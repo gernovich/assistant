@@ -1,0 +1,14 @@
+node_modules/
+main.js
+*.map
+.DS_Store
+dist/
+
+# recordings (keep audio out of git)
+recordings/
+audio/
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.flac
