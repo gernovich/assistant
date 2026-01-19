@@ -20,4 +20,3 @@ versions[version] = manifest.minAppVersion;
 
 writeJson(manifestPath, manifest);
 writeJson(versionsPath, versions);
-

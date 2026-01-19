@@ -16,6 +16,8 @@ const buildOptions = {
   banner: { js: banner },
   entryPoints: ["main.ts"],
   bundle: true,
+  // Obsidian — Electron окружение с доступом к Node builtins, поэтому platform должен быть node.
+  platform: "node",
   external: [
     "obsidian",
     "electron",
@@ -60,4 +62,3 @@ if (isDev) {
 } else {
   await esbuild.build(buildOptions);
 }
-

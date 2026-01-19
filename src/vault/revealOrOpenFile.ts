@@ -3,11 +3,12 @@ import type { App, TFile, WorkspaceLeaf } from "obsidian";
 function getLeafFilePath(leaf: WorkspaceLeaf): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyView = leaf.view as any;
-  // MarkdownView has `.file`, but we keep it generic.
+  // MarkdownView имеет `.file`, но мы держим это максимально универсально.
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   return anyView?.file?.path as string | undefined;
 }
 
+/** Найти уже открытый markdown leaf для файла (если он открыт). */
 export function findOpenLeafForFile(app: App, file: TFile): WorkspaceLeaf | undefined {
   const markdownLeaves = app.workspace.getLeavesOfType("markdown");
   for (const leaf of markdownLeaves) {
@@ -17,8 +18,8 @@ export function findOpenLeafForFile(app: App, file: TFile): WorkspaceLeaf | unde
 }
 
 /**
- * If the file is already open in some markdown leaf, just focus it.
- * Otherwise open in a new leaf (so we don't replace the current view like Agenda).
+ * Если файл уже открыт в markdown-вкладке — просто фокусируем её.
+ * Иначе открываем файл в новом leaf, чтобы не “замещать” текущий view (например, повестку).
  */
 export async function revealOrOpenInNewLeaf(app: App, file: TFile): Promise<void> {
   const existing = findOpenLeafForFile(app, file);
@@ -30,4 +31,3 @@ export async function revealOrOpenInNewLeaf(app: App, file: TFile): Promise<void
   await leaf.openFile(file);
   app.workspace.revealLeaf(leaf);
 }
-

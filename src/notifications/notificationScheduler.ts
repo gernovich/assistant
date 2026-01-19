@@ -2,13 +2,26 @@ import { Notice } from "obsidian";
 import type { AssistantSettings, CalendarEvent } from "../types";
 import { linuxNotifySend } from "../os/linuxNotify";
 import { linuxPopupWindow } from "../os/linuxPopup";
+import { MS_PER_HOUR, NOTIFICATIONS_HORIZON_HOURS } from "../calendar/constants";
 
+/**
+ * Планировщик уведомлений по событиям календаря.
+ *
+ * Делает MVP-расписание через `setTimeout` и поддерживает несколько способов доставки:
+ * - Obsidian Notice
+ * - `notify-send` (Linux)
+ * - popup окно через `yad` (Linux)
+ */
 export class NotificationScheduler {
   private settings: AssistantSettings;
   private timers: number[] = [];
   private onLog?: (message: string) => void;
   private linuxNotifyFailedOnce = false;
 
+  /**
+   * @param onLog Логгер для диагностики (используется в LogService).
+   * @param actions Коллбеки на действия из popup окна (создать протокол, и т.п.).
+   */
   constructor(
     settings: AssistantSettings,
     onLog?: (message: string) => void,
@@ -22,15 +35,18 @@ export class NotificationScheduler {
     this.onLog = onLog;
   }
 
+  /** Обновить настройки без пересоздания планировщика. */
   setSettings(settings: AssistantSettings) {
     this.settings = settings;
   }
 
+  /** Снять все активные таймеры уведомлений. */
   clear() {
     for (const t of this.timers) window.clearTimeout(t);
     this.timers = [];
   }
 
+  /** Пересобрать расписание уведомлений по списку событий. */
   schedule(events: CalendarEvent[]) {
     this.clear();
     if (!this.settings.notifications.enabled) return;
@@ -38,8 +54,8 @@ export class NotificationScheduler {
     const now = Date.now();
     const minutesBefore = Math.max(0, this.settings.notifications.minutesBefore);
 
-    // MVP: schedule only upcoming events within next 48 hours to avoid too many timers
-    const horizonMs = 48 * 60 * 60 * 1000;
+    // MVP: планируем только ближайшие события (в горизонте), чтобы не плодить сотни таймеров.
+    const horizonMs = NOTIFICATIONS_HORIZON_HOURS * MS_PER_HOUR;
     const until = now + horizonMs;
 
     for (const ev of events) {
@@ -77,7 +93,7 @@ export class NotificationScheduler {
   private async showGlobal(ev: CalendarEvent, msg: string, isDebug = false) {
     const prefix = isDebug ? "DEBUG уведомление" : "Показано уведомление";
     this.onLog?.(`${prefix}: ${msg}`);
-    // Back-compat for older settings objects (e.g. tests) that don't have delivery yet.
+    // Обратная совместимость: старые настройки (например из тестов) могли не иметь delivery.*.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const anyNotifications = this.settings.notifications as any;
     const method =
@@ -93,14 +109,16 @@ export class NotificationScheduler {
       try {
         await linuxNotifySend("Ассистент", msg, this.settings);
       } catch (e) {
-        if (!this.linuxNotifyFailedOnce) this.linuxNotifyFailedOnce = true;
-        this.onLog?.("notify-send: ошибка (поставьте пакет libnotify-bin), уведомление не показано");
+        if (!this.linuxNotifyFailedOnce) {
+          this.linuxNotifyFailedOnce = true;
+          this.onLog?.("notify-send: ошибка (поставьте пакет libnotify-bin), уведомление не показано");
+        }
         void e;
       }
       return;
     }
 
-    // popup_window
+    // popup_window (yad)
     try {
       const action = await linuxPopupWindow(ev, msg, this.settings);
       if (action === "start_recording") {
@@ -126,4 +144,3 @@ function formatEvent(ev: CalendarEvent): string {
   const t = ev.allDay ? "весь день" : ev.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${t} — ${ev.summary}`;
 }
-

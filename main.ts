@@ -14,42 +14,78 @@ import { SyncService } from "./src/sync/syncService";
 import { ProtocolNoteService } from "./src/protocols/protocolNoteService";
 import { commandExists } from "./src/os/commandExists";
 import { runGoogleLoopbackOAuth } from "./src/caldav/googleOauth";
+import * as path from "node:path";
+import { IndexNoteService } from "./src/index/indexNoteService";
+import { CalendarEventCache } from "./src/calendar/store/calendarEventCache";
+import { OutboxService } from "./src/offline/outboxService";
+import type { OutboxItemV1 } from "./src/offline/outboxService";
+import { isTFile } from "./src/vault/ensureFile";
+import { parseFrontmatterMap, splitFrontmatter, upsertFrontmatter } from "./src/vault/frontmatter";
 
+/**
+ * Основной класс Obsidian-плагина “Ассистент”.
+ *
+ * Здесь выполняется wiring:
+ * - инициализация сервисов
+ * - регистрация views/команд/настроек
+ * - запуск автообновления
+ */
 export default class AssistantPlugin extends Plugin {
   settings: AssistantSettings = DEFAULT_SETTINGS;
   calendarService!: CalendarService;
   eventNoteService!: EventNoteService;
   protocolNoteService!: ProtocolNoteService;
+  indexNoteService!: IndexNoteService;
+  calendarEventCache!: CalendarEventCache;
+  outboxService!: OutboxService;
   logFileWriter!: LogFileWriter;
   logService!: LogService;
   notificationScheduler!: NotificationScheduler;
   syncService!: SyncService;
   private refreshTimer?: number;
   private initStarted = false;
+  private agendaRibbonEl?: HTMLElement;
+  private logRibbonEl?: HTMLElement;
 
+  /** Obsidian: lifecycle — регистрация views/команд/настроек и запуск initAsync. */
   async onload() {
-    // IMPORTANT: do not block view/ribbon registration on awaited IO.
-    // Otherwise Obsidian can restore workspace (our views) before plugin finishes init
-    // which results in "plugin is no longer active" and missing ribbon/actions.
+    // ВАЖНО: не блокируем регистрацию представлений/кнопок (views/ribbon) на await-IO.
+    // Иначе Obsidian может восстановить workspace (наши views) раньше, чем завершится init плагина,
+    // что приводит к "plugin is no longer active" и пропавшим ribbon/actions.
 
-    // Initialize services with defaults immediately (no awaits)
+    // Инициализируем сервисы дефолтами сразу (без await)
     this.settings = DEFAULT_SETTINGS;
-    this.logFileWriter = new LogFileWriter(this.app, this.settings.folders.logs, this.settings.log.writeToVault);
+    this.logFileWriter = new LogFileWriter({
+      app: this.app,
+      logsDirPath: this.getPluginLogsDirPath(),
+      retentionDays: this.settings.log.retentionDays,
+    });
     this.logService = new LogService(this.settings.log.maxEntries, (entry) => {
       this.logFileWriter.enqueue(entry);
     });
     this.calendarService = new CalendarService(this.settings);
     this.eventNoteService = new EventNoteService(this.app, this.settings.folders.calendarEvents);
     this.protocolNoteService = new ProtocolNoteService(this.app, this.settings.folders.protocols);
-    this.notificationScheduler = new NotificationScheduler(
-      this.settings,
-      (msg) => this.logService.info(msg),
-      {
-        createProtocol: (ev) => this.createProtocolFromEvent(ev),
-        startRecording: (ev) => this.startRecordingFromReminder(ev),
-        meetingCancelled: (ev) => this.meetingCancelledFromReminder(ev),
-      },
-    );
+    this.indexNoteService = new IndexNoteService(this.app, {
+      indexDir: this.settings.folders.index,
+      eventsDir: this.settings.folders.calendarEvents,
+      protocolsDir: this.settings.folders.protocols,
+      peopleDir: this.settings.folders.people,
+      projectsDir: this.settings.folders.projects,
+    });
+    this.calendarEventCache = new CalendarEventCache({
+      filePath: this.getCalendarCacheFilePath(),
+      logService: () => this.logService,
+    });
+    this.outboxService = new OutboxService({
+      filePath: this.getOutboxFilePath(),
+      logService: () => this.logService,
+    });
+    this.notificationScheduler = new NotificationScheduler(this.settings, (msg) => this.logService.info(msg), {
+      createProtocol: (ev) => this.createProtocolFromEvent(ev),
+      startRecording: (ev) => this.startRecordingFromReminder(ev),
+      meetingCancelled: (ev) => this.meetingCancelledFromReminder(ev),
+    });
     this.syncService = new SyncService(this.calendarService, this.eventNoteService, this.notificationScheduler, this.logService);
 
     this.addSettingTab(new AssistantSettingsTab(this.app, this));
@@ -71,18 +107,22 @@ export default class AssistantPlugin extends Plugin {
         ),
     );
 
-    this.registerView(LOG_VIEW_TYPE, (leaf: WorkspaceLeaf) =>
-      new LogView(
-        leaf,
-        this.logService,
-        () => void this.logFileWriter.openTodayLog(),
-        () => void this.activateAgendaView(),
-      ),
+    this.registerView(
+      LOG_VIEW_TYPE,
+      (leaf: WorkspaceLeaf) =>
+        new LogView(
+          leaf,
+          this.logService,
+          () => void this.logFileWriter.openTodayLog(),
+          () => void this.logFileWriter.clearTodayLogFile(),
+          () => void this.activateAgendaView(),
+        ),
     );
 
-    // Use built-in icons for stability across enable/disable without restarting Obsidian.
-    this.addRibbonIcon("calendar", "Ассистент: Повестка", async () => this.activateAgendaView());
-    this.addRibbonIcon("list", "Ассистент: Лог", async () => this.activateLogView());
+    // Используем встроенные иконки для стабильности при включении/выключении плагина без рестарта Obsidian.
+    this.agendaRibbonEl = this.addRibbonIcon("calendar", "Ассистент: Повестка", async () => this.activateAgendaView());
+    // Кнопку “Лог” показываем только в debug-режиме (см. updateRibbonIcons()).
+    this.updateRibbonIcons();
 
     this.addCommand({
       id: "open-agenda",
@@ -103,12 +143,34 @@ export default class AssistantPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "apply-outbox",
+      name: "Применить офлайн-очередь",
+      callback: () => void this.applyOutbox(),
+    });
+
+    this.addCommand({
+      id: "event-plan-accepted",
+      name: "Отметить «Приду» (в заметке встречи)",
+      callback: () => void this.setActiveEventPlanPartstat("accepted"),
+    });
+    this.addCommand({
+      id: "event-plan-declined",
+      name: "Отметить «Не приду» (в заметке встречи)",
+      callback: () => void this.setActiveEventPlanPartstat("declined"),
+    });
+    this.addCommand({
+      id: "event-plan-tentative",
+      name: "Отметить «Возможно» (в заметке встречи)",
+      callback: () => void this.setActiveEventPlanPartstat("tentative"),
+    });
+
+    this.addCommand({
       id: "create-meeting-from-active-event",
       name: "Создать протокол из текущей встречи",
       callback: () => this.createProtocolFromActiveEvent(),
     });
 
-    // Async init after layout is ready (safe for workspace restore)
+    // Асинхронная инициализация после layoutReady (безопасно при restore workspace)
     this.app.workspace.onLayoutReady(() => {
       if (this.initStarted) return;
       this.initStarted = true;
@@ -122,13 +184,15 @@ export default class AssistantPlugin extends Plugin {
     void this.logFileWriter?.flush();
   }
 
+  /** Загрузить настройки из Obsidian `loadData()` и применить нормализацию/миграции. */
   async loadSettings() {
     this.settings = normalizeSettings(await this.loadData());
   }
 
+  /** Запустить OAuth и сохранить refresh‑токен для Google CalDAV аккаунта. */
   async authorizeGoogleCaldav(accountId: string): Promise<void> {
     const acc = this.settings.caldav.accounts.find((a) => a.id === accountId);
-    if (!acc) throw new Error("CalDAV account not found");
+    if (!acc) throw new Error("CalDAV аккаунт не найден");
 
     const oauth = acc.oauth ?? { clientId: "", clientSecret: "", refreshToken: "" };
     if (!oauth.clientId || !oauth.clientSecret) {
@@ -141,7 +205,7 @@ export default class AssistantPlugin extends Plugin {
       return;
     }
 
-    // Google CalDAV scope
+    // Scope для Google CalDAV
     const scope = "https://www.googleapis.com/auth/calendar";
 
     const openExternal = (url: string) => {
@@ -153,7 +217,7 @@ export default class AssistantPlugin extends Plugin {
           return;
         }
       } catch {
-        // ignore
+        // игнорируем
       }
       window.open(url);
     };
@@ -167,7 +231,7 @@ export default class AssistantPlugin extends Plugin {
         openExternal,
       }));
     } catch (e) {
-      const raw = String((e as unknown) ?? "unknown");
+      const raw = String((e as unknown) ?? "неизвестная ошибка");
       const short = raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
       this.logService.error("CalDAV: Google OAuth ошибка", { error: raw });
       new Notice(`Ассистент: Google OAuth ошибка: ${short}. Подробности в логе.`);
@@ -189,32 +253,52 @@ export default class AssistantPlugin extends Plugin {
     try {
       await this.loadSettings();
     } catch (e) {
-      console.error("Assistant: loadSettings failed", e);
+      console.error("Ассистент: не удалось загрузить настройки", e);
       this.settings = DEFAULT_SETTINGS;
     }
 
-    // Apply settings to services
+    // Применяем настройки к сервисам
     this.logService.setMaxEntries(this.settings.log.maxEntries);
-    this.logFileWriter.setConfig(this.settings.folders.logs, this.settings.log.writeToVault);
+    await this.logFileWriter.setRetentionDays(this.settings.log.retentionDays);
+    // Лог-файлы пишем вне vault (в папку плагина). Конфиг папки/включения не настраивается.
     this.syncService.applySettings(this.settings);
     this.protocolNoteService.setProtocolsDir(this.settings.folders.protocols);
+    this.indexNoteService.setPaths({
+      indexDir: this.settings.folders.index,
+      eventsDir: this.settings.folders.calendarEvents,
+      protocolsDir: this.settings.folders.protocols,
+      peopleDir: this.settings.folders.people,
+      projectsDir: this.settings.folders.projects,
+    });
 
-    // Update already-restored views with loaded settings (important for debug menu items, etc.)
+    // Обновляем уже восстановленные views загруженными настройками (важно для debug-элементов UI и т.п.)
     for (const leaf of this.app.workspace.getLeavesOfType(AGENDA_VIEW_TYPE)) {
       const view = leaf.view;
       if (view instanceof AgendaView) view.setSettings(this.settings);
     }
 
-    // Ensure folders, but never crash plugin if vault is read-only / path invalid
+    // Обеспечиваем папки, но не “роняем” плагин, если vault read-only / путь невалидный
     try {
       await ensureFolder(this.app.vault, this.settings.folders.projects);
       await ensureFolder(this.app.vault, this.settings.folders.people);
       await ensureFolder(this.app.vault, this.settings.folders.calendarEvents);
       await ensureFolder(this.app.vault, this.settings.folders.protocols);
+      await ensureFolder(this.app.vault, this.settings.folders.index);
+      await this.indexNoteService.ensureIndexNotes();
     } catch (e) {
-      console.error("Assistant: ensureFolder failed", e);
+      console.error("Ассистент: не удалось создать папки в vault", e);
       this.logService.error("Не удалось создать папки в vault");
     }
+
+    // Persistent cache: чтобы после рестарта повестка могла показать last-good данные без сети.
+    await this.calendarEventCache.loadIntoCalendarService(this.calendarService, {
+      enabledCalendarIds: this.settings.calendars.filter((c) => c.enabled).map((c) => c.id),
+    });
+    this.calendarService.onChange(() => {
+      void this.calendarEventCache.saveFromCalendarService(this.calendarService, {
+        enabledCalendarIds: this.settings.calendars.filter((c) => c.enabled).map((c) => c.id),
+      });
+    });
 
     await this.refreshCalendars();
     this.setupAutoRefreshTimer();
@@ -223,20 +307,178 @@ export default class AssistantPlugin extends Plugin {
   async saveSettingsAndApply() {
     await this.saveData(this.settings);
     this.logService.setMaxEntries(this.settings.log.maxEntries);
-    this.logFileWriter.setConfig(this.settings.folders.logs, this.settings.log.writeToVault);
+    await this.logFileWriter.setRetentionDays(this.settings.log.retentionDays);
+    // Лог-файлы пишем вне vault (в папку плагина). Конфиг папки/включения не настраивается.
     this.syncService.applySettings(this.settings);
     this.protocolNoteService.setProtocolsDir(this.settings.folders.protocols);
+    this.indexNoteService.setPaths({
+      indexDir: this.settings.folders.index,
+      eventsDir: this.settings.folders.calendarEvents,
+      protocolsDir: this.settings.folders.protocols,
+      peopleDir: this.settings.folders.people,
+      projectsDir: this.settings.folders.projects,
+    });
 
-    // Update existing agenda views
+    // Обновляем уже открытые views повестки
     for (const leaf of this.app.workspace.getLeavesOfType(AGENDA_VIEW_TYPE)) {
       const view = leaf.view;
       if (view instanceof AgendaView) view.setSettings(this.settings);
     }
 
-    // Re-schedule notifications based on current events
+    // Перепланируем уведомления по текущим событиям
     this.notificationScheduler.schedule(this.calendarService.getEvents());
 
     this.setupAutoRefreshTimer();
+    this.updateRibbonIcons();
+  }
+
+  /**
+   * Применить накопленные офлайн-изменения (outbox).
+   *
+   * MVP: поддерживаем только локальную метку в заметке встречи (frontmatter `my_plan_partstat`).
+   */
+  async applyOutbox(): Promise<void> {
+    const items = await this.outboxService.list();
+    if (!items.length) {
+      new Notice("Ассистент: очередь пуста");
+      return;
+    }
+
+    const remaining: OutboxItemV1[] = [];
+    let applied = 0;
+    for (const it of items) {
+      if (it.kind !== "set_event_plan_partstat") {
+        remaining.push(it);
+        continue;
+      }
+      const filePath = String(it.payload?.filePath ?? "");
+      const partstat = String(it.payload?.partstat ?? "");
+      if (!filePath || !partstat) {
+        remaining.push(it);
+        continue;
+      }
+
+      const af = this.app.vault.getAbstractFileByPath(filePath);
+      if (!af || !isTFile(af)) {
+        remaining.push(it);
+        continue;
+      }
+
+      try {
+        const cur = await this.app.vault.read(af);
+        const { frontmatter } = splitFrontmatter(cur);
+        const fm = frontmatter ? parseFrontmatterMap(frontmatter) : {};
+        if (fm["assistant_type"] !== "calendar_event") {
+          remaining.push(it);
+          continue;
+        }
+        const updated = upsertFrontmatter(cur, { my_plan_partstat: partstat });
+        await this.app.vault.modify(af, updated);
+        applied++;
+      } catch (e) {
+        this.logService.warn("Outbox: не удалось применить действие", { id: it.id, error: String((e as unknown) ?? "неизвестная ошибка") });
+        remaining.push(it);
+      }
+    }
+
+    await this.outboxService.replace(remaining);
+    new Notice(`Ассистент: применено действий: ${applied}, осталось: ${remaining.length}`);
+  }
+
+  private async setActiveEventPlanPartstat(partstat: "accepted" | "declined" | "tentative"): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) {
+      new Notice("Ассистент: откройте заметку встречи");
+      return;
+    }
+    try {
+      const cur = await this.app.vault.read(file);
+      const { frontmatter } = splitFrontmatter(cur);
+      const fm = frontmatter ? parseFrontmatterMap(frontmatter) : {};
+      if (fm["assistant_type"] !== "calendar_event") {
+        new Notice("Ассистент: активный файл — не заметка встречи");
+        return;
+      }
+      const updated = upsertFrontmatter(cur, { my_plan_partstat: partstat });
+      await this.app.vault.modify(file, updated);
+      new Notice("Ассистент: сохранено в заметке встречи");
+    } catch (e) {
+      // Если не можем записать в vault — кладём в outbox.
+      const id = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
+      await this.outboxService.enqueue({
+        id,
+        createdAtMs: Date.now(),
+        kind: "set_event_plan_partstat",
+        payload: { filePath: file.path, partstat },
+      });
+      this.logService.warn("Офлайн-режим: действие добавлено в очередь (не удалось записать в vault)", {
+        filePath: file.path,
+        partstat,
+        error: String((e as unknown) ?? "неизвестная ошибка"),
+      });
+      new Notice("Ассистент: не удалось записать. Действие добавлено в офлайн-очередь.");
+    }
+  }
+
+  /**
+   * Папка логов в системной директории плагина:
+   * `<vault>/.obsidian/plugins/<pluginId>/logs`
+   *
+   * Зачем: не засоряем vault md-файлами логов (меньше шума и случайных коммитов).
+   */
+  private getPluginLogsDirPath(): string {
+    const pluginDirPath = this.getPluginDirPath();
+    if (!pluginDirPath) return "";
+    return path.join(pluginDirPath, "logs");
+  }
+
+  /** Получить абсолютный путь к vault (только desktop). */
+  private getVaultBasePath(): string | null {
+    // FileSystemAdapter есть на desktop; в tests/stubs его может не быть.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyAdapter = this.app.vault.adapter as any;
+    const p = anyAdapter?.getBasePath?.();
+    return typeof p === "string" && p ? p : null;
+  }
+
+  /** Абсолютный путь к директории плагина: `<vault>/.obsidian/plugins/<pluginId>` */
+  private getPluginDirPath(): string | null {
+    const basePath = this.getVaultBasePath();
+    if (!basePath) return null;
+    return path.join(basePath, ".obsidian", "plugins", this.manifest.id);
+  }
+
+  /** Путь к persistent cache календарей (JSON) в системной директории плагина. */
+  private getCalendarCacheFilePath(): string {
+    const pluginDirPath = this.getPluginDirPath();
+    if (!pluginDirPath) return "";
+    return path.join(pluginDirPath, "cache", "calendar-events.json");
+  }
+
+  /** Путь к outbox (очередь офлайн-изменений) в системной директории плагина. */
+  private getOutboxFilePath(): string {
+    const pluginDirPath = this.getPluginDirPath();
+    if (!pluginDirPath) return "";
+    return path.join(pluginDirPath, "outbox.json");
+  }
+
+  /**
+   * Обновить ribbon-кнопки в зависимости от текущих настроек.
+   * Важно: при выключенной отладке не показываем кнопку “Лог” на панели Obsidian.
+   */
+  private updateRibbonIcons(): void {
+    const debugEnabled = this.settings.debug?.enabled === true;
+    if (debugEnabled) {
+      if (!this.logRibbonEl) {
+        this.logRibbonEl = this.addRibbonIcon("list", "Ассистент: Лог", async () => this.activateLogView());
+      }
+      return;
+    }
+
+    if (this.logRibbonEl) {
+      this.logRibbonEl.remove();
+      this.logRibbonEl = undefined;
+    }
   }
 
   async refreshCalendars() {
@@ -244,7 +486,7 @@ export default class AssistantPlugin extends Plugin {
       await this.syncService.refreshCalendarsAndSync(this.settings);
       // eslint-disable-next-line no-empty
     } catch (e) {
-      console.error("Assistant: calendar refresh failed", e);
+      console.error("Ассистент: не удалось обновить календари", e);
       new Notice("Ассистент: не удалось обновить календари");
       this.logService.error("Обновление календарей: ошибка");
     }
@@ -260,14 +502,14 @@ export default class AssistantPlugin extends Plugin {
       if (errors.length === 0) this.logService.info("Календарь: обновление (один): ok", { calendarId });
       // eslint-disable-next-line no-empty
     } catch (e) {
-      console.error("Assistant: calendar refresh (one) failed", e);
+      console.error("Ассистент: не удалось обновить календарь", e);
       new Notice("Ассистент: не удалось обновить календарь");
       this.logService.error("Календарь: обновление (один): ошибка");
     }
   }
 
   async debugNotifyTest() {
-    // Only for manual verification from settings
+    // Только для ручной проверки из настроек
     this.notificationScheduler.debugShowReminder({
       calendarId: "debug",
       uid: "debug",
@@ -298,9 +540,7 @@ export default class AssistantPlugin extends Plugin {
 
     if (method === "popup_window") {
       const ok = await commandExists("yad");
-      return ok
-        ? { ok: true, message: "OK: найден yad." }
-        : { ok: false, message: "Не найден yad. Установите: sudo apt install yad" };
+      return ok ? { ok: true, message: "OK: найден yad." } : { ok: false, message: "Не найден yad. Установите: sudo apt install yad" };
     }
 
     return { ok: false, message: "Ошибка: неизвестный способ уведомлений." };

@@ -1,8 +1,13 @@
 import type { CalendarEvent, CalendarId } from "../types";
 
-// Minimal ICS (VEVENT) parser for MVP.
-// Supported fields: UID, DTSTART, DTEND, SUMMARY, DESCRIPTION, LOCATION, URL, RRULE, EXDATE, ATTENDEE(PARTSTAT)
+// Минимальный ICS (VEVENT) парсер для MVP.
+// Поддерживаемые поля: UID, DTSTART, DTEND, SUMMARY, DESCRIPTION, LOCATION, URL, RRULE, EXDATE, ATTENDEE(PARTSTAT)
 
+/**
+ * Распарсить текст `.ics` в список событий.
+ *
+ * Важно: это MVP-парсер, покрывающий базовый набор полей и простые RRULE (в пределах горизонта).
+ */
 export function parseIcs(
   calendarId: CalendarId,
   icsText: string,
@@ -53,7 +58,7 @@ type ContentLine = {
 type ParsedVEvent = {
   single: Partial<Record<string, string>>;
   rrule?: string;
-  exdates: string[]; // raw values (may contain comma-separated list)
+  exdates: string[]; // сырой текст (может содержать список через запятую)
   attendees: Array<{ value: string; params: Record<string, string> }>;
 };
 
@@ -96,7 +101,7 @@ function applyContentLine(ev: ParsedVEvent, cl: ContentLine) {
     ev.attendees.push({ value: cl.value.trim(), params: cl.params });
     return;
   }
-  // Keep first occurrence for scalar fields
+  // Для скалярных полей сохраняем первое значение.
   if (ev.single[key] == null) ev.single[key] = cl.value;
 }
 
@@ -114,7 +119,11 @@ function unfoldLines(text: string): string[] {
   return out;
 }
 
-function toEvents(calendarId: CalendarId, ve: ParsedVEvent, opts?: { now?: Date; horizonDays?: number; myEmail?: string }): CalendarEvent[] {
+function toEvents(
+  calendarId: CalendarId,
+  ve: ParsedVEvent,
+  opts?: { now?: Date; horizonDays?: number; myEmail?: string },
+): CalendarEvent[] {
   const base = toBaseEvent(calendarId, ve, opts?.myEmail);
   if (!base) return [];
   if (!ve.rrule) return [base];
@@ -138,7 +147,7 @@ function toBaseEvent(calendarId: CalendarId, ve: ParsedVEvent, myEmail?: string)
   if (!start) return null;
 
   const dtEndRaw = fields.DTEND?.trim();
-  const end = dtEndRaw ? parseIcsDate(dtEndRaw) ?? undefined : undefined;
+  const end = dtEndRaw ? (parseIcsDate(dtEndRaw) ?? undefined) : undefined;
 
   const allDay = isAllDay(dtStartRaw);
 
@@ -184,13 +193,13 @@ function detectMyPartstat(
 }
 
 function isAllDay(v: string): boolean {
-  // VALUE=DATE normally appears in params, but MVP strips params. We use heuristic:
-  // YYYYMMDD (8 chars) -> all-day
+  // VALUE=DATE обычно приходит в params, но MVP-режим выкидывает params. Используем эвристику:
+  // YYYYMMDD (8 символов) -> “весь день”
   return /^\d{8}$/.test(v);
 }
 
 function parseIcsDate(v: string): Date | null {
-  // Supported:
+  // Поддерживаем:
   // - YYYYMMDD
   // - YYYYMMDDTHHMMSSZ
   // - YYYYMMDDTHHMMSS
@@ -216,11 +225,7 @@ function parseIcsDate(v: string): Date | null {
 }
 
 function unescapeText(s: string): string {
-  return s
-    .replace(/\\n/gi, "\n")
-    .replace(/\\,/g, ",")
-    .replace(/\\;/g, ";")
-    .replace(/\\\\/g, "\\");
+  return s.replace(/\\n/gi, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
 }
 
 function parseExdates(exdates: string[]): number[] {
@@ -251,15 +256,10 @@ function expandRrule(base: CalendarEvent, rrule: string, exdateMs: number[], hor
   const freq = String(rule["FREQ"] ?? "").toUpperCase();
   const interval = Math.max(1, Number(rule["INTERVAL"] ?? 1) || 1);
   const countLimit = Math.max(0, Number(rule["COUNT"] ?? 0) || 0);
-  const until = rule["UNTIL"] ? parseIcsDate(rule["UNTIL"]) ?? undefined : undefined;
+  const until = rule["UNTIL"] ? (parseIcsDate(rule["UNTIL"]) ?? undefined) : undefined;
   const hardEnd = until && until < horizonEnd ? until : horizonEnd;
 
-  const durationMs =
-    base.end != null
-      ? base.end.getTime() - base.start.getTime()
-      : base.allDay
-        ? 24 * 60 * 60_000
-        : 0;
+  const durationMs = base.end != null ? base.end.getTime() - base.start.getTime() : base.allDay ? 24 * 60 * 60_000 : 0;
 
   const ex = new Set<number>(exdateMs);
 
@@ -272,10 +272,10 @@ function expandRrule(base: CalendarEvent, rrule: string, exdateMs: number[], hor
     out.push({ ...base, start: new Date(sMs), end });
   };
 
-  // Always include the base DTSTART occurrence if it's within horizon
+  // Всегда добавляем базовое DTSTART-происхождение (если оно в горизонте).
   addOcc(base.start);
 
-  // Guard: no freq -> return base only
+  // Защита: нет FREQ -> возвращаем только базовое событие.
   if (freq !== "DAILY" && freq !== "WEEKLY") return out;
 
   const maxGen = 2000;
@@ -293,12 +293,17 @@ function expandRrule(base: CalendarEvent, rrule: string, exdateMs: number[], hor
     return out;
   }
 
-  // WEEKLY
+  // Режим WEEKLY
   const bydayRaw = rule["BYDAY"];
-  const bydays = bydayRaw ? bydayRaw.split(",").map((x) => x.trim().toUpperCase()).filter(Boolean) : [];
+  const bydays = bydayRaw
+    ? bydayRaw
+        .split(",")
+        .map((x) => x.trim().toUpperCase())
+        .filter(Boolean)
+    : [];
   const targetDays = bydays.length > 0 ? bydays : [weekdayToByday(base.start.getDay())];
 
-  // Iterate day-by-day within horizon (cheap for <= 60d), filter by week interval and day-of-week.
+  // Идём по дням в пределах горизонта (дёшево для <= 60 дней), фильтруем по interval и дню недели.
   const startDay = startOfDay(base.start);
   const endDay = startOfDay(hardEnd);
   for (let d = new Date(startDay.getTime()); d.getTime() <= endDay.getTime() && generated < maxGen; d = addDays(d, 1)) {
@@ -308,10 +313,10 @@ function expandRrule(base: CalendarEvent, rrule: string, exdateMs: number[], hor
     const by = weekdayToByday(d.getDay());
     if (!targetDays.includes(by)) continue;
 
-    // Apply time-of-day from DTSTART
+    // Применяем время суток из DTSTART.
     const occ = new Date(d.getTime());
     occ.setHours(base.start.getHours(), base.start.getMinutes(), base.start.getSeconds(), base.start.getMilliseconds());
-    // Skip base occurrence (already added)
+    // Пропускаем базовое происхождение (оно уже добавлено).
     if (occ.getTime() === base.start.getTime()) continue;
     addOcc(occ);
     generated++;
@@ -334,7 +339,7 @@ function startOfDay(d: Date): Date {
 }
 
 function weekdayToByday(jsDay: number): string {
-  // JS: 0=Sun..6=Sat
+  // JS: 0=Вс..6=Сб
   if (jsDay === 1) return "MO";
   if (jsDay === 2) return "TU";
   if (jsDay === 3) return "WE";

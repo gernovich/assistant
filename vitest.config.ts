@@ -15,9 +15,19 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      // P2: считаем покрытие только для модулей, которые уже покрыты тестами сейчас.
-      // По мере добавления тестов расширяем include и поднимаем пороги.
-      include: ["src/calendar/ics.ts", "src/notifications/**/*.ts"],
+      // Считаем покрытие для “чистых” модулей, которые реально можно покрывать unit-тестами без Obsidian UI.
+      // UI (settings/views) и main.ts сюда не включаем, чтобы не делать хрупкие DOM/Obsidian-интеграционные тесты.
+      include: [
+        "src/calendar/ics.ts",
+        "src/notifications/**/*.ts",
+        "src/log/**/*.ts",
+        "src/ids/**/*.ts",
+        "src/vault/**/*.ts",
+        "src/caldav/caldavReadiness.ts",
+        "src/caldav/requestUrlFetch.ts",
+        "src/calendar/store/**/*.ts",
+        "src/calendar/constants.ts",
+      ],
       exclude: ["tests/**", "src/**/__mocks__/**"],
       thresholds: {
         lines: 60,
@@ -28,4 +38,3 @@ export default defineConfig({
     },
   },
 });
-

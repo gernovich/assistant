@@ -2,45 +2,55 @@ import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import type { LogEntry } from "../log/logService";
 import type { LogService } from "../log/logService";
 
+/** Тип Obsidian view для панели лога ассистента. */
 export const LOG_VIEW_TYPE = "assistant-log";
 
+/** View “Лог” — отображает in-memory лог и даёт быстрые действия (открыть файл/очистить). */
 export class LogView extends ItemView {
   private log: LogService;
   private openTodayFile?: () => void;
+  private clearTodayFile?: () => void;
   private openAgenda?: () => void;
   private unsubscribe?: () => void;
 
-  constructor(
-    leaf: WorkspaceLeaf,
-    log: LogService,
-    openTodayFile?: () => void,
-    openAgenda?: () => void,
-  ) {
+  /**
+   * @param leaf Leaf, в котором живёт view.
+   * @param log Лог-сервис (источник записей).
+   * @param openTodayFile Открыть файл лога за сегодня (в системной папке плагина).
+   * @param clearTodayFile Очистить файл лога за сегодня.
+   * @param openAgenda Открыть повестку.
+   */
+  constructor(leaf: WorkspaceLeaf, log: LogService, openTodayFile?: () => void, clearTodayFile?: () => void, openAgenda?: () => void) {
     super(leaf);
     this.log = log;
     this.openTodayFile = openTodayFile;
+    this.clearTodayFile = clearTodayFile;
     this.openAgenda = openAgenda;
   }
 
+  /** Obsidian: тип view. */
   getViewType(): string {
     return LOG_VIEW_TYPE;
   }
 
+  /** Obsidian: заголовок вкладки. */
   getDisplayText(): string {
     return "Лог";
   }
 
+  /** Obsidian: иконка вкладки. */
   getIcon(): string {
     return "list";
   }
 
+  /** Obsidian: lifecycle — при открытии view подписываемся на лог и рендерим. */
   async onOpen() {
     const action = this.addAction("calendar", "Открыть повестку", () => this.openAgenda?.());
     const force = () => {
       try {
         setIcon(action, "calendar");
       } catch {
-        // ignore
+        // игнорируем
       }
     };
     force();
@@ -49,6 +59,7 @@ export class LogView extends ItemView {
     this.render();
   }
 
+  /** Obsidian: lifecycle — снимаем подписки. */
   async onClose() {
     this.unsubscribe?.();
   }
@@ -64,8 +75,12 @@ export class LogView extends ItemView {
     const actions = header.createDiv({ cls: "assistant-log__actions" });
     const openBtn = actions.createEl("button", { text: "Открыть файл" });
     openBtn.onclick = () => this.openTodayFile?.();
-    const clearBtn = actions.createEl("button", { text: "Очистить" });
-    clearBtn.onclick = () => this.log.clear();
+
+    const clearPanelBtn = actions.createEl("button", { text: "Очистить панель" });
+    clearPanelBtn.onclick = () => this.log.clear();
+
+    const clearFileBtn = actions.createEl("button", { text: "Очистить файл (сегодня)" });
+    clearFileBtn.onclick = () => this.clearTodayFile?.();
 
     const list = el.createDiv({ cls: "assistant-log__list" });
     const items = this.log.list();
@@ -108,4 +123,3 @@ function renderEntry(e: LogEntry): HTMLElement {
 
   return row;
 }
-

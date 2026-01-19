@@ -5,26 +5,34 @@ import { ensureFolder } from "../vault/ensureFolder";
 import { revealOrOpenInNewLeaf } from "../vault/revealOrOpenFile";
 import { createUniqueMarkdownFile } from "../vault/fileNaming";
 import { makeEventKey } from "../ids/stableIds";
+import { yamlEscape } from "../vault/yamlEscape";
 
+/** Сервис создания/открытия протоколов встреч (md-файлы в vault). */
 export class ProtocolNoteService {
   private app: App;
   private vault: Vault;
   private protocolsDir: string;
 
+  /** @param protocolsDir Папка протоколов в vault. */
   constructor(app: App, protocolsDir: string) {
     this.app = app;
     this.vault = app.vault;
     this.protocolsDir = normalizePath(protocolsDir);
   }
 
+  /** Обновить папку протоколов (например после изменения настроек). */
   setProtocolsDir(protocolsDir: string) {
     this.protocolsDir = normalizePath(protocolsDir);
   }
 
+  /**
+   * Создать протокол из события календаря.
+   * Имя файла человекочитаемое, уникальность обеспечиваем суффиксами ` 2/3/...`.
+   */
   async createProtocolFromEvent(ev: CalendarEvent, eventFilePath?: string): Promise<TFile> {
     await ensureFolder(this.vault, this.protocolsDir);
 
-    // Human-friendly file name (no UID in name). Uniqueness via " 2/3/..."
+    // Человекочитаемое имя файла (без UID). Уникальность через суффиксы " 2/3/...".
     const baseName = `${ev.summary} ${formatRuDate(ev.start)}`;
 
     const content = renderProtocol(ev, eventFilePath);
@@ -32,6 +40,7 @@ export class ProtocolNoteService {
     return file;
   }
 
+  /** Открыть протокол в новой вкладке (или сфокусировать, если уже открыт). */
   async openProtocol(file: TFile) {
     await revealOrOpenInNewLeaf(this.app, file);
   }
@@ -95,12 +104,8 @@ function renderProtocol(ev: CalendarEvent, eventFilePath?: string): string {
   ].join("\n");
 }
 
-function yamlEscape(v: string): string {
-  const s = (v ?? "").replace(/\r?\n/g, " ").trim();
-  return JSON.stringify(s);
-}
+// yamlEscape moved to src/vault/yamlEscape.ts
 
 function formatRuDate(d: Date): string {
   return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "long" });
 }
-

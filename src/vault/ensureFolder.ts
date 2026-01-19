@@ -12,4 +12,3 @@ export async function ensureFolder(vault: Vault, folderPath: string) {
     }
   }
 }
-

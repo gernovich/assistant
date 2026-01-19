@@ -14,4 +14,3 @@ export async function commandExists(cmd: string): Promise<boolean> {
 function shellEscape(s: string): string {
   return `'${String(s).replace(/'/g, `'\"'\"'`)}'`;
 }
-

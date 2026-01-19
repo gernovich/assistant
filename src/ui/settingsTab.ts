@@ -2,8 +2,11 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type AssistantPlugin from "../../main";
 import type { CalendarConfig } from "../types";
 import { CaldavProvider } from "../calendar/providers/caldavProvider";
+import { getCaldavAccountReadiness } from "../caldav/caldavReadiness";
 
+/** Вкладка настроек плагина “Ассистент” в Obsidian. */
 export class AssistantSettingsTab extends PluginSettingTab {
+  /** Ссылка на плагин (доступ к настройкам/логам/командам). */
   plugin: AssistantPlugin;
   private discoveredCaldavCalendars: Record<string, Array<{ displayName: string; url: string; color?: string }>> = {};
 
@@ -12,12 +15,35 @@ export class AssistantSettingsTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /** Obsidian: отрисовать вкладку настроек. */
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
     containerEl.createEl("h2", { text: "Ассистент — Календари" });
 
+    this.renderDebugSection(containerEl);
+    this.renderVaultFoldersSection(containerEl);
+    this.renderNotificationsSection(containerEl);
+    this.renderAutoRefreshSection(containerEl);
+    this.renderLogSection(containerEl);
+    this.renderOutboxSection(containerEl);
+    this.renderCaldavAccountsSection(containerEl);
+    this.renderConnectedCalendarsSection(containerEl);
+    this.renderCalendarOperationsSection(containerEl);
+  }
+
+  /**
+   * Перерисовать вкладку, сохранив позицию прокрутки.
+   * Нужно, чтобы UI не “дёргался” и не прыгал к началу при смене настроек.
+   */
+  private rerenderPreservingScroll(): void {
+    const top = this.containerEl.scrollTop;
+    this.display();
+    this.containerEl.scrollTop = top;
+  }
+
+  private renderDebugSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Отладка" });
 
     new Setting(containerEl)
@@ -27,24 +53,13 @@ export class AssistantSettingsTab extends PluginSettingTab {
         t.setValue(this.plugin.settings.debug.enabled).onChange(async (v) => {
           this.plugin.settings.debug.enabled = v;
           await this.plugin.saveSettingsAndApply();
-          this.display();
+          this.rerenderPreservingScroll();
         }),
       );
+  }
 
+  private renderVaultFoldersSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Папки в vault" });
-
-    new Setting(containerEl)
-      .setName("Логи")
-      .setDesc("По умолчанию: Ассистент/Логи")
-      .addText((t) =>
-        t
-          .setPlaceholder("Ассистент/Логи")
-          .setValue(this.plugin.settings.folders.logs)
-          .onChange(async (v) => {
-            this.plugin.settings.folders.logs = v.trim() || "Ассистент/Логи";
-            await this.plugin.saveSettingsAndApply();
-          }),
-      );
 
     new Setting(containerEl)
       .setName("Проекты")
@@ -98,6 +113,21 @@ export class AssistantSettingsTab extends PluginSettingTab {
           }),
       );
 
+    new Setting(containerEl)
+      .setName("Индекс")
+      .setDesc("По умолчанию: Ассистент/Индекс (файлы-дашборды: Встречи/Протоколы/Люди/Проекты)")
+      .addText((t) =>
+        t
+          .setPlaceholder("Ассистент/Индекс")
+          .setValue(this.plugin.settings.folders.index)
+          .onChange(async (v) => {
+            this.plugin.settings.folders.index = v.trim() || "Ассистент/Индекс";
+            await this.plugin.saveSettingsAndApply();
+          }),
+      );
+  }
+
+  private renderNotificationsSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Уведомления" });
 
     new Setting(containerEl)
@@ -134,9 +164,18 @@ export class AssistantSettingsTab extends PluginSettingTab {
         }),
       );
 
+    const methodSystemBlock = containerEl.createDiv();
+    const methodPopupBlock = containerEl.createDiv();
+
+    const updateMethodBlocksVisibility = () => {
+      const m = this.plugin.settings.notifications.delivery.method;
+      methodSystemBlock.style.display = m === "system_notify_send" ? "" : "none";
+      methodPopupBlock.style.display = m === "popup_window" ? "" : "none";
+    };
+
     new Setting(containerEl)
       .setName("Способ уведомления")
-      .setDesc("Notice / notify-send / popup window (yad).")
+      .setDesc("Obsidian Notice / notify-send / всплывающее окно (yad).")
       .addDropdown((dd) => {
         dd.addOption("obsidian_notice", "Уведомление Obsidian (Notice)");
         dd.addOption("system_notify_send", "Системное уведомление (notify-send)");
@@ -145,55 +184,54 @@ export class AssistantSettingsTab extends PluginSettingTab {
         dd.onChange(async (v) => {
           this.plugin.settings.notifications.delivery.method = v as "obsidian_notice" | "system_notify_send" | "popup_window";
           await this.plugin.saveSettingsAndApply();
-          this.display();
+          // Не делаем полный ререндер: иначе прыгает прокрутка. Ниже просто покажем/скроем нужные блоки.
+          updateMethodBlocksVisibility();
         });
       });
 
-    if (this.plugin.settings.notifications.delivery.method === "system_notify_send") {
-      new Setting(containerEl)
-        .setName("Urgency (notify-send)")
-        .setDesc("Рекомендуется: critical. Требуется пакет libnotify-bin.")
-        .addDropdown((dd) => {
-          dd.addOption("low", "low");
-          dd.addOption("normal", "normal");
-          dd.addOption("critical", "critical");
-          dd.setValue(this.plugin.settings.notifications.delivery.system.urgency);
-          dd.onChange(async (v) => {
-            this.plugin.settings.notifications.delivery.system.urgency = v as "low" | "normal" | "critical";
-            await this.plugin.saveSettingsAndApply();
-          });
+    new Setting(methodSystemBlock)
+      .setName("Важность (notify-send)")
+      .setDesc("Рекомендуется: critical. Требуется пакет libnotify-bin.")
+      .addDropdown((dd) => {
+        dd.addOption("low", "low (низкая)");
+        dd.addOption("normal", "normal (обычная)");
+        dd.addOption("critical", "critical (критичная)");
+        dd.setValue(this.plugin.settings.notifications.delivery.system.urgency);
+        dd.onChange(async (v) => {
+          this.plugin.settings.notifications.delivery.system.urgency = v as "low" | "normal" | "critical";
+          await this.plugin.saveSettingsAndApply();
         });
+      });
 
-      new Setting(containerEl)
-        .setName("Таймаут (мс)")
-        .setDesc("Например 20000.")
-        .addText((t) =>
-          t
-            .setPlaceholder("20000")
-            .setValue(String(this.plugin.settings.notifications.delivery.system.timeoutMs))
-            .onChange(async (v) => {
-              const n = Number(v);
-              this.plugin.settings.notifications.delivery.system.timeoutMs = Number.isFinite(n) ? n : 20_000;
-              await this.plugin.saveSettingsAndApply();
-            }),
-        );
-    }
+    new Setting(methodSystemBlock)
+      .setName("Таймаут (мс)")
+      .setDesc("Например 20000.")
+      .addText((t) =>
+        t
+          .setPlaceholder("20000")
+          .setValue(String(this.plugin.settings.notifications.delivery.system.timeoutMs))
+          .onChange(async (v) => {
+            const n = Number(v);
+            this.plugin.settings.notifications.delivery.system.timeoutMs = Number.isFinite(n) ? n : 20_000;
+            await this.plugin.saveSettingsAndApply();
+          }),
+      );
 
-    if (this.plugin.settings.notifications.delivery.method === "popup_window") {
-      new Setting(containerEl)
-        .setName("Таймаут окна (мс)")
-        .setDesc("Требуется yad. Окно может показываться поверх других окон.")
-        .addText((t) =>
-          t
-            .setPlaceholder("20000")
-            .setValue(String(this.plugin.settings.notifications.delivery.popup.timeoutMs))
-            .onChange(async (v) => {
-              const n = Number(v);
-              this.plugin.settings.notifications.delivery.popup.timeoutMs = Number.isFinite(n) ? n : 20_000;
-              await this.plugin.saveSettingsAndApply();
-            }),
-        );
-    }
+    new Setting(methodPopupBlock)
+      .setName("Таймаут окна (мс)")
+      .setDesc("Требуется yad. Окно может показываться поверх других окон.")
+      .addText((t) =>
+        t
+          .setPlaceholder("20000")
+          .setValue(String(this.plugin.settings.notifications.delivery.popup.timeoutMs))
+          .onChange(async (v) => {
+            const n = Number(v);
+            this.plugin.settings.notifications.delivery.popup.timeoutMs = Number.isFinite(n) ? n : 20_000;
+            await this.plugin.saveSettingsAndApply();
+          }),
+      );
+
+    updateMethodBlocksVisibility();
 
     new Setting(containerEl)
       .setName("Проверить уведомление")
@@ -212,13 +250,15 @@ export class AssistantSettingsTab extends PluginSettingTab {
           const res = await this.plugin.checkNotificationDependencies();
           if (res.ok) this.plugin.logService.info(res.message);
           else this.plugin.logService.warn(res.message);
-          // Notice показываем всегда, чтобы результат был виден без панели лога
+          // Уведомление (Notice) показываем всегда, чтобы результат был виден без панели лога
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { Notice } = require("obsidian") as typeof import("obsidian");
           new Notice(res.message);
         }),
       );
+  }
 
+  private renderAutoRefreshSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Автообновление" });
 
     new Setting(containerEl)
@@ -257,7 +297,9 @@ export class AssistantSettingsTab extends PluginSettingTab {
             await this.plugin.saveSettingsAndApply();
           }),
       );
+  }
 
+  private renderLogSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Лог" });
 
     if (this.plugin.settings.debug.enabled) {
@@ -272,7 +314,7 @@ export class AssistantSettingsTab extends PluginSettingTab {
 
       new Setting(containerEl)
         .setName("Открыть сегодняшний лог-файл")
-        .setDesc("Открыть markdown лог по дате прямо в Obsidian.")
+        .setDesc("Открыть файл лога за сегодня (в системной папке плагина, вне vault).")
         .addButton((b) =>
           b.setButtonText("Открыть файл").onClick(async () => {
             await this.plugin.logFileWriter.openTodayLog();
@@ -285,41 +327,86 @@ export class AssistantSettingsTab extends PluginSettingTab {
       });
     }
 
-    new Setting(containerEl)
-      .setName("Писать лог в vault (md файлы)")
-      .setDesc("Сохранять лог в виде markdown-файлов по датам, чтобы их можно было смотреть прямо в Obsidian.")
-      .addToggle((t) =>
-        t.setValue(this.plugin.settings.log.writeToVault).onChange(async (v) => {
-          this.plugin.settings.log.writeToVault = v;
-          await this.plugin.saveSettingsAndApply();
-        }),
-      );
-
-    // Папка логов настраивается в "Папки в vault" → "Логи" (settings.folders.logs).
+    // Лог в файлы пишется вне vault (в .obsidian/plugins/assistant/logs), поэтому настройки папки/включения не нужны.
 
     new Setting(containerEl)
       .setName("Размер лога (строк)")
-      .setDesc("Сколько последних записей хранить в панели лога.")
+      .setDesc("Сколько последних записей хранить в панели лога. По умолчанию 2048.")
       .addText((t) =>
         t
-          .setPlaceholder("200")
+          .setPlaceholder("2048")
           .setValue(String(this.plugin.settings.log.maxEntries))
           .onChange(async (v) => {
             const n = Number(v);
-            this.plugin.settings.log.maxEntries = Number.isFinite(n) ? n : 200;
+            this.plugin.settings.log.maxEntries = Number.isFinite(n) ? n : 2048;
             await this.plugin.saveSettingsAndApply();
           }),
       );
 
+    new Setting(containerEl)
+      .setName("Хранить лог‑файлы (дней)")
+      .setDesc("Сколько дней хранить файлы логов в `.obsidian/plugins/assistant/logs` (по умолчанию 7).")
+      .addText((t) =>
+        t
+          .setPlaceholder("7")
+          .setValue(String(this.plugin.settings.log.retentionDays))
+          .onChange(async (v) => {
+            const n = Number(v);
+            this.plugin.settings.log.retentionDays = Number.isFinite(n) ? Math.floor(n) : 7;
+            await this.plugin.saveSettingsAndApply();
+          }),
+      );
+  }
+
+  private renderOutboxSection(containerEl: HTMLElement) {
+    containerEl.createEl("h3", { text: "Офлайн-очередь" });
+
+    const info = containerEl.createDiv({ cls: "assistant-settings__notice assistant-settings__notice--info" });
+    info.createDiv({ text: "ℹ️ Очередь изменений (offline-first)", cls: "assistant-settings__notice-title" });
+    info.createDiv({
+      text: "Если действие нельзя применить сразу (например vault read-only), оно попадёт в очередь. Позже можно применить очередь.",
+      cls: "assistant-settings__notice-desc",
+    });
+
+    const countEl = containerEl.createDiv({ cls: "assistant-settings__notice-desc" });
+    countEl.setText("Загрузка очереди…");
+    void this.plugin.outboxService
+      .list()
+      .then((items) => countEl.setText(`В очереди: ${items.length}`))
+      .catch(() => countEl.setText("В очереди: ?"));
+
+    new Setting(containerEl)
+      .setName("Применить очередь")
+      .setDesc("Попробовать применить отложенные действия. Ошибки будут в логе.")
+      .addButton((b) =>
+        b.setButtonText("Применить").onClick(async () => {
+          await this.plugin.applyOutbox();
+          this.rerenderPreservingScroll();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Очистить очередь")
+      .setDesc("Удалить все отложенные действия без применения.")
+      .addButton((b) =>
+        b.setButtonText("Очистить").onClick(async () => {
+          await this.plugin.outboxService.clear();
+          this.rerenderPreservingScroll();
+        }),
+      );
+  }
+
+  private renderCaldavAccountsSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Аккаунты (CalDAV)" });
 
     const accounts = this.plugin.settings.caldav.accounts;
     if (accounts.length === 0) {
       const emptyAcc = containerEl.createDiv({ cls: "assistant-settings__notice assistant-settings__notice--warning" });
       emptyAcc.createDiv({ text: "⚠️ Нет CalDAV аккаунтов", cls: "assistant-settings__notice-title" });
-      emptyAcc.createDiv(
-        { text: "Добавьте аккаунт CalDAV, чтобы подключать CalDAV календари и использовать OAuth для Google.", cls: "assistant-settings__notice-desc" },
-      );
+      emptyAcc.createDiv({
+        text: "Добавьте аккаунт CalDAV, чтобы подключать CalDAV календари и использовать OAuth для Google.",
+        cls: "assistant-settings__notice-desc",
+      });
     }
 
     for (const acc of accounts) {
@@ -343,11 +430,11 @@ export class AssistantSettingsTab extends PluginSettingTab {
       );
 
       new Setting(accBlock)
-        .setName("Auth method")
+        .setName("Тип авторизации")
         .setDesc("Basic для Nextcloud/iCloud; Google OAuth — без пароля (рекомендуется для Google).")
         .addDropdown((dd) => {
-          dd.addOption("basic", "Basic");
-          dd.addOption("google_oauth", "Google OAuth");
+          dd.addOption("basic", "Basic (логин/пароль)");
+          dd.addOption("google_oauth", "Google OAuth (через браузер)");
           dd.setValue(acc.authMethod ?? "basic");
           dd.onChange(async (v) => {
             acc.authMethod = v as "basic" | "google_oauth";
@@ -356,13 +443,13 @@ export class AssistantSettingsTab extends PluginSettingTab {
               acc.serverUrl = GOOGLE_CALDAV_SERVER_URL;
             }
             await this.plugin.saveSettingsAndApply();
-            this.display();
+            this.rerenderPreservingScroll();
           });
         });
 
       const authMethod = acc.authMethod ?? "basic";
 
-      // Readiness status (helps understand why discovery/sync doesn't work)
+      // Статус “готовности” (помогает понять, почему discovery/sync не работают).
       const readiness = getCaldavAccountReadiness(acc);
       const status = accBlock.createDiv({
         cls: `assistant-settings__notice ${readiness.ok ? "assistant-settings__notice--ok" : "assistant-settings__notice--warning"}`,
@@ -387,33 +474,33 @@ export class AssistantSettingsTab extends PluginSettingTab {
 
       if (authMethod === "basic" && isGoogleCaldavUrl(acc.serverUrl)) {
         const warn = accBlock.createDiv({ cls: "assistant-settings__notice assistant-settings__notice--warning" });
-        warn.createDiv({ text: "⚠️ Google + Basic: нужен App password", cls: "assistant-settings__notice-title" });
+        warn.createDiv({ text: "⚠️ Google + Basic: нужен пароль приложения", cls: "assistant-settings__notice-title" });
         warn.createDiv({
-          text: "Google обычно не принимает обычный пароль по Basic. Если хотите Basic — используйте App password (требует 2FA).",
+          text: "Google обычно не принимает обычный пароль по Basic. Если хотите Basic — используйте пароль приложения (App password; требует 2FA).",
           cls: "assistant-settings__notice-desc",
         });
         warn.createDiv({ text: "Быстрый доступ:", cls: "assistant-settings__notice-desc" });
         const links = warn.createEl("ul");
         links.createEl("li").createEl("a", {
-          text: "App passwords (прямая ссылка)",
+          text: "Пароли приложений (App passwords, прямая ссылка)",
           href: "https://myaccount.google.com/apppasswords",
         });
         links.createEl("li").createEl("a", {
-          text: "Безопасность Google аккаунта (Security)",
+          text: "Раздел безопасности Google аккаунта (Security)",
           href: "https://myaccount.google.com/security",
         });
 
         warn.createDiv({ text: "Пошагово:", cls: "assistant-settings__notice-desc" });
         const steps = warn.createEl("ol");
         steps.createEl("li", {
-          text: "Проверьте 2FA: «Google Account → Security → 2-Step Verification» (иначе App passwords недоступны).",
+          text: "Проверьте 2FA (двухэтапная аутентификация): «Google Account → Security → 2-Step Verification» (иначе App passwords недоступны).",
         });
-        steps.createEl("li", { text: "Откройте «Пароли приложений / App passwords»." });
+        steps.createEl("li", { text: "Откройте «Пароли приложений (App passwords)»." });
         steps.createEl("li", {
           text: "Введите имя приложения (например «Obsidian Assistant») и нажмите «Создать».",
         });
         steps.createEl("li", {
-          text: "Скопируйте 16-значный код и используйте его в поле Password (вместо основного пароля).",
+          text: "Скопируйте 16-значный код и используйте его в поле «Пароль / пароль приложения» (вместо основного пароля).",
         });
         warn.createDiv({
           text: "Если пункта «Пароли приложений» не видно — используйте поиск внутри настроек Google аккаунта: «пароли приложений».",
@@ -431,38 +518,43 @@ export class AssistantSettingsTab extends PluginSettingTab {
           void this.plugin.saveSettingsAndApply();
         }
         accBlock.createDiv({
-          text: `Server URL (Google, fixed): ${root}`,
+          text: `URL сервера (Google, фиксированный): ${root}`,
           cls: "setting-item-description",
         });
       } else {
         new Setting(accBlock)
-          .setName("Server URL")
+          .setName("URL сервера")
           .setDesc("URL CalDAV сервера (например Nextcloud/iCloud).")
           .addText((t) =>
-            t.setPlaceholder("https://...").setValue(acc.serverUrl).onChange(async (v) => {
-              acc.serverUrl = v.trim();
-              await this.plugin.saveSettingsAndApply();
-            }),
+            t
+              .setPlaceholder("https://...")
+              .setValue(acc.serverUrl)
+              .onChange(async (v) => {
+                acc.serverUrl = v.trim();
+                await this.plugin.saveSettingsAndApply();
+              }),
           );
       }
 
-      new Setting(accBlock).setName("Login (email)").addText((t) =>
-        t.setPlaceholder("me@example.com").setValue(acc.username).onChange(async (v) => {
-          acc.username = v.trim();
-          await this.plugin.saveSettingsAndApply();
-        }),
+      new Setting(accBlock).setName("Логин (email)").addText((t) =>
+        t
+          .setPlaceholder("me@example.com")
+          .setValue(acc.username)
+          .onChange(async (v) => {
+            acc.username = v.trim();
+            await this.plugin.saveSettingsAndApply();
+          }),
       );
 
       if (authMethod === "basic") {
         let passwordInputEl: HTMLInputElement | null = null;
         let passwordVisible = false;
 
-        const passwordSetting = new Setting(accBlock).setName("Password / App password");
+        const passwordSetting = new Setting(accBlock).setName("Пароль / пароль приложения");
         passwordSetting.addText((t) => {
           passwordInputEl = t.inputEl;
           t.inputEl.type = "password";
-          t
-            .setPlaceholder("••••••••")
+          t.setPlaceholder("••••••••")
             .setValue(acc.password)
             .onChange(async (v) => {
               acc.password = v;
@@ -480,7 +572,7 @@ export class AssistantSettingsTab extends PluginSettingTab {
 
         if (isGoogleCaldavUrl(acc.serverUrl)) {
           accBlock.createDiv({
-            text: "Подсказка (Google): App password обычно показывается с пробелами, но вводить нужно без пробелов (16 символов подряд).",
+            text: "Подсказка (Google): пароль приложения (App password) часто показывается с пробелами, но вводить нужно без пробелов (16 символов подряд).",
             cls: "setting-item-description",
           });
         }
@@ -495,42 +587,46 @@ export class AssistantSettingsTab extends PluginSettingTab {
         ul.createEl("li", { text: "Скопируй Client ID и Client Secret сюда." });
 
         new Setting(accBlock)
-          .setName("Google OAuth clientId")
-          .setDesc("OAuth Client ID (рекомендуется тип: Desktop app).")
+          .setName("Google OAuth Client ID (clientId)")
+          .setDesc("OAuth Client ID (рекомендуется тип приложения: Desktop app).")
           .addText((t) =>
-            t.setPlaceholder("...apps.googleusercontent.com").setValue(oauth.clientId).onChange(async (v) => {
-              oauth.clientId = v.trim();
-              acc.oauth = oauth;
-              await this.plugin.saveSettingsAndApply();
-            }),
+            t
+              .setPlaceholder("...apps.googleusercontent.com")
+              .setValue(oauth.clientId)
+              .onChange(async (v) => {
+                oauth.clientId = v.trim();
+                acc.oauth = oauth;
+                await this.plugin.saveSettingsAndApply();
+              }),
           );
 
         new Setting(accBlock)
-          .setName("Google OAuth clientSecret")
+          .setName("Google OAuth Client Secret (clientSecret)")
           .setDesc("Client Secret из Google Cloud (для Desktop app выдаётся).")
           .addText((t) => {
-            // placeholder - will be replaced below (we need access to the Setting to add extra button)
+            // Placeholder — ниже перерисуем поле как “пароль” с “глазиком” (нужно иметь доступ к addExtraButton).
             t.setPlaceholder("••••••••");
           });
 
-        // Re-render the clientSecret field as password with eye toggle (keeping layout consistent)
-        // NOTE: We intentionally create a dedicated Setting to have access to addExtraButton.
-        // (Obsidian Setting API doesn't expose the current Setting inside addText callback)
+        // Перерисовываем clientSecret как “пароль”-поле с “глазиком”, сохраняя раскладку.
+        // Важно: делаем отдельный Setting, т.к. API Obsidian не даёт доступа к текущему Setting внутри addText callback.
         accBlock.lastElementChild?.remove();
 
         let secretInputEl: HTMLInputElement | null = null;
         let secretVisible = false;
         const secretSetting = new Setting(accBlock)
-          .setName("Google OAuth clientSecret")
+          .setName("Google OAuth Client Secret (clientSecret)")
           .setDesc("Client Secret из Google Cloud (для Desktop app выдаётся).");
         secretSetting.addText((t) => {
           secretInputEl = t.inputEl;
           t.inputEl.type = "password";
-          t.setPlaceholder("••••••••").setValue(oauth.clientSecret).onChange(async (v) => {
-            oauth.clientSecret = v.trim();
-            acc.oauth = oauth;
-            await this.plugin.saveSettingsAndApply();
-          });
+          t.setPlaceholder("••••••••")
+            .setValue(oauth.clientSecret)
+            .onChange(async (v) => {
+              oauth.clientSecret = v.trim();
+              acc.oauth = oauth;
+              await this.plugin.saveSettingsAndApply();
+            });
         });
         secretSetting.addExtraButton((b) => {
           b.setIcon("eye").setTooltip("Показать/скрыть secret");
@@ -542,7 +638,7 @@ export class AssistantSettingsTab extends PluginSettingTab {
         });
 
         accBlock.createDiv({
-          text: oauth.refreshToken ? "Refresh token: сохранён" : "Refresh token: отсутствует",
+          text: oauth.refreshToken ? "refresh‑токен: сохранён" : "refresh‑токен: отсутствует",
           cls: "setting-item-description",
         });
 
@@ -552,19 +648,22 @@ export class AssistantSettingsTab extends PluginSettingTab {
           .addButton((b) =>
             b.setButtonText("Авторизоваться").onClick(async () => {
               await this.plugin.authorizeGoogleCaldav(acc.id);
-              this.display();
+              this.rerenderPreservingScroll();
             }),
           )
           .addButton((b) =>
-            b.setButtonText("Сбросить токен").setWarning().onClick(async () => {
-              oauth.refreshToken = "";
-              acc.oauth = oauth;
-              await this.plugin.saveSettingsAndApply();
-              this.display();
-            }),
+            b
+              .setButtonText("Сбросить токен")
+              .setWarning()
+              .onClick(async () => {
+                oauth.refreshToken = "";
+                acc.oauth = oauth;
+                await this.plugin.saveSettingsAndApply();
+                this.rerenderPreservingScroll();
+              }),
           );
 
-        // serverUrl for Google is auto-filled and shown above
+        // Для Google serverUrl заполняется автоматически и показан выше.
       }
 
       new Setting(accBlock)
@@ -591,9 +690,9 @@ export class AssistantSettingsTab extends PluginSettingTab {
                 `Ассистент: найдено календарей: ${found.length}. ` +
                   `Прокрутите ниже к «Найденные календари» и нажмите «Добавить» напротив нужного.`,
               );
-              this.display();
+              this.rerenderPreservingScroll();
             } catch (e) {
-              const raw = String((e as unknown) ?? "unknown");
+              const raw = String((e as unknown) ?? "неизвестная ошибка");
               const reason = raw.length > 160 ? `${raw.slice(0, 160)}…` : raw;
               this.plugin.logService.error("CalDAV: discovery ошибка", { error: raw });
               // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -607,6 +706,12 @@ export class AssistantSettingsTab extends PluginSettingTab {
       if (discovered.length > 0) {
         accBlock.createDiv({ text: "Найденные календари:", cls: "setting-item-description" });
         const login = acc.username.trim().toLowerCase();
+        const addedUrls = new Set(
+          this.plugin.settings.calendars
+            .filter((c) => c.type === "caldav" && c.caldav?.accountId === acc.id)
+            .map((c) => c.caldav?.calendarUrl)
+            .filter((u): u is string => Boolean(u)),
+        );
         const sorted = discovered.slice().sort((a, b) => {
           const aIsPrimary = login && a.displayName.trim().toLowerCase() === login;
           const bIsPrimary = login && b.displayName.trim().toLowerCase() === login;
@@ -616,26 +721,32 @@ export class AssistantSettingsTab extends PluginSettingTab {
 
         for (const c of sorted) {
           const isPrimary = login && c.displayName.trim().toLowerCase() === login;
-          const isHoliday = c.displayName.toLowerCase().includes("праздник");
+          const isAdded = addedUrls.has(c.url);
+          const titleBase = isPrimary ? `Основной: ${c.displayName}` : c.displayName;
+          const title = isAdded ? `✅ ${titleBase}` : titleBase;
           new Setting(accBlock)
-            .setName(isPrimary ? `✅ Основной: ${c.displayName}` : c.displayName)
+            .setName(title)
             .setDesc(c.url)
             .addButton((b) =>
-              b.setButtonText(isHoliday ? "Добавить (необязательно)" : "Добавить").onClick(async () => {
-                this.plugin.settings.calendars.push({
-                  id: newId(),
-                  name: c.displayName || "Календарь",
-                  type: "caldav",
-                  enabled: true,
-                  caldav: {
-                    accountId: acc.id,
-                    calendarUrl: c.url,
-                  },
-                  color: c.color,
-                });
-                await this.plugin.saveSettingsAndApply();
-                this.display();
-              }),
+              b
+                .setButtonText(isAdded ? "Добавлен" : "Добавить")
+                .setDisabled(isAdded)
+                .onClick(async () => {
+                  if (isAdded) return;
+                  this.plugin.settings.calendars.push({
+                    id: newId(),
+                    name: c.displayName || "Календарь",
+                    type: "caldav",
+                    enabled: true,
+                    caldav: {
+                      accountId: acc.id,
+                      calendarUrl: c.url,
+                    },
+                    color: c.color,
+                  });
+                  await this.plugin.saveSettingsAndApply();
+                  this.rerenderPreservingScroll();
+                }),
             );
         }
       }
@@ -644,16 +755,19 @@ export class AssistantSettingsTab extends PluginSettingTab {
         .setName("Удалить аккаунт")
         .setDesc("Удалит аккаунт и выключит связанные календари (их можно удалить отдельно ниже).")
         .addButton((b) =>
-          b.setButtonText("Удалить").setWarning().onClick(async () => {
-            this.plugin.settings.caldav.accounts = this.plugin.settings.caldav.accounts.filter((a) => a.id !== acc.id);
-            // не удаляем календари автоматически (чтобы не терять конфиг), но выключим
-            for (const cal of this.plugin.settings.calendars) {
-              if (cal.type === "caldav" && cal.caldav?.accountId === acc.id) cal.enabled = false;
-            }
-            delete this.discoveredCaldavCalendars[acc.id];
-            await this.plugin.saveSettingsAndApply();
-            this.display();
-          }),
+          b
+            .setButtonText("Удалить")
+            .setWarning()
+            .onClick(async () => {
+              this.plugin.settings.caldav.accounts = this.plugin.settings.caldav.accounts.filter((a) => a.id !== acc.id);
+              // не удаляем календари автоматически (чтобы не терять конфиг), но выключим
+              for (const cal of this.plugin.settings.calendars) {
+                if (cal.type === "caldav" && cal.caldav?.accountId === acc.id) cal.enabled = false;
+              }
+              delete this.discoveredCaldavCalendars[acc.id];
+              await this.plugin.saveSettingsAndApply();
+              this.rerenderPreservingScroll();
+            }),
         );
     }
 
@@ -672,10 +786,12 @@ export class AssistantSettingsTab extends PluginSettingTab {
             authMethod: "basic",
           });
           await this.plugin.saveSettingsAndApply();
-          this.display();
+          this.rerenderPreservingScroll();
         }),
       );
+  }
 
+  private renderConnectedCalendarsSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Подключенные календари" });
 
     const cals = this.plugin.settings.calendars;
@@ -706,10 +822,12 @@ export class AssistantSettingsTab extends PluginSettingTab {
             url: "",
           });
           await this.plugin.saveSettingsAndApply();
-          this.display();
+          this.rerenderPreservingScroll();
         }),
       );
+  }
 
+  private renderCalendarOperationsSection(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "Операции с календарями" });
 
     new Setting(containerEl)
@@ -725,46 +843,40 @@ export class AssistantSettingsTab extends PluginSettingTab {
   private renderCalendar(containerEl: HTMLElement, cal: CalendarConfig) {
     const calHeader = containerEl.createEl("h4", { text: cal.name, cls: "assistant-settings__calendar-title" });
 
-    new Setting(containerEl)
-      .setName("Включён")
-      .addToggle((t) =>
-        t.setValue(cal.enabled).onChange(async (v) => {
-          cal.enabled = v;
-          await this.plugin.saveSettingsAndApply();
-        }),
-      );
+    new Setting(containerEl).setName("Включён").addToggle((t) =>
+      t.setValue(cal.enabled).onChange(async (v) => {
+        cal.enabled = v;
+        await this.plugin.saveSettingsAndApply();
+      }),
+    );
 
-    new Setting(containerEl)
-      .setName("Имя")
-      .addText((t) =>
-        t.setValue(cal.name).onChange(async (v) => {
-          cal.name = v.trim() || "Календарь";
-          await this.plugin.saveSettingsAndApply();
-          calHeader.setText(cal.name);
-        }),
-      );
+    new Setting(containerEl).setName("Имя").addText((t) =>
+      t.setValue(cal.name).onChange(async (v) => {
+        cal.name = v.trim() || "Календарь";
+        await this.plugin.saveSettingsAndApply();
+        calHeader.setText(cal.name);
+      }),
+    );
 
-    new Setting(containerEl)
-      .setName("Тип")
-      .addDropdown((dd) => {
-        dd.addOption("ics_url", "ICS URL");
-        dd.addOption("caldav", "CalDAV");
-        dd.setValue(cal.type);
-        dd.onChange(async (v) => {
-          const next = v as CalendarConfig["type"];
-          if (cal.type === next) return;
-          cal.type = next;
-          if (next === "ics_url") {
-            cal.url = cal.url ?? "";
-            cal.caldav = undefined;
-          } else if (next === "caldav") {
-            cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
-            cal.url = undefined;
-          }
-          await this.plugin.saveSettingsAndApply();
-          this.display();
-        });
+    new Setting(containerEl).setName("Тип").addDropdown((dd) => {
+      dd.addOption("ics_url", "ICS URL");
+      dd.addOption("caldav", "CalDAV");
+      dd.setValue(cal.type);
+      dd.onChange(async (v) => {
+        const next = v as CalendarConfig["type"];
+        if (cal.type === next) return;
+        cal.type = next;
+        if (next === "ics_url") {
+          cal.url = cal.url ?? "";
+          cal.caldav = undefined;
+        } else if (next === "caldav") {
+          cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
+          cal.url = undefined;
+        }
+        await this.plugin.saveSettingsAndApply();
+        this.rerenderPreservingScroll();
       });
+    });
 
     const hint = containerEl.createDiv({ cls: "assistant-settings__notice assistant-settings__notice--info" });
     hint.createDiv({ text: "ℹ️ Типы календарей и ограничения", cls: "assistant-settings__notice-title" });
@@ -775,13 +887,16 @@ export class AssistantSettingsTab extends PluginSettingTab {
 
     if (cal.type === "ics_url") {
       new Setting(containerEl)
-        .setName("ICS URL")
+        .setName("URL ICS")
         .setDesc("Ссылка на .ics (может быть приватной).")
         .addText((t) =>
-          t.setPlaceholder("https://.../calendar.ics").setValue(cal.url ?? "").onChange(async (v) => {
-            cal.url = v.trim();
-            await this.plugin.saveSettingsAndApply();
-          }),
+          t
+            .setPlaceholder("https://.../calendar.ics")
+            .setValue(cal.url ?? "")
+            .onChange(async (v) => {
+              cal.url = v.trim();
+              await this.plugin.saveSettingsAndApply();
+            }),
         );
     }
 
@@ -800,7 +915,7 @@ export class AssistantSettingsTab extends PluginSettingTab {
             cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
             cal.caldav.accountId = v;
             await this.plugin.saveSettingsAndApply();
-            this.display();
+            this.rerenderPreservingScroll();
           });
         });
 
@@ -818,32 +933,40 @@ export class AssistantSettingsTab extends PluginSettingTab {
           const n = authInfo.createDiv({
             cls: `assistant-settings__notice ${hasToken ? "assistant-settings__notice--ok" : "assistant-settings__notice--danger"}`,
           });
-          n.createDiv(
-            { text: hasToken ? "✅ Авторизация: Google OAuth — OK" : "⛔ Авторизация: Google OAuth — нет refresh token", cls: "assistant-settings__notice-title" },
-          );
+          n.createDiv({
+            text: hasToken ? "✅ Авторизация: Google OAuth — OK" : "⛔ Авторизация: Google OAuth — нет refresh token",
+            cls: "assistant-settings__notice-title",
+          });
           if (!hasToken) {
-            n.createDiv({ text: "Нажмите «Авторизоваться» в аккаунте CalDAV, чтобы получить refresh token.", cls: "assistant-settings__notice-desc" });
+            n.createDiv({
+              text: "Нажмите «Авторизоваться» в аккаунте CalDAV, чтобы получить refresh‑токен.",
+              cls: "assistant-settings__notice-desc",
+            });
           }
         } else {
           const n = authInfo.createDiv({
             cls: `assistant-settings__notice ${hasPassword ? "assistant-settings__notice--ok" : "assistant-settings__notice--warning"}`,
           });
-          n.createDiv(
-            { text: hasPassword ? "✅ Авторизация: Basic — пароль задан" : "⚠️ Авторизация: Basic — нет пароля", cls: "assistant-settings__notice-title" },
-          );
+          n.createDiv({
+            text: hasPassword ? "✅ Авторизация: Basic — пароль задан" : "⚠️ Авторизация: Basic — нет пароля",
+            cls: "assistant-settings__notice-title",
+          });
           if (!hasPassword) {
-            n.createDiv({ text: "Задайте пароль (или App password) в аккаунте CalDAV.", cls: "assistant-settings__notice-desc" });
+            n.createDiv({
+              text: "Задайте пароль (или пароль приложения / App password) в аккаунте CalDAV.",
+              cls: "assistant-settings__notice-desc",
+            });
           }
         }
 
         if (method === "google_oauth" && !hasToken) {
           new Setting(authInfo)
             .setName("Google OAuth")
-            .setDesc("Рекомендуется для Google. Нажмите авторизацию, чтобы получить refresh token.")
+            .setDesc("Рекомендуется для Google. Нажмите авторизацию, чтобы получить refresh‑токен.")
             .addButton((b) =>
               b.setButtonText("Авторизоваться").onClick(async () => {
                 await this.plugin.authorizeGoogleCaldav(selectedAcc.id);
-                this.display();
+                this.rerenderPreservingScroll();
               }),
             );
         }
@@ -852,14 +975,17 @@ export class AssistantSettingsTab extends PluginSettingTab {
       }
 
       new Setting(containerEl)
-        .setName("Calendar URL")
-        .setDesc("URL calendar collection (обычно оканчивается на /events/ или /). Проще добавить через discovery выше.")
+        .setName("URL календаря")
+        .setDesc("URL календаря (обычно оканчивается на /events/ или /). Проще добавить через «Найти календари» выше.")
         .addText((t) =>
-          t.setPlaceholder("https://.../").setValue(cal.caldav?.calendarUrl ?? "").onChange(async (v) => {
-            cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
-            cal.caldav.calendarUrl = v.trim();
-            await this.plugin.saveSettingsAndApply();
-          }),
+          t
+            .setPlaceholder("https://.../")
+            .setValue(cal.caldav?.calendarUrl ?? "")
+            .onChange(async (v) => {
+              cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
+              cal.caldav.calendarUrl = v.trim();
+              await this.plugin.saveSettingsAndApply();
+            }),
         );
     }
 
@@ -872,43 +998,17 @@ export class AssistantSettingsTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl)
-      .setName("Удалить календарь")
-      .addButton((b) =>
-        b.setButtonText("Удалить").setWarning().onClick(async () => {
+    new Setting(containerEl).setName("Удалить календарь").addButton((b) =>
+      b
+        .setButtonText("Удалить")
+        .setWarning()
+        .onClick(async () => {
           this.plugin.settings.calendars = this.plugin.settings.calendars.filter((c) => c.id !== cal.id);
           await this.plugin.saveSettingsAndApply();
-          this.display();
+          this.rerenderPreservingScroll();
         }),
-      );
+    );
   }
-}
-
-function getCaldavAccountReadiness(acc: {
-  enabled: boolean;
-  serverUrl: string;
-  username: string;
-  password: string;
-  authMethod?: "basic" | "google_oauth";
-  oauth?: { clientId: string; clientSecret: string; refreshToken: string };
-}): { ok: boolean; reasons: string[] } {
-  const reasons: string[] = [];
-  if (!acc.enabled) reasons.push("Аккаунт выключен");
-
-  const method = acc.authMethod ?? "basic";
-  if (!acc.serverUrl.trim()) reasons.push("Не задан Server URL");
-  if (!acc.username.trim()) reasons.push("Не задан Login (email)");
-
-  if (method === "basic") {
-    if (!acc.password) reasons.push("Не задан Password / App password");
-  } else {
-    const oauth = acc.oauth ?? { clientId: "", clientSecret: "", refreshToken: "" };
-    if (!oauth.clientId.trim()) reasons.push("Не задан Google OAuth clientId");
-    if (!oauth.clientSecret.trim()) reasons.push("Не задан Google OAuth clientSecret");
-    if (!oauth.refreshToken.trim()) reasons.push("Нет refresh token — нажмите «Авторизоваться»");
-  }
-
-  return { ok: reasons.length === 0, reasons };
 }
 
 const GOOGLE_CALDAV_SERVER_URL = "https://apidata.googleusercontent.com/caldav/v2/";
@@ -925,4 +1025,3 @@ function newId(): string {
   if (anyCrypto?.randomUUID) return anyCrypto.randomUUID();
   return `cal_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
-

@@ -10,10 +10,16 @@ function isLinux(): boolean {
   }
 }
 
+/** Возможные действия пользователя в popup-окне. */
 export type PopupAction = "ok" | "create_protocol" | "start_recording" | "cancelled" | "close";
 
+/**
+ * Показать popup-окно уведомления через `yad` (только Linux).
+ *
+ * Возвращает код действия (какую кнопку нажали).
+ */
 export async function linuxPopupWindow(ev: CalendarEvent, msg: string, settings: AssistantSettings): Promise<PopupAction> {
-  if (!isLinux()) throw new Error("not linux");
+  if (!isLinux()) throw new Error("Окружение не Linux");
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { execFile } = require("child_process") as typeof import("child_process");
@@ -31,7 +37,7 @@ export async function linuxPopupWindow(ev: CalendarEvent, msg: string, settings:
 
   const text = `${msg}\n\n${details}`;
 
-  // Prefer yad (supports on-top reliably)
+  // Предпочитаем yad (надёжно поддерживает поверх окон)
   const code = await execCode(execFile, "yad", [
     "--on-top",
     "--sticky",
@@ -58,11 +64,7 @@ export async function linuxPopupWindow(ev: CalendarEvent, msg: string, settings:
   return "close";
 }
 
-function execCode(
-  execFile: typeof import("child_process").execFile,
-  cmd: string,
-  args: string[],
-): Promise<number> {
+function execCode(execFile: typeof import("child_process").execFile, cmd: string, args: string[]): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     execFile(cmd, args, (err: unknown) => {
       if (!err) return resolve(0);
@@ -74,4 +76,3 @@ function execCode(
     });
   });
 }
-

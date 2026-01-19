@@ -3,8 +3,11 @@ import type { CalendarProvider } from "./calendarProvider";
 import { DAVClient, type DAVAccount, type DAVCalendar, getOauthHeaders } from "tsdav";
 import { parseIcs } from "../ics";
 import { ensureObsidianFetchInstalled } from "../../caldav/obsidianFetch";
+import { getCaldavAccountReadiness } from "../../caldav/caldavReadiness";
+import { CALENDAR_EVENTS_HORIZON_DAYS, MS_PER_DAY } from "../constants";
 
 export class CaldavProvider implements CalendarProvider {
+  /** Тип источника календаря, который обслуживает провайдер. */
   type: CalendarConfig["type"] = "caldav";
 
   /**
@@ -45,8 +48,8 @@ export class CaldavProvider implements CalendarProvider {
 
   setSettings(settings: AssistantSettings) {
     this.settings = settings;
-    // Intentionally keep clients cache; credentials might change though.
-    // We will recreate a client if login fails.
+    // Намеренно сохраняем кэш клиентов: пересоздаём его только при ошибке входа
+    // (учёт смены учётных данных/сервера без лишнего давления на сеть).
   }
 
   async refresh(cal: CalendarConfig): Promise<CalendarEvent[]> {
@@ -54,15 +57,14 @@ export class CaldavProvider implements CalendarProvider {
     if (!cfg?.accountId || !cfg.calendarUrl) return [];
 
     const account = this.settings.caldav.accounts.find((a) => a.id === cfg.accountId);
-    if (!account || !account.enabled) return [];
-    if (!account.serverUrl || !account.username) return [];
-    if ((account.authMethod ?? "basic") === "basic" && !account.password) return [];
-    if ((account.authMethod ?? "basic") === "google_oauth" && !account.oauth?.refreshToken) return [];
+    if (!account) return [];
+    const readiness = getCaldavAccountReadiness(account);
+    if (!readiness.ok) return [];
 
     const client = await this.getOrLoginClient(account);
 
     const start = new Date();
-    const end = new Date(Date.now() + 60 * 24 * 60 * 60_000); // 60 days
+    const end = new Date(Date.now() + CALENDAR_EVENTS_HORIZON_DAYS * MS_PER_DAY);
 
     const calendar: DAVCalendar = {
       url: cfg.calendarUrl,
@@ -106,7 +108,7 @@ export class CaldavProvider implements CalendarProvider {
       out.push(
         ...parseIcs(cal.id, text, {
           now: new Date(),
-          horizonDays: 60,
+          horizonDays: CALENDAR_EVENTS_HORIZON_DAYS,
           myEmail: this.settings.calendar.myEmail,
         }),
       );
@@ -116,10 +118,9 @@ export class CaldavProvider implements CalendarProvider {
 
   async discoverCalendars(accountId: string): Promise<Array<{ displayName: string; url: string; color?: string }>> {
     const account = this.settings.caldav.accounts.find((a) => a.id === accountId);
-    if (!account || !account.enabled) return [];
-    if (!account.serverUrl || !account.username) return [];
-    if ((account.authMethod ?? "basic") === "basic" && !account.password) return [];
-    if ((account.authMethod ?? "basic") === "google_oauth" && !account.oauth?.refreshToken) return [];
+    if (!account) return [];
+    const readiness = getCaldavAccountReadiness(account);
+    if (!readiness.ok) return [];
 
     const client = await this.getOrLoginClient(account);
     const cals = await client.fetchCalendars();
@@ -147,18 +148,14 @@ export class CaldavProvider implements CalendarProvider {
                 "После включения подождите 5–10 минут и повторите discovery.",
             );
           }
-          throw new Error(`CalDAV PROPFIND failed: HTTP ${first.status} ${first.statusText}`);
+          throw new Error(`CalDAV: PROPFIND не удался: HTTP ${first.status} ${first.statusText}`);
         }
       }
     }
 
-    // Google CalDAV: sometimes PROPFIND-based discovery returns 0 calendars depending on server behavior/policies.
-    // Provide a practical fallback: primary calendar lives under /events/.
-    if (
-      cals.length === 0 &&
-      (account.authMethod ?? "basic") === "google_oauth" &&
-      isGoogleCaldavServerUrl(account.serverUrl)
-    ) {
+    // Google CalDAV: иногда PROPFIND-based discovery возвращает 0 календарей (особенности сервера/политик).
+    // Практичный fallback: основной календарь обычно живёт по /events/.
+    if (cals.length === 0 && (account.authMethod ?? "basic") === "google_oauth" && isGoogleCaldavServerUrl(account.serverUrl)) {
       return [
         {
           displayName: "Primary (Google)",
@@ -174,9 +171,7 @@ export class CaldavProvider implements CalendarProvider {
     }));
   }
 
-  private async getOrLoginClient(
-    account: AssistantSettings["caldav"]["accounts"][number],
-  ): Promise<DAVClient> {
+  private async getOrLoginClient(account: AssistantSettings["caldav"]["accounts"][number]): Promise<DAVClient> {
     let client = this.clientByAccountId.get(account.id);
     if (!client) {
       client = this.createClient(account);
@@ -187,16 +182,16 @@ export class CaldavProvider implements CalendarProvider {
       await client.login();
       return client;
     } catch (e) {
-      // Credentials/server might have changed — recreate and retry once.
+      // Учёт смены данных/сервера: пересоздаём клиент и повторяем один раз.
       const fresh = this.createClient(account);
       this.clientByAccountId.set(account.id, fresh);
       try {
         await fresh.login();
         return fresh;
       } catch (e2) {
-        const msg = String((e2 as unknown) ?? "unknown");
+        const msg = String((e2 as unknown) ?? "неизвестная ошибка");
         const method = account.authMethod ?? "basic";
-        throw new Error(`CalDAV login failed (${method}, serverUrl=${account.serverUrl}): ${msg}`);
+        throw new Error(`CalDAV: вход не удался (${method}, serverUrl=${account.serverUrl}): ${msg}`);
       }
     }
   }
@@ -225,14 +220,14 @@ export class CaldavProvider implements CalendarProvider {
       serverUrl: account.serverUrl,
       credentials: {
         username: account.username,
-        // Google app-password is often copied with spaces; server expects it without spaces.
-        password: isGoogleCaldavServerUrl(account.serverUrl) ? account.password.replaceAll(" ", "") : account.password,
+        // ВАЖНО (UX): не модифицируем пароль автоматически.
+        // Если Google показывает пароль приложения с пробелами — ожидаем ввод без пробелов (есть подсказка в настройках).
+        password: account.password,
       },
       authMethod: "Basic",
       defaultAccountType: "caldav",
     });
   }
-
 }
 
 function isGoogleCaldavServerUrl(url: string): boolean {

@@ -1,32 +1,58 @@
-import type { App, TAbstractFile, TFile, Vault } from "obsidian";
-import { normalizePath } from "obsidian";
+import type { App } from "obsidian";
 import type { LogEntry } from "./logService";
-import { ensureFolder } from "../vault/ensureFolder";
-import { revealOrOpenInNewLeaf } from "../vault/revealOrOpenFile";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
+/**
+ * Писатель лога в системную папку плагина (вне vault).
+ *
+ * Пишет “батчами” с небольшой задержкой, чтобы не спамить диск на каждый log entry.
+ *
+ * Формат файла: компактный `.log` (одна запись = одна строка).
+ */
 export class LogFileWriter {
   private app: App;
-  private vault: Vault;
-  private folderPath: string;
   private enabled: boolean;
+  private logsDirPath: string;
+  private openExternal?: (path: string) => void;
+  private retentionDays: number;
   private flushTimer?: number;
   private pending: LogEntry[] = [];
 
-  constructor(app: App, folderPath: string, enabled: boolean) {
-    this.app = app;
-    this.vault = app.vault;
-    this.folderPath = normalizePath(folderPath);
+  constructor(params: { app: App; logsDirPath: string; enabled?: boolean; openExternal?: (path: string) => void; retentionDays?: number }) {
+    this.app = params.app;
+    this.logsDirPath = params.logsDirPath;
+    this.enabled = params.enabled ?? true;
+    this.openExternal = params.openExternal;
+    this.retentionDays = normalizeRetentionDays(params.retentionDays ?? 7);
+  }
+
+  /** Включить/выключить запись в файлы (на всякий случай, не UI-настройка). */
+  setEnabled(enabled: boolean) {
     this.enabled = enabled;
   }
 
-  setConfig(folderPath: string, enabled: boolean) {
-    this.folderPath = normalizePath(folderPath);
+  /** Обновить путь папки логов (например, если изменился vault path). */
+  setLogsDirPath(logsDirPath: string) {
+    this.logsDirPath = logsDirPath;
+  }
+
+  /** Настроить срок хранения лог‑файлов (в днях). */
+  async setRetentionDays(retentionDays: number): Promise<void> {
+    this.retentionDays = normalizeRetentionDays(retentionDays);
+    await this.cleanupOldLogFiles();
+  }
+
+  /** @deprecated Раньше лог писался в vault; теперь настройки логов в vault не используются. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  setConfig(_folderPath: string, enabled: boolean) {
     this.enabled = enabled;
   }
 
+  /** Поставить запись в очередь на запись в файл лога. */
   enqueue(entry: LogEntry) {
     if (!this.enabled) return;
-    if (!this.folderPath) return;
+    if (!this.logsDirPath) return;
 
     this.pending.push(entry);
     if (!this.flushTimer) {
@@ -46,10 +72,10 @@ export class LogFileWriter {
     this.pending = [];
     if (batch.length === 0) return;
 
-    const folder = this.folderPath;
-    await ensureFolder(this.vault, folder);
+    const folder = this.logsDirPath;
+    await fs.mkdir(folder, { recursive: true });
 
-    // group by date (YYYY-MM-DD)
+    // Группируем по дате (YYYY-MM-DD)
     const byDate = new Map<string, LogEntry[]>();
     for (const e of batch) {
       const d = formatDateYmd(new Date(e.ts));
@@ -59,21 +85,107 @@ export class LogFileWriter {
     }
 
     for (const [ymd, entries] of byDate) {
-      const filePath = normalizePath(`${folder}/${ymd}.md`);
-      const file = await ensureFile(this.vault, filePath, `## Лог за ${ymd}\n\n`);
+      const filePath = path.join(folder, `${ymd}.log`);
+      await ensureFileExists(filePath, "");
       const text = entries.map(formatEntry).join("\n") + "\n";
-      await this.vault.append(file, text);
+      await fs.appendFile(filePath, text, { encoding: "utf-8" });
     }
+
+    await this.cleanupOldLogFiles();
   }
 
   async openTodayLog() {
-    if (!this.folderPath) return;
+    if (!this.logsDirPath) return;
     const ymd = formatDateYmd(new Date());
-    const filePath = normalizePath(`${this.folderPath}/${ymd}.md`);
-    await ensureFolder(this.vault, this.folderPath);
-    const file = await ensureFile(this.vault, filePath, `## Лог за ${ymd}\n\n`);
-    await revealOrOpenInNewLeaf(this.app, file);
+    const filePath = path.join(this.logsDirPath, `${ymd}.log`);
+    await fs.mkdir(this.logsDirPath, { recursive: true });
+    await ensureFileExists(filePath, "");
+
+    // Файл вне vault — открываем внешним способом (в debug UI).
+    if (this.openExternal) {
+      this.openExternal(filePath);
+    } else {
+      // Фолбек: попытаемся использовать electron shell, если доступен.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const electron = require("electron") as { shell?: { openPath?: (p: string) => Promise<string> } };
+        if (electron?.shell?.openPath) {
+          await electron.shell.openPath(filePath);
+        }
+      } catch {
+        // игнорируем
+      }
+    }
   }
+
+  /** Очистить файл лога за сегодня (только файл, без влияния на in-memory лог). */
+  async clearTodayLogFile(): Promise<void> {
+    if (!this.logsDirPath) return;
+    const ymd = formatDateYmd(new Date());
+    const filePath = path.join(this.logsDirPath, `${ymd}.log`);
+    await fs.mkdir(this.logsDirPath, { recursive: true });
+    await fs.writeFile(filePath, "", { encoding: "utf-8" });
+  }
+
+  /**
+   * Очистить старые лог‑файлы в папке `logsDirPath` согласно `retentionDays`.
+   *
+   * Правило: храним `retentionDays` дней, включая сегодняшний день.
+   * Пример: retentionDays=7 → оставляем сегодня + последние 6 дней, всё старше удаляем.
+   */
+  async cleanupOldLogFiles(nowMs: number = Date.now()): Promise<void> {
+    if (!this.logsDirPath) return;
+    const keepDays = this.retentionDays;
+    if (!Number.isFinite(keepDays) || keepDays <= 0) return;
+
+    try {
+      const files = await fs.readdir(this.logsDirPath);
+      const nowUtcMidnight = utcMidnightMs(nowMs);
+      for (const name of files) {
+        const m = /^(\d{4}-\d{2}-\d{2})\.log$/.exec(name);
+        if (!m) continue;
+        const fileUtcMidnight = parseYmdUtcMidnightMs(m[1]);
+        if (fileUtcMidnight === null) continue;
+        const ageDays = Math.floor((nowUtcMidnight - fileUtcMidnight) / MS_PER_DAY);
+        if (ageDays >= keepDays) {
+          await fs.rm(path.join(this.logsDirPath, name), { force: true });
+        }
+      }
+    } catch {
+      // игнорируем: папка может отсутствовать или быть недоступна
+    }
+  }
+}
+
+async function ensureFileExists(filePath: string, header: string): Promise<void> {
+  try {
+    await fs.access(filePath);
+  } catch {
+    await fs.writeFile(filePath, header, { encoding: "utf-8" });
+  }
+}
+
+const MS_PER_DAY = 24 * 60 * 60_000;
+
+function normalizeRetentionDays(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return 7;
+  return Math.min(365, Math.max(1, Math.floor(n)));
+}
+
+function utcMidnightMs(ts: number): number {
+  const d = new Date(ts);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+function parseYmdUtcMidnightMs(ymd: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(day)) return null;
+  return Date.UTC(y, mo - 1, day);
 }
 
 function formatDateYmd(d: Date): string {
@@ -83,35 +195,16 @@ function formatDateYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function formatTimeHms(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}
-
 function formatEntry(e: LogEntry): string {
-  const ts = formatTimeHms(new Date(e.ts));
+  const tsIso = new Date(e.ts).toISOString();
   const level = e.level.toUpperCase();
-  const base = `- ${ts} [${level}] ${e.message}`;
-  if (!e.data || Object.keys(e.data).length === 0) return base;
-  let json = "";
+  const msg = String(e.message ?? "");
+  if (!e.data || Object.keys(e.data).length === 0) return `${tsIso} ${level} ${msg}`;
   try {
-    json = JSON.stringify(e.data, null, 2);
+    return `${tsIso} ${level} ${msg} ${JSON.stringify(e.data)}`;
   } catch {
-    json = String(e.data);
+    return `${tsIso} ${level} ${msg} ${String(e.data)}`;
   }
-  return `${base}\n\n\`\`\`json\n${json}\n\`\`\`\n`;
 }
 
-async function ensureFile(vault: Vault, filePath: string, initial: string): Promise<TFile> {
-  const existing = vault.getAbstractFileByPath(filePath);
-  if (existing && isTFile(existing)) return existing;
-  return await vault.create(filePath, initial);
-}
-
-function isTFile(f: TAbstractFile): f is TFile {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (f as any)?.extension != null;
-}
-
+// Лог теперь пишется вне vault, поэтому ensureFile/vault utils не используются.

@@ -1,0 +1,9 @@
+# Dependencies / generated artifacts
+node_modules/
+coverage/
+
+# Build output (committed)
+main.js
+
+# Vendor-ish / large outputs
+package-lock.json

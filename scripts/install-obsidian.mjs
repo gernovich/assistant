@@ -33,4 +33,3 @@ for (const file of files) {
 }
 
 console.log(`Installed to: ${targetDir}`);
-

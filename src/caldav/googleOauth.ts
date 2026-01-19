@@ -2,6 +2,7 @@ import { requestUrl } from "obsidian";
 
 type CodeResult = { code: string; state: string };
 
+/** Случайный `state` для защиты OAuth callback от подделки запроса. */
 function randomState(): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyCrypto = crypto as any;
@@ -9,12 +10,11 @@ function randomState(): string {
   return `st_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-export function buildGoogleAuthUrl(params: {
-  clientId: string;
-  redirectUri: string;
-  scope: string;
-  state: string;
-}): string {
+/**
+ * Собрать URL авторизации Google OAuth2 для loopback потока.
+ * Важно: используем `access_type=offline` и `prompt=consent`, чтобы получить `refresh_token`.
+ */
+export function buildGoogleAuthUrl(params: { clientId: string; redirectUri: string; scope: string; state: string }): string {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", params.clientId);
   url.searchParams.set("redirect_uri", params.redirectUri);
@@ -27,6 +27,10 @@ export function buildGoogleAuthUrl(params: {
   return url.toString();
 }
 
+/**
+ * Запустить loopback OAuth: поднимаем локальный HTTP сервер на 127.0.0.1,
+ * открываем браузер на страницу авторизации, принимаем callback и обмениваем code на tokens.
+ */
 export async function runGoogleLoopbackOAuth(params: {
   clientId: string;
   clientSecret: string;
@@ -35,7 +39,25 @@ export async function runGoogleLoopbackOAuth(params: {
   timeoutMs?: number;
 }): Promise<{ refreshToken: string }> {
   const state = randomState();
-  const { server, redirectUri, waitForCode } = await startLoopbackServer({ state });
+  const { server, redirectUri, waitForResult } = await startLoopbackServer({
+    state,
+    onCode: async ({ code, redirectUri }) => {
+      const tokens = await exchangeGoogleCodeForTokens({
+        code,
+        clientId: params.clientId,
+        clientSecret: params.clientSecret,
+        redirectUri,
+      });
+      const refreshToken = String(tokens.refresh_token ?? "");
+      if (!refreshToken) {
+        throw new Error(
+          "Google OAuth: refresh_token не получен. " +
+            "Обычно помогает: удалить доступ приложения в Google Account → Security → Third-party access, и авторизоваться заново.",
+        );
+      }
+      return { refreshToken };
+    },
+  });
   const authUrl = buildGoogleAuthUrl({
     clientId: params.clientId,
     redirectUri,
@@ -46,24 +68,10 @@ export async function runGoogleLoopbackOAuth(params: {
   params.openExternal(authUrl);
 
   try {
-    const { code } = await withTimeout(waitForCode(), params.timeoutMs ?? 120_000);
-    const tokens = await exchangeGoogleCodeForTokens({
-      code,
-      clientId: params.clientId,
-      clientSecret: params.clientSecret,
-      redirectUri,
-    });
-    const refreshToken = String(tokens.refresh_token ?? "");
-    if (!refreshToken) {
-      throw new Error(
-        "Google OAuth: refresh_token не получен. " +
-          "Обычно помогает: удалить доступ приложения в Google Account → Security → Third-party access, и авторизоваться заново.",
-      );
-    }
-    return { refreshToken };
+    return await withTimeout(waitForResult(), params.timeoutMs ?? 120_000);
   } finally {
-    // Даем браузеру шанс сходить на /finish после 302 с callback, иначе можно словить "site can't be reached"
-    // на медленных/загруженных системах (exchange может успеть закрыть сервер слишком быстро).
+    // Даём браузеру шанс сходить на /finish|/error после 302 с callback, иначе можно словить “сайт недоступен”
+    // на медленных/загруженных системах (обмен кода на токены может закрыть сервер слишком быстро).
     window.setTimeout(() => server.close(), 1500);
   }
 }
@@ -93,42 +101,61 @@ async function exchangeGoogleCodeForTokens(params: {
   });
 
   if (res.status < 200 || res.status >= 300) {
-    const reason = (res.text ?? "").slice(0, 400);
-    throw new Error(`Google OAuth token exchange failed: HTTP ${res.status}: ${reason}`);
+    const raw = res.text ?? "";
+    const reason = raw.slice(0, 400);
+    try {
+      const json = JSON.parse(raw) as { error?: string; error_description?: string };
+      if (res.status === 401 && json?.error === "invalid_client") {
+        const desc = json?.error_description ? ` (${json.error_description})` : "";
+        throw new Error(
+          "Google OAuth: обмен кода на токены не удался: invalid_client" +
+            desc +
+            ". Проверьте clientId/clientSecret. " +
+            "Для loopback (127.0.0.1 с динамическим портом) рекомендуем OAuth Client ID типа «Desktop app».",
+        );
+      }
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new Error(`Google OAuth: обмен кода на токены не удался: HTTP ${res.status}: ${reason}`);
   }
 
   try {
-    // requestUrl already parses json sometimes, but keep it deterministic
+    // requestUrl иногда уже парсит json, но нам важно единообразие/детерминизм.
     return JSON.parse(res.text ?? "{}") as Record<string, unknown>;
   } catch (e) {
-    throw new Error(`Google OAuth token exchange: invalid JSON response: ${(res.text ?? "").slice(0, 200)}`);
+    throw new Error(`Google OAuth: обмен кода на токены вернул некорректный JSON: ${(res.text ?? "").slice(0, 200)}`);
   }
 }
 
-async function startLoopbackServer(params: { state: string }): Promise<{
+async function startLoopbackServer(params: {
+  state: string;
+  onCode: (p: { code: string; redirectUri: string }) => Promise<{ refreshToken: string }>;
+}): Promise<{
   server: import("http").Server;
   redirectUri: string;
-  waitForCode: () => Promise<CodeResult>;
+  waitForResult: () => Promise<{ refreshToken: string }>;
 }> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const http = require("http") as typeof import("http");
 
-  let resolve!: (r: CodeResult) => void;
+  let resolve!: (r: { refreshToken: string }) => void;
   let reject!: (e: unknown) => void;
-  const promise = new Promise<CodeResult>((res, rej) => {
+  const promise = new Promise<{ refreshToken: string }>((res, rej) => {
     resolve = res;
     reject = rej;
   });
 
   let lastError: string | null = null;
+  let redirectUri = "";
 
   const server = http.createServer((req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
       // Красивые страницы без параметров в адресе:
-      // - /finish: success
-      // - /error: error (последняя ошибка берётся из памяти сервера)
+      // - /finish: успех
+      // - /error: ошибка (последняя ошибка берётся из памяти сервера)
       if (url.pathname === "/finish") {
         res.writeHead(200, {
           "content-type": "text/html; charset=utf-8",
@@ -142,13 +169,13 @@ async function startLoopbackServer(params: { state: string }): Promise<{
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
         });
-        res.end(renderOAuthResultPage({ kind: "error", details: lastError ?? "Unknown error" }));
+        res.end(renderOAuthResultPage({ kind: "error", details: lastError ?? "Неизвестная ошибка" }));
         return;
       }
 
       if (url.pathname !== "/assistant-oauth-callback") {
         res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-        res.end("Not found");
+        res.end("Не найдено");
         return;
       }
 
@@ -160,25 +187,35 @@ async function startLoopbackServer(params: { state: string }): Promise<{
         lastError = error;
         res.writeHead(302, { location: "/error", "cache-control": "no-store" });
         res.end();
-        reject(new Error(`Google OAuth error: ${error}`));
+        reject(new Error(`Google OAuth: ошибка: ${error}`));
         return;
       }
       if (!code || !state || state !== params.state) {
         lastError = "Некорректный callback (state/code)";
         res.writeHead(302, { location: "/error", "cache-control": "no-store" });
         res.end();
-        reject(new Error("Google OAuth: invalid callback state/code"));
+        reject(new Error("Google OAuth: некорректный callback state/code"));
         return;
       }
 
-      // Успех: убираем query из адреса через редирект и показываем красивую страницу.
-      // Важно: resolve() вызываем до редиректа, чтобы основной поток мог продолжить exchange токенов.
-      resolve({ code, state });
-      res.writeHead(302, { location: "/finish", "cache-control": "no-store" });
-      res.end();
+      // Важно: считаем успехом только получение refresh_token.
+      // Иначе будет ложное “Авторизация завершена”, но Obsidian останется без токена.
+      Promise.resolve()
+        .then(async () => {
+          const out = await params.onCode({ code, redirectUri });
+          resolve(out);
+          res.writeHead(302, { location: "/finish", "cache-control": "no-store" });
+          res.end();
+        })
+        .catch((e) => {
+          lastError = String((e as unknown) ?? "неизвестная ошибка");
+          res.writeHead(302, { location: "/error", "cache-control": "no-store" });
+          res.end();
+          reject(e);
+        });
     } catch (e) {
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-      res.end("Internal error");
+      res.end("Внутренняя ошибка");
       reject(e);
     }
   });
@@ -190,17 +227,18 @@ async function startLoopbackServer(params: { state: string }): Promise<{
 
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
-  const redirectUri = `http://127.0.0.1:${port}/assistant-oauth-callback`;
+  redirectUri = `http://127.0.0.1:${port}/assistant-oauth-callback`;
 
   return {
     server,
     redirectUri,
-    waitForCode: () => promise,
+    waitForResult: () => promise,
   };
 }
 
 function escapeHtml(s: string): string {
-  return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  // Не используем String.prototype.replaceAll, чтобы не повышать target/lib выше ES2018.
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function renderOAuthResultPage(params: { kind: "success" } | { kind: "error"; details: string }): string {
@@ -212,9 +250,7 @@ function renderOAuthResultPage(params: { kind: "success" } | { kind: "error"; de
     ? "Можете закрыть окно браузера и вернуться в Obsidian."
     : "Вернитесь в Obsidian — там будет подробная ошибка. Если нужно, повторите авторизацию.";
   const details =
-    params.kind === "error"
-      ? `<div class="details"><div class="label">Детали:</div><pre>${escapeHtml(params.details)}</pre></div>`
-      : "";
+    params.kind === "error" ? `<div class="details"><div class="label">Детали:</div><pre>${escapeHtml(params.details)}</pre></div>` : "";
 
   return `<!doctype html>
 <html lang="ru">
@@ -280,4 +316,3 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     );
   });
 }
-

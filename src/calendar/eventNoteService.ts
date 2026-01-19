@@ -1,41 +1,57 @@
-import type { App, TAbstractFile, TFile, Vault } from "obsidian";
+import type { App, TFile, Vault } from "obsidian";
 import { normalizePath } from "obsidian";
 import type { CalendarEvent } from "../types";
 import { ensureFolder } from "../vault/ensureFolder";
 import { revealOrOpenInNewLeaf } from "../vault/revealOrOpenFile";
 import { makeEventKey, shortStableId } from "../ids/stableIds";
 import { sanitizeFileName } from "../vault/fileNaming";
+import { ensureFile, isTFile } from "../vault/ensureFile";
+import { yamlEscape } from "../vault/yamlEscape";
 
+/**
+ * Сервис заметок встреч (md-файлы в vault).
+ *
+ * Отвечает за:
+ * - расчёт пути файла встречи (стабильность через `[sid]`)
+ * - создание/обновление файла встречи
+ * - связь “встреча ↔ протоколы” через секцию `ASSISTANT:PROTOCOLS`
+ */
 export class EventNoteService {
   private app: App;
   private vault: Vault;
   private eventsDir: string;
 
+  /** @param eventsDir Папка встреч в vault. */
   constructor(app: App, eventsDir: string) {
     this.app = app;
     this.vault = app.vault;
     this.eventsDir = normalizePath(eventsDir);
   }
 
+  /** Обновить папку встреч (например после изменения настроек). */
   setEventsDir(eventsDir: string) {
     this.eventsDir = normalizePath(eventsDir);
   }
 
+  /** Рассчитать “идеальный” путь файла встречи по событию. */
   getEventFilePath(ev: CalendarEvent): string {
-    // Stable id keeps file stable even if summary changes; summary stays "pretty".
+    // Стабильный id удерживает путь файла стабильным даже при изменении summary; summary остаётся “красивым”.
     const eventKey = makeEventKey(ev.calendarId, ev.uid);
     const sid = shortStableId(eventKey, 6);
     const pretty = sanitizeFileName(ev.summary).slice(0, 80);
     return normalizePath(`${this.eventsDir}/${pretty} [${sid}].md`);
   }
 
+  /** Синхронизировать набор событий в vault (создать/обновить файлы встреч). */
   async syncEvents(events: CalendarEvent[]) {
     await ensureFolder(this.vault, this.eventsDir);
+    const sidIndex = this.buildStableIdIndex();
     for (const ev of events) {
-      await this.upsertEvent(ev);
+      await this.upsertEvent(ev, sidIndex);
     }
   }
 
+  /** Открыть (или создать) файл встречи в новой вкладке. */
   async openEvent(ev: CalendarEvent) {
     const filePath = await this.resolveEventFilePath(ev);
     await ensureFolder(this.vault, this.eventsDir);
@@ -43,12 +59,14 @@ export class EventNoteService {
     await revealOrOpenInNewLeaf(this.app, file);
   }
 
+  /** Убедиться, что файл встречи существует, и вернуть `TFile`. */
   async ensureEventFile(ev: CalendarEvent): Promise<TFile> {
     const filePath = await this.resolveEventFilePath(ev);
     await ensureFolder(this.vault, this.eventsDir);
     return await ensureFile(this.vault, filePath, renderEventFile(ev, true));
   }
 
+  /** Добавить ссылку на протокол в секцию “Протоколы” в файле встречи. */
   async linkProtocol(ev: CalendarEvent, protocolFile: TFile) {
     const evFile = await this.ensureEventFile(ev);
     const cur = await this.vault.read(evFile);
@@ -58,6 +76,7 @@ export class EventNoteService {
     if (updated !== cur) await this.vault.modify(evFile, updated);
   }
 
+  /** Список файлов протоколов, связанных со встречей (парсинг wiki-link из секции “Протоколы”). */
   async listProtocolFiles(ev: CalendarEvent): Promise<TFile[]> {
     const evFile = await this.ensureEventFile(ev);
     const cur = await this.vault.read(evFile);
@@ -72,6 +91,7 @@ export class EventNoteService {
     return out;
   }
 
+  /** Список протоколов + дата `start` (если удалось извлечь из frontmatter). */
   async listProtocolInfos(ev: CalendarEvent): Promise<Array<{ file: TFile; start?: Date }>> {
     const files = await this.listProtocolFiles(ev);
     const out: Array<{ file: TFile; start?: Date }> = [];
@@ -79,7 +99,7 @@ export class EventNoteService {
       const start = this.getFileFrontmatterDate(f, "start");
       out.push({ file: f, start });
     }
-    // Sort latest-first; items without start go last
+    // Сортируем “последние сверху”; элементы без start — в конце.
     out.sort((a, b) => {
       const at = a.start?.getTime();
       const bt = b.start?.getTime();
@@ -103,6 +123,7 @@ export class EventNoteService {
     return undefined;
   }
 
+  /** Пометить встречу как отменённую (в пользовательской секции файла встречи). */
   async markCancelled(ev: CalendarEvent) {
     const evFile = await this.ensureEventFile(ev);
     const cur = await this.vault.read(evFile);
@@ -110,8 +131,8 @@ export class EventNoteService {
     if (updated !== cur) await this.vault.modify(evFile, updated);
   }
 
-  private async upsertEvent(ev: CalendarEvent) {
-    const filePath = await this.resolveEventFilePath(ev);
+  private async upsertEvent(ev: CalendarEvent, sidIndex?: Map<string, TFile>) {
+    const filePath = await this.resolveEventFilePath(ev, sidIndex);
     const existing = this.vault.getAbstractFileByPath(filePath);
     if (existing && isTFile(existing)) {
       const cur = await this.vault.read(existing);
@@ -122,23 +143,40 @@ export class EventNoteService {
     await ensureFile(this.vault, filePath, renderEventFile(ev, true));
   }
 
-  private async resolveEventFilePath(ev: CalendarEvent): Promise<string> {
+  private async resolveEventFilePath(ev: CalendarEvent, sidIndex?: Map<string, TFile>): Promise<string> {
     const target = this.getEventFilePath(ev);
     const eventKey = makeEventKey(ev.calendarId, ev.uid);
     const sid = shortStableId(eventKey, 6);
 
-    const existingBySid = this.findEventFileByStableId(sid);
+    const existingBySid = sidIndex?.get(sid) ?? this.findEventFileByStableId(sid);
     if (existingBySid && existingBySid.path !== target) {
-      // Rename to keep filename pretty when summary changes, but keep stable identity via [sid].
+      // Переименовываем для “красивого” имени при изменении summary, но сохраняем стабильность через [sid].
       try {
         await this.vault.rename(existingBySid, target);
+        sidIndex?.set(sid, existingBySid);
         return target;
       } catch {
-        // If rename fails (conflict/permissions), fall back to existing path.
+        // Если rename не удался (конфликт/права) — остаёмся на текущем пути.
         return existingBySid.path;
       }
     }
     return target;
+  }
+
+  /**
+   * Build index of existing event notes in eventsDir: stableId (sid) -> file
+   * This avoids O(N vault files) scans per event during syncEvents().
+   */
+  private buildStableIdIndex(): Map<string, TFile> {
+    const dirPrefix = normalizePath(this.eventsDir) + "/";
+    const out = new Map<string, TFile>();
+    const files = this.vault.getFiles();
+    for (const f of files) {
+      if (!f.path.startsWith(dirPrefix)) continue;
+      const sid = extractStableIdFromPath(f.path);
+      if (sid) out.set(sid, f);
+    }
+    return out;
   }
 
   private findEventFileByStableId(sid: string): TFile | undefined {
@@ -151,6 +189,12 @@ export class EventNoteService {
     }
     return undefined;
   }
+}
+
+function extractStableIdFromPath(path: string): string | null {
+  // Ожидаемый суффикс: " [abcdef].md" (длина sid сейчас 6)
+  const m = path.match(/ \[([0-9a-fA-F]{6})\]\.md$/);
+  return m ? (m[1] ?? "").toLowerCase() : null;
 }
 
 function renderEventFile(ev: CalendarEvent, includeUserSections: boolean): string {
@@ -166,6 +210,7 @@ function renderEventFile(ev: CalendarEvent, includeUserSections: boolean): strin
     `summary: ${yamlEscape(ev.summary)}`,
     `start: ${yamlEscape(startIso)}`,
     `end: ${yamlEscape(endIso)}`,
+    ev.myPartstat ? `my_partstat: ${yamlEscape(ev.myPartstat)}` : "",
     ev.url ? `url: ${yamlEscape(ev.url)}` : "",
     ev.location ? `location: ${yamlEscape(ev.location)}` : "",
     "---",
@@ -187,40 +232,29 @@ function renderEventFile(ev: CalendarEvent, includeUserSections: boolean): strin
   const base = header.endsWith("\n") ? header : header + "\n";
   if (!includeUserSections) return base;
 
-  return (
-    base +
-    [
-      "",
-      "- (пока пусто)",
-      "",
-      "## Заметки",
-      "",
-      "<!-- ASSISTANT:USER -->",
-      "",
-    ].join("\n")
-  );
+  return base + ["", "- (пока пусто)", "", "## Заметки", "", "<!-- ASSISTANT:USER -->", ""].join("\n");
 }
 
 function mergePreservingSections(existing: string, regenerated: string): string {
-  // Back-compat: older versions used ASSISTANT:NOTES as the only preserved marker.
+  // Обратная совместимость: старые версии использовали ASSISTANT:NOTES как единственный маркер сохранённых секций.
   const userMarkerNew = "<!-- ASSISTANT:USER -->";
   const userMarkerOld = "<!-- ASSISTANT:NOTES -->";
   const protocolsMarkerNew = "<!-- ASSISTANT:PROTOCOLS -->";
 
-  // Extract user content
+  // Извлекаем пользовательский контент
   const userIdxNew = existing.indexOf(userMarkerNew);
   const userIdxOld = existing.indexOf(userMarkerOld);
   const userMarker = userIdxNew !== -1 ? userMarkerNew : userMarkerOld;
   const userIdx = userIdxNew !== -1 ? userIdxNew : userIdxOld;
   const userTail = userIdx === -1 ? "" : existing.slice(userIdx + userMarker.length).trimStart();
 
-  // Extract protocols list (prefer marker, fallback to section heading)
+  // Извлекаем список протоколов (предпочитаем marker, иначе fallback на заголовок секции)
   const protocolsBody = extractProtocolsBody(existing);
 
-  // Apply into regenerated template
+  // Вклеиваем в заново сгенерированный шаблон
   let out = regenerated;
 
-  // Inject protocols body
+  // Вставляем тело секции “Протоколы”
   const regenProtoIdx = out.indexOf(protocolsMarkerNew);
   if (regenProtoIdx !== -1) {
     const insertAt = regenProtoIdx + protocolsMarkerNew.length;
@@ -234,26 +268,23 @@ function mergePreservingSections(existing: string, regenerated: string): string 
     out = beforePart + normalizedBody + afterPart;
   }
 
-  // Inject user tail
+  // Вставляем сохранённый “хвост” пользовательской секции
   const regenUserIdx = out.indexOf(userMarkerNew);
   if (regenUserIdx !== -1) {
     const before = out.slice(0, regenUserIdx + userMarkerNew.length);
     const after = out.slice(regenUserIdx + userMarkerNew.length);
-    // remove everything after marker in regenerated, replace with preserved
+    // Удаляем всё после marker в regenerated и заменяем сохранённым содержимым.
     out = before + "\n" + (userTail ? userTail.trimStart() : "") + "\n";
-    // keep a trailing newline
+    // Сохраняем завершающий перевод строки
     if (!out.endsWith("\n")) out += "\n";
-    // ignore old regenerated tail
+    // Игнорируем старый regenerated tail
     void after;
   }
 
   return out;
 }
 
-function yamlEscape(v: string): string {
-  const s = (v ?? "").replace(/\r?\n/g, " ").trim();
-  return JSON.stringify(s);
-}
+// yamlEscape перенесён в src/vault/yamlEscape.ts
 
 function extractProtocolsBody(text: string): string {
   const protocolsMarkerNew = "<!-- ASSISTANT:PROTOCOLS -->";
@@ -272,19 +303,15 @@ function extractProtocolsBody(text: string): string {
     return after.slice(0, end).trim();
   }
 
-  // Fallback: parse between heading and next "##"
+  // Fallback: парсим между заголовком секции и следующим "##"
   const heading = "## Протоколы";
   const hIdx = text.indexOf(heading);
   if (hIdx === -1) return "";
   const afterH = text.slice(hIdx + heading.length);
   const endByNext = afterH.search(/\n##\s+/);
   const body = endByNext === -1 ? afterH : afterH.slice(0, endByNext);
-  // remove possible markers
-  return body
-    .replace(protocolsMarkerNew, "")
-    .replace(userMarkerNew, "")
-    .replace(userMarkerOld, "")
-    .trim();
+  // Убираем возможные маркеры
+  return body.replace(protocolsMarkerNew, "").replace(userMarkerNew, "").replace(userMarkerOld, "").trim();
 }
 
 function extractWikiLinkTargets(text: string): string[] {
@@ -305,7 +332,7 @@ function upsertProtocolLink(text: string, linkLine: string): string {
   const idx = text.indexOf(protocolsMarkerNew);
 
   if (idx === -1) {
-    // Fallback: append into (or create) protocols section
+    // Fallback: дописываем в секцию протоколов (или создаём её)
     const heading = "## Протоколы";
     const hIdx = text.indexOf(heading);
     if (hIdx === -1) return text + `\n\n${heading}\n${protocolsMarkerNew}\n${linkLine}\n`;
@@ -317,7 +344,7 @@ function upsertProtocolLink(text: string, linkLine: string): string {
   const before = text.slice(0, insertAt);
   const after = text.slice(insertAt);
 
-  // remove placeholder if present at start of meetings body
+  // Убираем placeholder, если он стоит в начале тела секции
   const cleanedAfter = after.replace(/^\s*\n- \(пока пусто\)\s*\n/, "\n");
   return before + `\n${linkLine}\n` + cleanedAfter;
 }
@@ -339,14 +366,4 @@ function upsertCancelledFlagInUserSection(text: string): string {
   return head + "\n" + line + "\n" + tail.trimStart();
 }
 
-async function ensureFile(vault: Vault, filePath: string, initial: string): Promise<TFile> {
-  const existing = vault.getAbstractFileByPath(filePath);
-  if (existing && isTFile(existing)) return existing;
-  return await vault.create(filePath, initial);
-}
-
-function isTFile(f: TAbstractFile): f is TFile {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (f as any)?.extension != null;
-}
-
+// ensureFile перенесён в src/vault/ensureFile.ts

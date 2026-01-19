@@ -46,15 +46,9 @@ describe("parseIcs", () => {
   });
 
   it("parses all-day date format", () => {
-    const ics = [
-      "BEGIN:VCALENDAR",
-      "BEGIN:VEVENT",
-      "UID:day-1",
-      "DTSTART:20260118",
-      "SUMMARY:All day",
-      "END:VEVENT",
-      "END:VCALENDAR",
-    ].join("\n");
+    const ics = ["BEGIN:VCALENDAR", "BEGIN:VEVENT", "UID:day-1", "DTSTART:20260118", "SUMMARY:All day", "END:VEVENT", "END:VCALENDAR"].join(
+      "\n",
+    );
 
     const events = parseIcs("cal1", ics);
     expect(events).toHaveLength(1);
@@ -102,5 +96,67 @@ describe("parseIcs", () => {
     expect(events).toHaveLength(1);
     expect(events[0].myPartstat).toBe("accepted");
   });
-});
 
+  it("parses other PARTSTAT variants and ignores non-matching emails", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:inv-2",
+      "DTSTART:20260118T120000Z",
+      "SUMMARY:Invite",
+      "ATTENDEE;PARTSTAT=DECLINED:mailto:me@example.com",
+      "ATTENDEE;PARTSTAT=TENTATIVE:mailto:other@example.com",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\n");
+
+    const events = parseIcs("cal1", ics, { myEmail: "me@example.com" });
+    expect(events).toHaveLength(1);
+    expect(events[0].myPartstat).toBe("declined");
+  });
+
+  it("expands weekly RRULE with BYDAY and EXDATE", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:w-1",
+      "DTSTART:20260105T120000Z",
+      "DTEND:20260105T123000Z",
+      "RRULE:FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4",
+      "EXDATE:20260107T120000Z",
+      "SUMMARY:Weekly",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\n");
+
+    const events = parseIcs("cal1", ics, { now: new Date("2026-01-05T00:00:00.000Z"), horizonDays: 20 });
+    // базовое MO (05), затем WE (07) исключено, затем MO (12), WE (14), MO (19) — но COUNT=4 => всего 4 occurrences
+    expect(events.map((e) => e.start.toISOString())).toEqual([
+      "2026-01-05T12:00:00.000Z",
+      "2026-01-12T12:00:00.000Z",
+      "2026-01-14T12:00:00.000Z",
+      "2026-01-19T12:00:00.000Z",
+    ]);
+  });
+
+  it("cuts RRULE by UNTIL", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:d-2",
+      "DTSTART:20260101T120000Z",
+      "DTEND:20260101T123000Z",
+      "RRULE:FREQ=DAILY;UNTIL=20260103T120000Z",
+      "SUMMARY:Daily",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\n");
+
+    const events = parseIcs("cal1", ics, { now: new Date("2026-01-01T00:00:00.000Z"), horizonDays: 10 });
+    expect(events.map((e) => e.start.toISOString())).toEqual([
+      "2026-01-01T12:00:00.000Z",
+      "2026-01-02T12:00:00.000Z",
+      "2026-01-03T12:00:00.000Z",
+    ]);
+  });
+});
