@@ -1,7 +1,9 @@
-import type { AssistantSettings, CalendarConfig, CalendarEvent } from "../types";
+import type { AssistantSettings, CalendarConfig, Event } from "../types";
 import { IcsUrlProvider } from "./providers/icsUrlProvider";
 import { CaldavProvider } from "./providers/caldavProvider";
 import { CalendarEventStore } from "./store/calendarEventStore";
+import type { RefreshResult } from "./store/calendarEventStore";
+import { MS_PER_HOUR, NOTIFICATIONS_HORIZON_HOURS } from "./constants";
 
 type Listener = () => void;
 
@@ -47,8 +49,35 @@ export class CalendarService {
   }
 
   /** Текущий “снимок” событий (включая кэш/статус stale при проблемах сети). */
-  getEvents(): CalendarEvent[] {
+  getEvents(): Event[] {
     return this.store.getEvents();
+  }
+
+  /** Единый контракт состояния (events + perCalendar + updatedAt). */
+  getRefreshResult(): RefreshResult {
+    return this.store.getRefreshResult();
+  }
+
+  /** События на день (локальное время). */
+  getDayEvents(dayOffset: number, maxEvents: number): Event[] {
+    const max = Math.max(1, Number(maxEvents) || 1);
+    return this.store.getDay(dayOffset).slice(0, max);
+  }
+
+  /** События в диапазоне времени. */
+  getRangeEvents(start: Date, end: Date): Event[] {
+    return this.store.getRange(start, end);
+  }
+
+  /** Ближайшие события для планирования уведомлений (в горизонте). */
+  getUpcomingEventsForNotifications(): Event[] {
+    const horizonMs = NOTIFICATIONS_HORIZON_HOURS * MS_PER_HOUR;
+    return this.store.getUpcoming(horizonMs);
+  }
+
+  /** Найти событие по стабильному ключу (`calendar_id:event_id`). */
+  getEventByEventKey(eventKey: string): Event | null {
+    return this.store.getByEventKey(eventKey);
   }
 
   /** Статус данных по календарям (fresh/stale + время/ошибка). */
@@ -57,11 +86,25 @@ export class CalendarService {
   }
 
   /**
+   * Изменить мой статус участия (PARTSTAT) в календаре и обновить данные.
+   *
+   * Важно: поддерживается только CalDAV (ICS URL — read-only).
+   */
+  async setMyPartstat(ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> {
+    const cal = this.settings.calendars.find((c) => c.id === ev.calendar.id);
+    if (!cal) throw new Error("Календарь не найден");
+    if (!cal.enabled) throw new Error("Календарь отключён");
+    if (cal.type !== "caldav") throw new Error("Этот календарь read-only (ICS URL не поддерживает запись)");
+    await this.caldavProvider.setMyPartstat(cal, ev, partstat);
+    await this.refreshOneAndMerge(cal.id);
+  }
+
+  /**
    * Инициализировать in-memory стор данными из persistent cache (после рестарта).
    *
    * Семантика: кэш считается “stale”, пока не будет успешного refresh.
    */
-  seedFromCache(params: { enabledCalendarIds: string[]; lastGood: Record<string, { fetchedAt: number; events: CalendarEvent[] }> }): void {
+  seedFromCache(params: { enabledCalendarIds: string[]; lastGood: Record<string, { fetchedAt: number; events: Event[] }> }): void {
     this.store.seedFromCache({
       enabledCalendarIds: params.enabledCalendarIds,
       lastGood: params.lastGood,
@@ -70,14 +113,14 @@ export class CalendarService {
   }
 
   /** Экспортировать lastGood данные для persistent cache. */
-  exportLastGoodForCache(params: { enabledCalendarIds: string[] }): Record<string, { fetchedAt: number; events: CalendarEvent[] }> {
+  exportLastGoodForCache(params: { enabledCalendarIds: string[] }): Record<string, { fetchedAt: number; events: Event[] }> {
     return this.store.exportLastGoodSnapshot({ enabledCalendarIds: params.enabledCalendarIds });
   }
 
   /**
    * Обновить один календарь и аккуратно смержить результат с остальными (чтобы не терять кэш по другим календарям).
    */
-  async refreshOneAndMerge(calendarId: string): Promise<{ events: CalendarEvent[]; errors: CalendarRefreshError[] }> {
+  async refreshOneAndMerge(calendarId: string): Promise<{ events: Event[]; errors: CalendarRefreshError[] }> {
     const cal = this.settings.calendars.find((c) => c.id === calendarId);
     if (!cal) {
       return {
@@ -114,7 +157,7 @@ export class CalendarService {
    * Обновить все включённые календари.
    * При ошибках не “обнуляет” данные: стор переводит календарь в stale и оставляет lastGood (если был).
    */
-  async refreshAll(): Promise<{ events: CalendarEvent[]; errors: CalendarRefreshError[] }> {
+  async refreshAll(): Promise<{ events: Event[]; errors: CalendarRefreshError[] }> {
     const enabled = this.settings.calendars.filter((c) => c.enabled);
     const errors: CalendarRefreshError[] = [];
 
@@ -126,7 +169,7 @@ export class CalendarService {
 
     const fetchedAt = Date.now();
     const batchResults: Array<
-      { calendarId: string; ok: true; fetchedAt: number; events: CalendarEvent[] } | { calendarId: string; ok: false; error: string }
+      { calendarId: string; ok: true; fetchedAt: number; events: Event[] } | { calendarId: string; ok: false; error: string }
     > = [];
 
     for (let i = 0; i < results.length; i++) {
@@ -154,7 +197,7 @@ export class CalendarService {
     return { events: this.getEvents(), errors };
   }
 
-  private async refreshOneCalendar(cal: CalendarConfig): Promise<CalendarEvent[]> {
+  private async refreshOneCalendar(cal: CalendarConfig): Promise<Event[]> {
     if (cal.type === "ics_url") return await this.icsUrlProvider.refresh(cal);
     if (cal.type === "caldav") return await this.caldavProvider.refresh(cal);
     return [];

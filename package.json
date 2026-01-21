@@ -26,6 +26,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "fix-webm-duration": "^1.0.6",
     "tsdav": "^2.1.6"
   }
 }

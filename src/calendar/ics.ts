@@ -1,4 +1,4 @@
-import type { CalendarEvent, CalendarId } from "../types";
+import type { Calendar, Event, EventColor, EventReminderDto, EventRecurrenceDto, Person } from "../types";
 
 // Минимальный ICS (VEVENT) парсер для MVP.
 // Поддерживаемые поля: UID, DTSTART, DTEND, SUMMARY, DESCRIPTION, LOCATION, URL, RRULE, EXDATE, ATTENDEE(PARTSTAT)
@@ -9,31 +9,37 @@ import type { CalendarEvent, CalendarId } from "../types";
  * Важно: это MVP-парсер, покрывающий базовый набор полей и простые RRULE (в пределах горизонта).
  */
 export function parseIcs(
-  calendarId: CalendarId,
+  calendar: Calendar,
   icsText: string,
   opts?: {
     now?: Date;
     horizonDays?: number;
     myEmail?: string;
   },
-): CalendarEvent[] {
+): Event[] {
   const lines = unfoldLines(icsText);
-  const events: CalendarEvent[] = [];
+  const vevents: ParsedVEvent[] = [];
 
   let inEvent = false;
+  let inAlarm = false;
+  let alarmCur: { trigger?: string; action?: string; description?: string } | null = null;
   let cur: ParsedVEvent = createEmptyEvent();
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
     if (line === "BEGIN:VEVENT") {
       inEvent = true;
+      inAlarm = false;
+      alarmCur = null;
       cur = createEmptyEvent();
       continue;
     }
     if (line === "END:VEVENT") {
       if (inEvent) {
-        const evs = toEvents(calendarId, cur, opts);
-        events.push(...evs);
+        // Если VALARM не был корректно закрыт — просто сбрасываем.
+        inAlarm = false;
+        alarmCur = null;
+        vevents.push(cur);
       }
       inEvent = false;
       cur = createEmptyEvent();
@@ -41,12 +47,71 @@ export function parseIcs(
     }
     if (!inEvent) continue;
 
+    // VALARM внутри VEVENT
+    if (line === "BEGIN:VALARM") {
+      inAlarm = true;
+      alarmCur = {};
+      continue;
+    }
+    if (line === "END:VALARM") {
+      if (inAlarm && alarmCur) cur.reminders.push(alarmCur);
+      inAlarm = false;
+      alarmCur = null;
+      continue;
+    }
+
     const cl = parseContentLine(line);
     if (!cl) continue;
+
+    if (inAlarm && alarmCur) {
+      if (cl.name === "TRIGGER") alarmCur.trigger = cl.value.trim();
+      else if (cl.name === "ACTION") alarmCur.action = cl.value.trim();
+      else if (cl.name === "DESCRIPTION") alarmCur.description = cl.value.trim();
+      continue;
+    }
     applyContentLine(cur, cl);
   }
 
-  return events;
+  // Two-pass: CalDAV/ICS может содержать master (RRULE) и отдельные overrides (RECURRENCE-ID).
+  // Если не исключить overrides, получим дубли одного и того же occurrence в повестке.
+  const overridesByUidStart = new Map<string, Set<number>>();
+  for (const ve of vevents) {
+    const uid = (ve.single.UID ?? "").trim();
+    const dtStartRaw = (ve.single.DTSTART ?? "").trim();
+    const recurrenceRaw = (ve.single["RECURRENCE-ID"] ?? "").trim();
+    if (!uid || !dtStartRaw || !recurrenceRaw) continue;
+    const start = parseIcsDate(dtStartRaw);
+    if (!start) continue;
+    let set = overridesByUidStart.get(uid);
+    if (!set) {
+      set = new Set<number>();
+      overridesByUidStart.set(uid, set);
+    }
+    set.add(start.getTime());
+  }
+
+  const out: Event[] = [];
+  for (const ve of vevents) {
+    const uid = (ve.single.UID ?? "").trim();
+    const blocked = uid ? overridesByUidStart.get(uid) : undefined;
+    out.push(...toEvents(calendar, ve, opts, blocked));
+  }
+
+  // Финальная страховка от дублей (на случай кривого фида):
+  // дедуп по (calendar.id, event.id, startMs) с приоритетом “более богатых” полей.
+  const byKey = new Map<string, { ev: Event; score: number }>();
+  for (const ev of out) {
+    const key = `${ev.calendar.id}:${ev.id}:${ev.start.getTime()}`;
+    const score =
+      (ev.attendees?.length ? 4 : 0) +
+      (ev.status ? 2 : 0) +
+      (ev.location ? 1 : 0) +
+      (ev.url ? 1 : 0) +
+      (ev.description ? 1 : 0);
+    const prev = byKey.get(key);
+    if (!prev || score >= prev.score) byKey.set(key, { ev, score });
+  }
+  return Array.from(byKey.values()).map((x) => x.ev);
 }
 
 type ContentLine = {
@@ -57,13 +122,16 @@ type ContentLine = {
 
 type ParsedVEvent = {
   single: Partial<Record<string, string>>;
+  singleParams: Partial<Record<string, Record<string, string>>>;
   rrule?: string;
   exdates: string[]; // сырой текст (может содержать список через запятую)
   attendees: Array<{ value: string; params: Record<string, string> }>;
+  organizer?: { value: string; params: Record<string, string> };
+  reminders: Array<{ trigger?: string; action?: string; description?: string }>;
 };
 
 function createEmptyEvent(): ParsedVEvent {
-  return { single: {}, exdates: [], attendees: [] };
+  return { single: {}, singleParams: {}, exdates: [], attendees: [], reminders: [] };
 }
 
 function parseContentLine(line: string): ContentLine | null {
@@ -101,8 +169,16 @@ function applyContentLine(ev: ParsedVEvent, cl: ContentLine) {
     ev.attendees.push({ value: cl.value.trim(), params: cl.params });
     return;
   }
-  // Для скалярных полей сохраняем первое значение.
-  if (ev.single[key] == null) ev.single[key] = cl.value;
+  if (key === "ORGANIZER") {
+    // Берём первый ORGANIZER (в норме он один).
+    if (!ev.organizer) ev.organizer = { value: cl.value.trim(), params: cl.params };
+    return;
+  }
+  // Для скалярных полей сохраняем первое значение + params (TZID/VALUE и т.п.)
+  if (ev.single[key] == null) {
+    ev.single[key] = cl.value;
+    ev.singleParams[key] = cl.params;
+  }
 }
 
 function unfoldLines(text: string): string[] {
@@ -120,11 +196,12 @@ function unfoldLines(text: string): string[] {
 }
 
 function toEvents(
-  calendarId: CalendarId,
+  calendar: Calendar,
   ve: ParsedVEvent,
   opts?: { now?: Date; horizonDays?: number; myEmail?: string },
-): CalendarEvent[] {
-  const base = toBaseEvent(calendarId, ve, opts?.myEmail);
+  blockedStartMs?: Set<number>,
+): Event[] {
+  const base = toBaseEvent(calendar, ve, opts?.myEmail);
   if (!base) return [];
   if (!ve.rrule) return [base];
 
@@ -133,10 +210,10 @@ function toEvents(
   const horizonEnd = new Date(now.getTime() + horizonDays * 24 * 60 * 60_000);
 
   const ex = parseExdates(ve.exdates);
-  return expandRrule(base, ve.rrule, ex, horizonEnd);
+  return expandRrule(base, ve.rrule, ex, horizonEnd, blockedStartMs);
 }
 
-function toBaseEvent(calendarId: CalendarId, ve: ParsedVEvent, myEmail?: string): CalendarEvent | null {
+function toBaseEvent(calendar: Calendar, ve: ParsedVEvent, myEmail?: string): Event | null {
   const fields = ve.single;
   const uid = fields.UID?.trim();
   const dtStartRaw = fields.DTSTART?.trim();
@@ -149,21 +226,36 @@ function toBaseEvent(calendarId: CalendarId, ve: ParsedVEvent, myEmail?: string)
   const dtEndRaw = fields.DTEND?.trim();
   const end = dtEndRaw ? (parseIcsDate(dtEndRaw) ?? undefined) : undefined;
 
-  const allDay = isAllDay(dtStartRaw);
+  const dtStartParams = ve.singleParams.DTSTART ?? {};
+  const dtEndParams = ve.singleParams.DTEND ?? {};
+  const allDay = isAllDay(dtStartRaw, dtStartParams);
 
-  const myPartstat = detectMyPartstat(ve.attendees, myEmail);
+  const timeZone = detectTimeZone(dtStartRaw, dtStartParams, dtEndParams);
+
+  const status = detectMyPartstat(ve.attendees, myEmail);
+  const attendees = parseAttendees(ve.attendees);
+  const organizer = parseOrganizer(ve.organizer);
+  const recurrence = buildRecurrence(ve);
+  const reminders = buildReminders(ve, myEmail);
+  const color = parseEventColor(fields, ve.singleParams);
 
   return {
-    calendarId,
-    uid,
+    calendar,
+    id: uid,
     summary: unescapeText(summary),
     description: fields.DESCRIPTION ? unescapeText(fields.DESCRIPTION) : undefined,
     location: fields.LOCATION ? unescapeText(fields.LOCATION) : undefined,
     url: fields.URL ? fields.URL.trim() : undefined,
     start,
     end,
+    timeZone,
     allDay,
-    myPartstat,
+    status,
+    recurrence,
+    reminders,
+    color,
+    organizer,
+    attendees,
   };
 }
 
@@ -176,12 +268,20 @@ function normalizeEmail(v: string): string {
 function detectMyPartstat(
   attendees: Array<{ value: string; params: Record<string, string> }>,
   myEmail?: string,
-): CalendarEvent["myPartstat"] | undefined {
-  const me = normalizeEmail(myEmail ?? "");
-  if (!me) return undefined;
+): Event["status"] | undefined {
+  const raw = String(myEmail ?? "").trim();
+  if (!raw) return undefined;
+  // Поддерживаем несколько email: "a@b, c@d" / "a@b c@d" / "a@b;c@d"
+  const meSet = new Set(
+    raw
+      .split(/[,\s;]+/g)
+      .map((x) => normalizeEmail(x))
+      .filter(Boolean),
+  );
+  if (meSet.size === 0) return undefined;
   for (const a of attendees) {
     const email = normalizeEmail(a.value);
-    if (!email || email !== me) continue;
+    if (!email || !meSet.has(email)) continue;
     const ps = String(a.params["PARTSTAT"] ?? "").toUpperCase();
     if (ps === "ACCEPTED") return "accepted";
     if (ps === "DECLINED") return "declined";
@@ -192,9 +292,42 @@ function detectMyPartstat(
   return undefined;
 }
 
-function isAllDay(v: string): boolean {
-  // VALUE=DATE обычно приходит в params, но MVP-режим выкидывает params. Используем эвристику:
-  // YYYYMMDD (8 символов) -> “весь день”
+function parseAttendees(attendees: Array<{ value: string; params: Record<string, string> }>): Event["attendees"] {
+  const out: NonNullable<Event["attendees"]> = [];
+  const seen = new Set<string>();
+  for (const a of attendees) {
+    const email = normalizeEmail(a.value);
+    if (!email) continue;
+    if (seen.has(email)) continue;
+    seen.add(email);
+
+    const cnRaw = String(a.params["CN"] ?? "").trim();
+    const partstatRaw = String(a.params["PARTSTAT"] ?? "").trim();
+    const roleRaw = String(a.params["ROLE"] ?? "").trim();
+
+    out.push({
+      email,
+      cn: cnRaw ? cnRaw : undefined,
+      partstat: partstatRaw ? partstatRaw : undefined,
+      role: roleRaw ? roleRaw : undefined,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function parseOrganizer(org?: { value: string; params: Record<string, string> }): Event["organizer"] | undefined {
+  if (!org) return undefined;
+  const email = normalizeEmail(org.value);
+  if (!email) return undefined;
+  const cnRaw = String(org.params?.CN ?? "").trim();
+  const displayName = cnRaw ? cnRaw : undefined;
+  const p: Person = { displayName, emails: email ? [email] : undefined, mailboxes: email ? [email] : undefined };
+  return p;
+}
+
+function isAllDay(v: string, params?: Record<string, string>): boolean {
+  // VALUE=DATE -> “весь день”, иначе fallback на эвристику YYYYMMDD.
+  if (String(params?.VALUE ?? "").toUpperCase() === "DATE") return true;
   return /^\d{8}$/.test(v);
 }
 
@@ -224,6 +357,64 @@ function parseIcsDate(v: string): Date | null {
   return isUtc ? new Date(Date.UTC(y, mo, d, hh, mm, ss, 0)) : new Date(y, mo, d, hh, mm, ss, 0);
 }
 
+function detectTimeZone(dtStartRaw: string, dtStartParams: Record<string, string>, dtEndParams: Record<string, string>): string | undefined {
+  const tzid = String(dtStartParams?.TZID ?? dtEndParams?.TZID ?? "").trim();
+  if (tzid) return tzid;
+  // DTSTART/DTEND с суффиксом Z -> UTC
+  if (/[zZ]$/.test(dtStartRaw)) return "UTC";
+  return undefined;
+}
+
+function buildRecurrence(ve: ParsedVEvent): EventRecurrenceDto | undefined {
+  const recurrenceId = String(ve.single["RECURRENCE-ID"] ?? "").trim();
+  const rrule = String(ve.rrule ?? "").trim();
+  const exdates = ve.exdates.length ? ve.exdates.slice() : [];
+  if (!recurrenceId && !rrule && exdates.length === 0) return undefined;
+  return {
+    recurrenceId: recurrenceId ? recurrenceId : undefined,
+    rrule: rrule ? rrule : undefined,
+    exdates: exdates.length ? exdates : undefined,
+  };
+}
+
+function buildReminders(ve: ParsedVEvent, myEmail?: string): Event["reminders"] | undefined {
+  if (!ve.reminders.length) return undefined;
+  const email = String(myEmail ?? "")
+    .trim()
+    .split(/[,\s;]+/g)
+    .map((x) => normalizeEmail(x))
+    .filter(Boolean)[0];
+  const person: Person = email ? { emails: [email], mailboxes: [email] } : {};
+  return ve.reminders.map((r) => ({
+    trigger: r.trigger,
+    minutesBefore: r.trigger ? parseTriggerMinutesBefore(r.trigger) : undefined,
+    action: r.action,
+    description: r.description,
+    status: "planned",
+    person,
+  }));
+}
+
+function parseTriggerMinutesBefore(trigger: string): number | undefined {
+  const t = String(trigger ?? "").trim();
+  // Пример: -PT5M, -PT15M, -PT1H
+  const m = t.match(/^-(?:P)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
+  if (!m) return undefined;
+  const hh = m[1] ? Number(m[1]) : 0;
+  const mm = m[2] ? Number(m[2]) : 0;
+  const ss = m[3] ? Number(m[3]) : 0;
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return undefined;
+  const totalMin = hh * 60 + mm + (ss > 0 ? 1 : 0);
+  return totalMin > 0 ? totalMin : undefined;
+}
+
+function parseEventColor(fields: Partial<Record<string, string>>, params: Partial<Record<string, Record<string, string>>>): EventColor | undefined {
+  // RFC 7986: COLOR:#RRGGBB
+  const c = String(fields.COLOR ?? "").trim();
+  if (!c) return undefined;
+  return { id: c, value: c };
+}
+
 function unescapeText(s: string): string {
   return s.replace(/\\n/gi, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
 }
@@ -251,7 +442,13 @@ function parseRrule(rrule: string): Record<string, string> {
   return out;
 }
 
-function expandRrule(base: CalendarEvent, rrule: string, exdateMs: number[], horizonEnd: Date): CalendarEvent[] {
+function expandRrule(
+  base: Event,
+  rrule: string,
+  exdateMs: number[],
+  horizonEnd: Date,
+  blockedStartMs?: Set<number>,
+): Event[] {
   const rule = parseRrule(rrule);
   const freq = String(rule["FREQ"] ?? "").toUpperCase();
   const interval = Math.max(1, Number(rule["INTERVAL"] ?? 1) || 1);
@@ -263,11 +460,14 @@ function expandRrule(base: CalendarEvent, rrule: string, exdateMs: number[], hor
 
   const ex = new Set<number>(exdateMs);
 
-  const out: CalendarEvent[] = [];
+  const out: Event[] = [];
   const addOcc = (start: Date) => {
     const sMs = start.getTime();
     if (sMs > hardEnd.getTime()) return;
     if (ex.has(sMs)) return;
+    // Если в фиде есть override VEVENT для этого occurrence — не создаём дубликат из RRULE.
+    // Override будет добавлен отдельным VEVENT без RRULE (см. blockedStartMs).
+    if (blockedStartMs && blockedStartMs.has(sMs)) return;
     const end = durationMs > 0 ? new Date(sMs + durationMs) : undefined;
     out.push({ ...base, start: new Date(sMs), end });
   };

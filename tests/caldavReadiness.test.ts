@@ -16,6 +16,19 @@ function acc(partial: Partial<CaldavAccountConfig>): CaldavAccountConfig {
 }
 
 describe("getCaldavAccountReadiness", () => {
+  it("по умолчанию использует basic (authMethod не задан)", () => {
+    const r = getCaldavAccountReadiness(
+      acc({
+        // authMethod отсутствует → должен считаться basic
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        authMethod: undefined as any,
+        password: "",
+      }),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reasons).toContain("Не задан пароль / пароль приложения");
+  });
+
   it("basic: требует serverUrl/username/password и enabled", () => {
     const r = getCaldavAccountReadiness(
       acc({
@@ -39,6 +52,21 @@ describe("getCaldavAccountReadiness", () => {
         authMethod: "google_oauth",
         password: "",
         oauth: { clientId: "", clientSecret: "", refreshToken: "" },
+      }),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reasons).toContain("Не задан clientId (Google OAuth)");
+    expect(r.reasons).toContain("Не задан clientSecret (Google OAuth)");
+    expect(r.reasons).toContain("Нет refresh‑токена — нажмите «Авторизоваться»");
+  });
+
+  it("google_oauth: если oauth не задан, использует пустые значения и возвращает причины", () => {
+    const r = getCaldavAccountReadiness(
+      acc({
+        authMethod: "google_oauth",
+        password: "",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        oauth: undefined as any,
       }),
     );
     expect(r.ok).toBe(false);

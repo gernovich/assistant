@@ -1,20 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { Notice } from "obsidian";
 import { NotificationScheduler } from "../src/notifications/notificationScheduler";
-import type { AssistantSettings, CalendarEvent } from "../src/types";
+import * as electronWindowReminder from "../src/notifications/electronWindowReminder";
+import type { AssistantSettings, Calendar, Event } from "../src/types";
 
-vi.mock("../src/os/linuxNotify", () => {
-  return {
-    linuxNotifySend: vi.fn(async () => {}),
-    canUseLinuxNotifySend: vi.fn(() => true),
-  };
-});
-
-vi.mock("../src/os/linuxPopup", () => {
-  return {
-    linuxPopupWindow: vi.fn(async () => "close"),
-  };
-});
+function cal(id: string): Calendar {
+  return { id, name: id, type: "ics_url", config: { id, name: id, type: "ics_url", enabled: true } };
+}
 
 describe("NotificationScheduler", () => {
   it("fires 'before' and 'atStart' notifications", () => {
@@ -25,24 +17,25 @@ describe("NotificationScheduler", () => {
     const settings: AssistantSettings = {
       debug: { enabled: false },
       calendars: [],
-      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "" },
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
       caldav: { accounts: [] },
       folders: {
         projects: "Ассистент/Проекты",
         people: "Ассистент/Люди",
         calendarEvents: "Ассистент/Встречи",
         protocols: "Ассистент/Протоколы",
-        index: "Ассистент/Индекс",
       },
       notifications: {
         enabled: true,
         minutesBefore: 5,
         atStart: true,
-        delivery: {
-          method: "obsidian_notice",
-          system: { urgency: "critical", timeoutMs: 20_000 },
-          popup: { timeoutMs: 20_000 },
-        },
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
       },
       agenda: { maxEvents: 50 },
       log: { maxEntries: 2048, retentionDays: 7 },
@@ -54,9 +47,9 @@ describe("NotificationScheduler", () => {
     const base = new Date("2026-01-18T12:00:00.000Z");
     vi.setSystemTime(new Date("2026-01-18T11:50:00.000Z"));
 
-    const ev: CalendarEvent = {
-      calendarId: "cal1",
-      uid: "u1",
+    const ev: Event = {
+      calendar: cal("cal1"),
+      id: "u1",
       summary: "Meeting",
       start: base,
       end: new Date("2026-01-18T12:30:00.000Z"),
@@ -76,33 +69,163 @@ describe("NotificationScheduler", () => {
     vi.useRealTimers();
   });
 
-  it("system_notify_send: вызывает linuxNotifySend и логирует ошибку только один раз", async () => {
-    const { linuxNotifySend } = await import("../src/os/linuxNotify");
-    const spy = linuxNotifySend as unknown as ReturnType<typeof vi.fn>;
-    spy.mockRejectedValueOnce(new Error("boom"));
-    spy.mockRejectedValueOnce(new Error("boom2"));
+  it("schedule: если notifications.enabled=false — ничего не планирует", () => {
+    vi.useFakeTimers();
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
 
     const settings: AssistantSettings = {
       debug: { enabled: false },
       calendars: [],
-      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "" },
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
       caldav: { accounts: [] },
       folders: {
         projects: "Ассистент/Проекты",
         people: "Ассистент/Люди",
         calendarEvents: "Ассистент/Встречи",
         protocols: "Ассистент/Протоколы",
-        index: "Ассистент/Индекс",
+      },
+      notifications: {
+        enabled: false,
+        minutesBefore: 5,
+        atStart: true,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    const sched = new NotificationScheduler(settings);
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:10:00.000Z") };
+    sched.schedule([ev]);
+
+    vi.advanceTimersByTime(60 * 60_000);
+    expect(anyNotice.messages).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it("schedule: игнорирует события, которые начались давно (старше 60 секунд)", () => {
+    vi.useFakeTimers();
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      notifications: {
+        enabled: true,
+        minutesBefore: 0,
+        atStart: true,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    const sched = new NotificationScheduler(settings);
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    const evOld: Event = { calendar: cal("c"), id: "u", summary: "Old", start: new Date("2025-12-31T23:58:00.000Z") };
+    sched.schedule([evOld]);
+
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(anyNotice.messages).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it("clear: снимает таймеры и после clear уведомления не приходят", () => {
+    vi.useFakeTimers();
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      notifications: {
+        enabled: true,
+        minutesBefore: 5,
+        atStart: true,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    const clearSpy = vi.spyOn(window, "clearTimeout");
+    const sched = new NotificationScheduler(settings);
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:10:00.000Z") };
+    sched.schedule([ev]); // должно поставить before + start
+
+    sched.clear();
+    expect(clearSpy).toHaveBeenCalled();
+
+    vi.advanceTimersByTime(60 * 60_000);
+    expect(anyNotice.messages).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it("electron_window: если BrowserWindow недоступен (например в тестах), делаем fallback на Notice", async () => {
+    const spy = vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => {
+      throw new Error("no BrowserWindow");
+    });
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
       },
       notifications: {
         enabled: true,
         minutesBefore: 0,
         atStart: false,
-        delivery: {
-          method: "system_notify_send",
-          system: { urgency: "critical", timeoutMs: 20_000 },
-          popup: { timeoutMs: 20_000 },
-        },
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
       },
       agenda: { maxEvents: 50 },
       log: { maxEntries: 200, retentionDays: 7 },
@@ -110,76 +233,10 @@ describe("NotificationScheduler", () => {
 
     const logs: string[] = [];
     const sched = new NotificationScheduler(settings, (m) => logs.push(m));
-
-    const ev: CalendarEvent = {
-      calendarId: "cal1",
-      uid: "u1",
-      summary: "Meeting",
-      start: new Date("2026-01-18T12:00:00.000Z"),
-      end: new Date("2026-01-18T12:30:00.000Z"),
-    };
-
-    // два вызова debug — два раза попытка linuxNotifySend, но сообщение об ошибке должно добавиться 1 раз
-    await (sched as any).showGlobal(ev, "m1");
-    await (sched as any).showGlobal(ev, "m2");
-
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(logs.filter((x) => x.includes("notify-send: ошибка")).length).toBe(1);
-  });
-
-  it("popup_window: вызывает action callbacks в зависимости от выбранной кнопки", async () => {
-    const { linuxPopupWindow } = await import("../src/os/linuxPopup");
-    const popup = linuxPopupWindow as unknown as ReturnType<typeof vi.fn>;
-
-    const settings: AssistantSettings = {
-      debug: { enabled: false },
-      calendars: [],
-      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "" },
-      caldav: { accounts: [] },
-      folders: {
-        projects: "Ассистент/Проекты",
-        people: "Ассистент/Люди",
-        calendarEvents: "Ассистент/Встречи",
-        protocols: "Ассистент/Протоколы",
-        index: "Ассистент/Индекс",
-      },
-      notifications: {
-        enabled: true,
-        minutesBefore: 0,
-        atStart: false,
-        delivery: {
-          method: "popup_window",
-          system: { urgency: "critical", timeoutMs: 20_000 },
-          popup: { timeoutMs: 20_000 },
-        },
-      },
-      agenda: { maxEvents: 50 },
-      log: { maxEntries: 200, retentionDays: 7 },
-    };
-
-    const createProtocol = vi.fn();
-    const startRecording = vi.fn();
-    const meetingCancelled = vi.fn();
-    const sched = new NotificationScheduler(settings, undefined, { createProtocol, startRecording, meetingCancelled });
-
-    const ev: CalendarEvent = {
-      calendarId: "cal1",
-      uid: "u1",
-      summary: "Meeting",
-      start: new Date("2026-01-18T12:00:00.000Z"),
-    };
-
-    popup.mockResolvedValueOnce("create_protocol");
-    await (sched as any).showGlobal(ev, "m");
-    expect(createProtocol).toHaveBeenCalledTimes(1);
-
-    popup.mockResolvedValueOnce("start_recording");
-    await (sched as any).showGlobal(ev, "m");
-    expect(startRecording).toHaveBeenCalledTimes(1);
-
-    popup.mockResolvedValueOnce("cancelled");
-    await (sched as any).showGlobal(ev, "m");
-    expect(meetingCancelled).toHaveBeenCalledTimes(1);
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:00:00.000Z") };
+    await (sched as any).showGlobal(ev, "m", "before");
+    expect(logs.some((x) => x.includes("electron_window: ошибка"))).toBe(true);
+    expect(spy).toHaveBeenCalled();
   });
 
   it("schedule не планирует события вне горизонта 48 часов", () => {
@@ -190,24 +247,25 @@ describe("NotificationScheduler", () => {
     const settings: AssistantSettings = {
       debug: { enabled: false },
       calendars: [],
-      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "" },
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
       caldav: { accounts: [] },
       folders: {
         projects: "Ассистент/Проекты",
         people: "Ассистент/Люди",
         calendarEvents: "Ассистент/Встречи",
         protocols: "Ассистент/Протоколы",
-        index: "Ассистент/Индекс",
       },
       notifications: {
         enabled: true,
         minutesBefore: 0,
         atStart: true,
-        delivery: {
-          method: "obsidian_notice",
-          system: { urgency: "critical", timeoutMs: 20_000 },
-          popup: { timeoutMs: 20_000 },
-        },
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
       },
       agenda: { maxEvents: 50 },
       log: { maxEntries: 200, retentionDays: 7 },
@@ -216,7 +274,7 @@ describe("NotificationScheduler", () => {
     const sched = new NotificationScheduler(settings);
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 
-    const evTooFar: CalendarEvent = { calendarId: "c", uid: "u", summary: "Far", start: new Date("2026-01-03T01:00:00.000Z") }; // > 48ч
+    const evTooFar: Event = { calendar: cal("c"), id: "u", summary: "Far", start: new Date("2026-01-03T01:00:00.000Z") }; // > 48ч
     sched.schedule([evTooFar]);
 
     vi.advanceTimersByTime(3 * 24 * 60 * 60_000);
@@ -224,67 +282,34 @@ describe("NotificationScheduler", () => {
     vi.useRealTimers();
   });
 
-  it("fallback: если delivery отсутствует, использует старый флаг notifications.global.enabled", async () => {
-    const { linuxNotifySend } = await import("../src/os/linuxNotify");
-    const spy = linuxNotifySend as unknown as ReturnType<typeof vi.fn>;
-    spy.mockResolvedValueOnce(undefined);
+  // delivery/global legacy paths удалены: теперь всегда используем electron_window.
 
+  it("electron_window: логирует ошибку при невозможности показать окно", async () => {
+    const spy = vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => {
+      throw new Error("boom");
+    });
     const settings: AssistantSettings = {
       debug: { enabled: false },
       calendars: [],
-      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "" },
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
       caldav: { accounts: [] },
       folders: {
         projects: "Ассистент/Проекты",
         people: "Ассистент/Люди",
         calendarEvents: "Ассистент/Встречи",
         protocols: "Ассистент/Протоколы",
-        index: "Ассистент/Индекс",
       },
       notifications: {
         enabled: true,
         minutesBefore: 0,
         atStart: false,
-        delivery: undefined as any,
-        // старый формат
-        global: { enabled: true },
-      } as any,
-      agenda: { maxEvents: 50 },
-      log: { maxEntries: 200, retentionDays: 7 },
-    };
-
-    const sched = new NotificationScheduler(settings);
-    const ev: CalendarEvent = { calendarId: "c", uid: "u", summary: "M", start: new Date("2026-01-01T00:00:00.000Z") };
-    await (sched as any).showGlobal(ev, "m");
-    expect(spy).toHaveBeenCalledTimes(1);
-  });
-
-  it("popup_window: логирует ошибку при падении linuxPopupWindow", async () => {
-    const { linuxPopupWindow } = await import("../src/os/linuxPopup");
-    const popup = linuxPopupWindow as unknown as ReturnType<typeof vi.fn>;
-    popup.mockRejectedValueOnce(new Error("boom"));
-
-    const settings: AssistantSettings = {
-      debug: { enabled: false },
-      calendars: [],
-      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "" },
-      caldav: { accounts: [] },
-      folders: {
-        projects: "Ассистент/Проекты",
-        people: "Ассистент/Люди",
-        calendarEvents: "Ассистент/Встречи",
-        protocols: "Ассистент/Протоколы",
-        index: "Ассистент/Индекс",
       },
-      notifications: {
-        enabled: true,
-        minutesBefore: 0,
-        atStart: false,
-        delivery: {
-          method: "popup_window",
-          system: { urgency: "critical", timeoutMs: 20_000 },
-          popup: { timeoutMs: 20_000 },
-        },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
       },
       agenda: { maxEvents: 50 },
       log: { maxEntries: 200, retentionDays: 7 },
@@ -292,8 +317,233 @@ describe("NotificationScheduler", () => {
 
     const logs: string[] = [];
     const sched = new NotificationScheduler(settings, (m) => logs.push(m));
-    const ev: CalendarEvent = { calendarId: "c", uid: "u", summary: "M", start: new Date("2026-01-01T00:00:00.000Z") };
-    await (sched as any).showGlobal(ev, "m");
-    expect(logs.some((x) => x.includes("popup_window: ошибка"))).toBe(true);
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:00:00.000Z") };
+    await (sched as any).showGlobal(ev, "m", "before");
+    expect(logs.some((x) => x.includes("electron_window: ошибка"))).toBe(true);
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("setSettings влияет на debugShowReminder (и пишет DEBUG лог)", () => {
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      notifications: {
+        enabled: true,
+        minutesBefore: 7,
+        atStart: false,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    const logs: string[] = [];
+    const sched = new NotificationScheduler(settings, (m) => logs.push(m));
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "Meeting", start: new Date("2026-01-01T10:00:00.000Z") };
+
+    sched.debugShowReminder(ev);
+    expect(anyNotice.messages[0]).toContain("Через 7 мин");
+    expect(logs.some((x) => x.startsWith("DEBUG уведомление:"))).toBe(true);
+
+    sched.setSettings({
+      ...settings,
+      notifications: { ...settings.notifications, minutesBefore: 3 },
+    });
+    sched.debugShowReminder(ev);
+    expect(anyNotice.messages[1]).toContain("Через 3 мин");
+  });
+
+  it("showGlobal: если electron_window доступен, не делает fallback на Notice", async () => {
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      notifications: {
+        enabled: true,
+        minutesBefore: 5,
+        atStart: false,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    const logs: string[] = [];
+    const sched = new NotificationScheduler(settings, (m) => logs.push(m));
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:10:00.000Z") };
+
+    const spy = vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => undefined);
+    await (sched as any).showGlobal(ev, "m", "before");
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(anyNotice.messages).toHaveLength(0);
+    expect(logs.some((x) => x.startsWith("Показано уведомление:"))).toBe(true);
+  });
+
+  it("catch-path: при ошибке electron_window и наличии onLog пишет 'electron_window: ошибка ...'", async () => {
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    // Убедимся, что в этом тесте нет глобального мока electron.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__assistantElectronMock;
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      notifications: {
+        enabled: true,
+        minutesBefore: 0,
+        atStart: false,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    const logs: string[] = [];
+    const sched = new NotificationScheduler(settings, (m) => logs.push(m));
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:00:00.000Z") };
+    await (sched as any).showGlobal(ev, "m", "before");
+
+    expect(logs.some((x) => x.includes("electron_window: ошибка"))).toBe(true);
+    expect(anyNotice.messages).toHaveLength(1);
+  });
+
+  it("catch-path: если electron_window бросает undefined, лог пишет 'неизвестно' (ветка ??)", async () => {
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      notifications: {
+        enabled: true,
+        minutesBefore: 0,
+        atStart: false,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    const logs: string[] = [];
+    const sched = new NotificationScheduler(settings, (m) => logs.push(m));
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:00:00.000Z") };
+
+    const spy = vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => {
+      // eslint-disable-next-line no-throw-literal
+      throw undefined;
+    });
+
+    await (sched as any).showGlobal(ev, "m", "before");
+    expect(spy).toHaveBeenCalled();
+    expect(logs.some((x) => x.includes("electron_window: ошибка (неизвестно)"))).toBe(true);
+    expect(anyNotice.messages).toHaveLength(1);
+  });
+
+  it("formatEvent: для allDay=true использует 'весь день'", () => {
+    vi.useFakeTimers();
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      notifications: {
+        enabled: true,
+        minutesBefore: 0,
+        atStart: false,
+      },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_desktop_capturer",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: false,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 200, retentionDays: 7 },
+    };
+
+    // Принудительно в fallback, чтобы создать Notice с msg.
+    vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => {
+      throw new Error("no BrowserWindow");
+    });
+
+    const sched = new NotificationScheduler(settings);
+    const ev: Event = { calendar: cal("c"), id: "u", summary: "AllDay", allDay: true, start: new Date("2026-01-01T00:00:00.000Z") };
+    sched.debugShowReminder(ev);
+    expect(anyNotice.messages[0]).toContain("весь день");
+    vi.useRealTimers();
   });
 });

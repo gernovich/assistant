@@ -1,9 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { makeEventKey, shortStableId } from "../src/ids/stableIds";
+import { makeEventKey, makePersonIdFromEmail, shortStableId } from "../src/ids/stableIds";
 
 describe("stableIds", () => {
-  it("makeEventKey склеивает calendarId и uid через ':'", () => {
-    expect(makeEventKey("cal", "uid")).toBe("cal:uid");
+  it("makeEventKey склеивает calendarId и eventId через ':'", () => {
+    expect(makeEventKey("cal", "event")).toBe("cal:event");
+  });
+
+  it("makePersonIdFromEmail нормализует mailto/регистр/пробелы", () => {
+    const a = makePersonIdFromEmail("MAILTO:Test@Example.com");
+    const b = makePersonIdFromEmail(" test@example.com ");
+    expect(a).toBe(b);
+    expect(a.startsWith("person-")).toBe(true);
+    // person- + shortStableId(len=10)
+    expect(a).toHaveLength("person-".length + 10);
+  });
+
+  it("makePersonIdFromEmail не падает на undefined/null (через any) и детерминированный", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const a = makePersonIdFromEmail(undefined as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const b = makePersonIdFromEmail(null as any);
+    expect(a).toBe(makePersonIdFromEmail("")); // нормализация сводит к ""
+    expect(a).toBe(b);
   });
 
   it("shortStableId детерминированный и нужной длины", () => {

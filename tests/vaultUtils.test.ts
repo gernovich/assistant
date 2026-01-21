@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { sanitizeFileName, createUniqueMarkdownFile, isTFile as isTFileFromFileNaming } from "../src/vault/fileNaming";
 import { ensureFile, isTFile } from "../src/vault/ensureFile";
 import { yamlEscape } from "../src/vault/yamlEscape";
@@ -30,6 +30,9 @@ describe("vault utils", () => {
 
   it("yamlEscape возвращает JSON-строку и убирает переносы строк", () => {
     expect(yamlEscape("a\nb")).toBe('"a b"');
+    expect(yamlEscape("a\r\nb")).toBe('"a b"');
+    // Ветка `(v ?? "")`
+    expect(yamlEscape(undefined as any)).toBe('""');
   });
 
   it("ensureFile создаёт файл если его нет, иначе возвращает существующий", async () => {
@@ -55,5 +58,20 @@ describe("vault utils", () => {
     await createUniqueMarkdownFile(v as any, "Ассистент/Встречи", "A", "1");
     const f2 = await createUniqueMarkdownFile(v as any, "Ассистент/Встречи", "A", "2");
     expect(f2.path).toContain("A 2.md");
+  });
+
+  it("createUniqueMarkdownFile использует запасной вариант с timestamp, если слишком много конфликтов", async () => {
+    const fixedNow = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(fixedNow);
+
+    const v = {
+      getAbstractFileByPath: () => ({ path: "exists" }), // всё занято
+      create: async (path: string, content: string) => ({ path, extension: "md", content }),
+    };
+
+    const f = await createUniqueMarkdownFile(v as any, "Ассистент/Встречи", "A", "x");
+    expect(f.path).toContain(String(fixedNow));
+    expect(f.path).toContain("A ");
+    (Date.now as any).mockRestore?.();
   });
 });

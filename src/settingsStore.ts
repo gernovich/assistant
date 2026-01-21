@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: AssistantSettings = {
     autoRefreshEnabled: true,
     autoRefreshMinutes: 10,
     myEmail: "",
+    persistentCacheMaxEventsPerCalendar: 2000,
   },
   caldav: {
     accounts: [],
@@ -19,22 +20,18 @@ export const DEFAULT_SETTINGS: AssistantSettings = {
     people: "Ассистент/Люди",
     calendarEvents: "Ассистент/Встречи",
     protocols: "Ассистент/Протоколы",
-    index: "Ассистент/Индекс",
   },
   notifications: {
     enabled: true,
     minutesBefore: 5,
     atStart: true,
-    delivery: {
-      method: "system_notify_send",
-      system: {
-        urgency: "critical",
-        timeoutMs: 20_000,
-      },
-      popup: {
-        timeoutMs: 20_000,
-      },
-    },
+  },
+  recording: {
+    chunkMinutes: 5,
+    audioBackend: "electron_desktop_capturer",
+    linuxNativeAudioProcessing: "normalize",
+    autoStartEnabled: false,
+    autoStartSeconds: 5,
   },
   agenda: {
     maxEvents: 50,
@@ -57,8 +54,6 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
   const obj = (raw ?? {}) as Partial<AssistantSettings>;
   const calendars = Array.isArray(obj.calendars) ? obj.calendars : [];
   const caldavAccounts = Array.isArray(obj.caldav?.accounts) ? obj.caldav?.accounts : [];
-  const delivery = obj.notifications?.delivery;
-
   return {
     debug: {
       enabled: obj.debug?.enabled ?? DEFAULT_SETTINGS.debug.enabled,
@@ -68,6 +63,9 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
       autoRefreshEnabled: obj.calendar?.autoRefreshEnabled ?? DEFAULT_SETTINGS.calendar.autoRefreshEnabled,
       autoRefreshMinutes: obj.calendar?.autoRefreshMinutes ?? DEFAULT_SETTINGS.calendar.autoRefreshMinutes,
       myEmail: (obj.calendar?.myEmail ?? DEFAULT_SETTINGS.calendar.myEmail).trim(),
+      persistentCacheMaxEventsPerCalendar: normalizePersistentCacheMaxEventsPerCalendar(
+        obj.calendar?.persistentCacheMaxEventsPerCalendar ?? DEFAULT_SETTINGS.calendar.persistentCacheMaxEventsPerCalendar,
+      ),
     },
     caldav: {
       accounts: caldavAccounts
@@ -79,22 +77,28 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
       people: obj.folders?.people ?? DEFAULT_SETTINGS.folders.people,
       calendarEvents: obj.folders?.calendarEvents ?? DEFAULT_SETTINGS.folders.calendarEvents,
       protocols: obj.folders?.protocols ?? DEFAULT_SETTINGS.folders.protocols,
-      index: obj.folders?.index ?? DEFAULT_SETTINGS.folders.index,
     },
     notifications: {
       enabled: obj.notifications?.enabled ?? DEFAULT_SETTINGS.notifications.enabled,
       minutesBefore: obj.notifications?.minutesBefore ?? DEFAULT_SETTINGS.notifications.minutesBefore,
       atStart: obj.notifications?.atStart ?? DEFAULT_SETTINGS.notifications.atStart,
-      delivery: {
-        method: delivery?.method ?? DEFAULT_SETTINGS.notifications.delivery.method,
-        system: {
-          urgency: delivery?.system?.urgency ?? DEFAULT_SETTINGS.notifications.delivery.system.urgency,
-          timeoutMs: delivery?.system?.timeoutMs ?? DEFAULT_SETTINGS.notifications.delivery.system.timeoutMs,
-        },
-        popup: {
-          timeoutMs: delivery?.popup?.timeoutMs ?? DEFAULT_SETTINGS.notifications.delivery.popup.timeoutMs,
-        },
-      },
+    },
+    recording: {
+      chunkMinutes: typeof obj.recording?.chunkMinutes === "number" ? obj.recording.chunkMinutes : DEFAULT_SETTINGS.recording.chunkMinutes,
+      audioBackend:
+        obj.recording?.audioBackend === "linux_native" || obj.recording?.audioBackend === "electron_desktop_capturer"
+          ? obj.recording.audioBackend
+          : DEFAULT_SETTINGS.recording.audioBackend,
+      linuxNativeAudioProcessing:
+        obj.recording?.linuxNativeAudioProcessing === "none" ||
+        obj.recording?.linuxNativeAudioProcessing === "normalize" ||
+        obj.recording?.linuxNativeAudioProcessing === "voice"
+          ? obj.recording.linuxNativeAudioProcessing
+          : DEFAULT_SETTINGS.recording.linuxNativeAudioProcessing,
+      autoStartEnabled:
+        typeof obj.recording?.autoStartEnabled === "boolean" ? obj.recording.autoStartEnabled : DEFAULT_SETTINGS.recording.autoStartEnabled,
+      autoStartSeconds:
+        typeof obj.recording?.autoStartSeconds === "number" ? obj.recording.autoStartSeconds : DEFAULT_SETTINGS.recording.autoStartSeconds,
     },
     agenda: {
       maxEvents: obj.agenda?.maxEvents ?? DEFAULT_SETTINGS.agenda.maxEvents,
@@ -113,6 +117,13 @@ function normalizeRetentionDays(v: unknown): number {
   return Math.min(365, Math.max(1, Math.floor(n)));
 }
 
+function normalizePersistentCacheMaxEventsPerCalendar(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return 2000;
+  // Ограничиваем, чтобы файл кэша не разрастался до гигантских размеров.
+  return Math.min(20_000, Math.max(1, Math.floor(n)));
+}
+
 function normalizeCalendar(c: Partial<CalendarConfig>): CalendarConfig | null {
   if (!c || typeof c !== "object") return null;
   if (!c.id || typeof c.id !== "string") return null;
@@ -125,7 +136,6 @@ function normalizeCalendar(c: Partial<CalendarConfig>): CalendarConfig | null {
       type: "ics_url",
       enabled: c.enabled ?? true,
       url: typeof c.url === "string" ? c.url : "",
-      color: typeof c.color === "string" ? c.color : undefined,
     };
   }
 
@@ -141,7 +151,6 @@ function normalizeCalendar(c: Partial<CalendarConfig>): CalendarConfig | null {
         accountId: typeof caldav.accountId === "string" ? caldav.accountId : "",
         calendarUrl: typeof caldav.calendarUrl === "string" ? caldav.calendarUrl : "",
       },
-      color: typeof c.color === "string" ? c.color : undefined,
     };
   }
 

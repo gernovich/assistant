@@ -1,6 +1,25 @@
 /** Стабильный ключ события (используется для связи “календарь ↔ протокол/встреча”). */
-export function makeEventKey(calendarId: string, uid: string): string {
-  return `${calendarId}:${uid}`;
+export function makeEventKey(calendarId: string, eventId: string): string {
+  return `${calendarId}:${eventId}`;
+}
+
+/** Нормализовать email для стабильных идентификаторов/поиска. */
+function normalizeEmail(v: string): string {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  const m = s.match(/^mailto:(.+)$/i);
+  return (m ? m[1] : s).trim().toLowerCase();
+}
+
+/**
+ * Стабильный person_id для случаев, когда у нас есть email (например из календаря).
+ *
+ * Важно: это позволяет ссылаться на человека по `person_id` даже до создания его карточки.
+ */
+export function makePersonIdFromEmail(email: string): string {
+  const norm = normalizeEmail(email);
+  return `person-${shortStableId(norm, 10)}`;
 }
 
 /**

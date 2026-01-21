@@ -2,6 +2,7 @@ import type { CalendarService } from "../calendar/calendarService";
 import type { EventNoteService } from "../calendar/eventNoteService";
 import type { LogService } from "../log/logService";
 import type { NotificationScheduler } from "../notifications/notificationScheduler";
+import type { PersonNoteService } from "../people/personNoteService";
 import type { AssistantSettings } from "../types";
 import { MS_PER_DAY, NOTES_SYNC_HORIZON_DAYS } from "../calendar/constants";
 
@@ -17,6 +18,7 @@ export class SyncService {
     private eventNoteService: EventNoteService,
     private notificationScheduler: NotificationScheduler,
     private log: LogService,
+    private personNoteService?: PersonNoteService,
   ) {}
 
   /** Применить новые настройки к зависимым сервисам. */
@@ -32,7 +34,9 @@ export class SyncService {
       enabledCalendars: settings.calendars.filter((c) => c.enabled).length,
     });
 
-    const { events, errors } = await this.calendarService.refreshAll();
+    const { errors } = await this.calendarService.refreshAll();
+    const rr = this.calendarService.getRefreshResult();
+    const events = rr.events;
 
     for (const e of errors) {
       this.log.warn("Календарь: ошибка обновления", { calendarId: e.calendarId, name: e.name, error: e.error });
@@ -40,7 +44,7 @@ export class SyncService {
 
     // Offline-first UX: если календарь не обновился, но у нас есть lastGood — продолжаем показывать кэш.
     // В логе должно быть явно видно, что данные устарели.
-    const status = this.calendarService.getPerCalendarStatus();
+    const status = rr.perCalendar;
     const calNameById = new Map(settings.calendars.map((c) => [c.id, c.name]));
     for (const [calendarId, s] of Object.entries(status)) {
       if (s.status !== "stale") continue;
@@ -72,9 +76,10 @@ export class SyncService {
     });
 
     // Встречи могут быть повторяющимися (RRULE) => в списке могут быть несколько occurrences с одним uid.
-    // Для заметок в vault мы держим 1 файл на uid, поэтому синкаем только ближайшую upcoming встречу по (calendarId, uid).
+    // Для заметок в vault мы держим 1 файл на id (UID), поэтому синкаем только ближайшую upcoming встречу по (calendar.id, id).
     const uniqueForNotes = pickEarliestPerKey(eventsForNotes);
     await this.eventNoteService.syncEvents(uniqueForNotes);
+    await this.ensurePeopleCardsFromEvents(uniqueForNotes);
     this.notificationScheduler.schedule(events);
     this.log.info("Обновление календарей: ok", { events: events.length });
   }
@@ -100,14 +105,33 @@ export class SyncService {
 
     const uniqueForNotes = pickEarliestPerKey(eventsForNotes);
     await this.eventNoteService.syncEvents(uniqueForNotes);
+    await this.ensurePeopleCardsFromEvents(uniqueForNotes);
     this.notificationScheduler.schedule(events);
+  }
+
+  private async ensurePeopleCardsFromEvents(events: Array<{ attendees?: Array<{ email: string; cn?: string }> }>): Promise<void> {
+    if (!this.personNoteService) return;
+    const emails = new Set<string>();
+    for (const ev of events) {
+      for (const a of ev.attendees ?? []) {
+        const email = String(a?.email ?? "").trim();
+        if (email) emails.add(email);
+      }
+    }
+    for (const email of emails) {
+      try {
+        await this.personNoteService.ensureByEmail({ email });
+      } catch {
+        // не валим sync из-за одной “битой” карточки
+      }
+    }
   }
 }
 
-function pickEarliestPerKey<T extends { calendarId: string; uid: string; start: Date }>(events: T[]): T[] {
+function pickEarliestPerKey<T extends { calendar: { id: string }; id: string; start: Date }>(events: T[]): T[] {
   const map = new Map<string, T>();
   for (const ev of events) {
-    const key = `${ev.calendarId}:${ev.uid}`;
+    const key = `${ev.calendar.id}:${ev.id}`;
     const prev = map.get(key);
     if (!prev || ev.start.getTime() < prev.start.getTime()) map.set(key, ev);
   }

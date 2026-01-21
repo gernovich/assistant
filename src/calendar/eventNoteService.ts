@@ -1,18 +1,28 @@
 import type { App, TFile, Vault } from "obsidian";
 import { normalizePath } from "obsidian";
-import type { CalendarEvent } from "../types";
+import type { Event } from "../types";
 import { ensureFolder } from "../vault/ensureFolder";
 import { revealOrOpenInNewLeaf } from "../vault/revealOrOpenFile";
-import { makeEventKey, shortStableId } from "../ids/stableIds";
-import { sanitizeFileName } from "../vault/fileNaming";
+import { makeEventKey, makePersonIdFromEmail, shortStableId } from "../ids/stableIds";
+import { createUniqueMarkdownFile, sanitizeFileName } from "../vault/fileNaming";
 import { ensureFile, isTFile } from "../vault/ensureFile";
 import { yamlEscape } from "../vault/yamlEscape";
+import type { EventNoteIndexCache } from "./store/eventNoteIndexCache";
+import { upsertFrontmatter } from "../vault/frontmatter";
+import { FM } from "../vault/frontmatterKeys";
+import {
+  extractProtocolsBody,
+  extractWikiLinkTargets,
+  mergePreservingAssistantSections,
+  upsertCancelledFlagInUserSection,
+  upsertProtocolLink,
+} from "../vault/markdownSections";
 
 /**
  * Сервис заметок встреч (md-файлы в vault).
  *
  * Отвечает за:
- * - расчёт пути файла встречи (стабильность через `[sid]`)
+ * - расчёт пути файла встречи (красивое имя файла; связь и поиск через `(calendar_id, event_id)`)
  * - создание/обновление файла встречи
  * - связь “встреча ↔ протоколы” через секцию `ASSISTANT:PROTOCOLS`
  */
@@ -20,54 +30,92 @@ export class EventNoteService {
   private app: App;
   private vault: Vault;
   private eventsDir: string;
+  private indexCache?: EventNoteIndexCache;
+  private eventKeyIndex = new Map<string, TFile>();
+  private eventKeyIndexLoaded = false;
 
   /** @param eventsDir Папка встреч в vault. */
-  constructor(app: App, eventsDir: string) {
+  constructor(app: App, eventsDir: string, indexCache?: EventNoteIndexCache) {
     this.app = app;
     this.vault = app.vault;
     this.eventsDir = normalizePath(eventsDir);
+    this.indexCache = indexCache;
   }
 
   /** Обновить папку встреч (например после изменения настроек). */
   setEventsDir(eventsDir: string) {
     this.eventsDir = normalizePath(eventsDir);
+    // Папка поменялась — индекс нужно пересобрать/перезагрузить.
+    this.eventKeyIndex.clear();
+    this.eventKeyIndexLoaded = false;
   }
 
   /** Рассчитать “идеальный” путь файла встречи по событию. */
-  getEventFilePath(ev: CalendarEvent): string {
-    // Стабильный id удерживает путь файла стабильным даже при изменении summary; summary остаётся “красивым”.
-    const eventKey = makeEventKey(ev.calendarId, ev.uid);
-    const sid = shortStableId(eventKey, 6);
+  getEventFilePath(ev: Event): string {
+    // Имя файла делаем “красивым” (без `[sid]`); связь и поиск держим через `(calendar_id, event_id)`.
     const pretty = sanitizeFileName(ev.summary).slice(0, 80);
-    return normalizePath(`${this.eventsDir}/${pretty} [${sid}].md`);
+    return normalizePath(`${this.eventsDir}/${pretty}.md`);
+  }
+
+  /** Прогреть индекс (загрузить persistent cache в память). */
+  async warmUpIndex(): Promise<void> {
+    await this.ensureEventKeyIndex();
+  }
+
+  // Ранее тут была локальная метка “план участия”.
+  // Концепция убрана: теперь статус управляется напрямую в календаре (CalDAV write-back).
+
+  /**
+   * Найти файл встречи по “стабильному ключу” встречи (`calendarId:eventId`).
+   *
+   * Зачем: “DB-подобный” доступ к карточкам — имя файла не участвует в идентичности.
+   */
+  async findEventFileByEventKey(eventKey: string): Promise<TFile | null> {
+    const key = String(eventKey ?? "").trim();
+    if (!key) return null;
+
+    const index = await this.ensureEventKeyIndex();
+    const direct = index.get(key);
+    if (direct) return direct;
+
+    // Фоллбек: индекс мог быть пуст/устаревшим (metadataCache не готов сразу).
+    // Перестраиваем по metadataCache и пробуем ещё раз.
+    this.eventKeyIndex = this.buildEventKeyIndex();
+    this.eventKeyIndexLoaded = true;
+    const again = this.eventKeyIndex.get(key) ?? null;
+    await this.persistEventKeyIndex();
+    return again;
   }
 
   /** Синхронизировать набор событий в vault (создать/обновить файлы встреч). */
-  async syncEvents(events: CalendarEvent[]) {
+  async syncEvents(events: Event[]) {
     await ensureFolder(this.vault, this.eventsDir);
     const sidIndex = this.buildStableIdIndex();
+    const eventKeyIndex = await this.ensureEventKeyIndex();
     for (const ev of events) {
-      await this.upsertEvent(ev, sidIndex);
+      await this.upsertEvent(ev, sidIndex, eventKeyIndex);
     }
+    await this.persistEventKeyIndex();
   }
 
   /** Открыть (или создать) файл встречи в новой вкладке. */
-  async openEvent(ev: CalendarEvent) {
-    const filePath = await this.resolveEventFilePath(ev);
+  async openEvent(ev: Event) {
     await ensureFolder(this.vault, this.eventsDir);
-    const file = await ensureFile(this.vault, filePath, renderEventFile(ev, true));
+    const file = await this.ensureOrCreateEventFile(ev);
     await revealOrOpenInNewLeaf(this.app, file);
+    await this.persistEventKeyIndex();
   }
 
   /** Убедиться, что файл встречи существует, и вернуть `TFile`. */
-  async ensureEventFile(ev: CalendarEvent): Promise<TFile> {
-    const filePath = await this.resolveEventFilePath(ev);
+  async ensureEventFile(ev: Event): Promise<TFile> {
     await ensureFolder(this.vault, this.eventsDir);
-    return await ensureFile(this.vault, filePath, renderEventFile(ev, true));
+    const file = await this.ensureOrCreateEventFile(ev);
+    await this.persistEventKeyIndex();
+    return file;
   }
 
   /** Добавить ссылку на протокол в секцию “Протоколы” в файле встречи. */
-  async linkProtocol(ev: CalendarEvent, protocolFile: TFile) {
+  async linkProtocol(ev: Event, protocolFile: TFile) {
     const evFile = await this.ensureEventFile(ev);
     const cur = await this.vault.read(evFile);
     const linkTarget = protocolFile.path.replace(/\.md$/i, "");
@@ -77,7 +125,7 @@ export class EventNoteService {
   }
 
   /** Список файлов протоколов, связанных со встречей (парсинг wiki-link из секции “Протоколы”). */
-  async listProtocolFiles(ev: CalendarEvent): Promise<TFile[]> {
+  async listProtocolFiles(ev: Event): Promise<TFile[]> {
     const evFile = await this.ensureEventFile(ev);
     const cur = await this.vault.read(evFile);
     const body = extractProtocolsBody(cur);
@@ -92,11 +140,11 @@ export class EventNoteService {
   }
 
   /** Список протоколов + дата `start` (если удалось извлечь из frontmatter). */
-  async listProtocolInfos(ev: CalendarEvent): Promise<Array<{ file: TFile; start?: Date }>> {
+  async listProtocolInfos(ev: Event): Promise<Array<{ file: TFile; start?: Date }>> {
     const files = await this.listProtocolFiles(ev);
     const out: Array<{ file: TFile; start?: Date }> = [];
     for (const f of files) {
-      const start = this.getFileFrontmatterDate(f, "start");
+      const start = this.getFileFrontmatterDate(f, FM.start);
       out.push({ file: f, start });
     }
     // Сортируем “последние сверху”; элементы без start — в конце.
@@ -124,43 +172,72 @@ export class EventNoteService {
   }
 
   /** Пометить встречу как отменённую (в пользовательской секции файла встречи). */
-  async markCancelled(ev: CalendarEvent) {
+  async markCancelled(ev: Event) {
     const evFile = await this.ensureEventFile(ev);
     const cur = await this.vault.read(evFile);
     const updated = upsertCancelledFlagInUserSection(cur);
     if (updated !== cur) await this.vault.modify(evFile, updated);
   }
 
-  private async upsertEvent(ev: CalendarEvent, sidIndex?: Map<string, TFile>) {
-    const filePath = await this.resolveEventFilePath(ev, sidIndex);
-    const existing = this.vault.getAbstractFileByPath(filePath);
-    if (existing && isTFile(existing)) {
-      const cur = await this.vault.read(existing);
-      const updated = mergePreservingSections(cur, renderEventFile(ev, false));
-      await this.vault.modify(existing, updated);
-      return;
-    }
-    await ensureFile(this.vault, filePath, renderEventFile(ev, true));
+  private async upsertEvent(ev: Event, sidIndex: Map<string, TFile>, eventKeyIndex: Map<string, TFile>) {
+    const file = await this.resolveOrCreateFileForEvent(ev, sidIndex, eventKeyIndex);
+    const cur = await this.vault.read(file);
+    const updated = mergePreservingAssistantSections(cur, renderEventFile(ev, false));
+    await this.vault.modify(file, updated);
   }
 
-  private async resolveEventFilePath(ev: CalendarEvent, sidIndex?: Map<string, TFile>): Promise<string> {
-    const target = this.getEventFilePath(ev);
-    const eventKey = makeEventKey(ev.calendarId, ev.uid);
-    const sid = shortStableId(eventKey, 6);
+  private async ensureOrCreateEventFile(ev: Event): Promise<TFile> {
+    const sidIndex = this.buildStableIdIndex();
+    const eventKeyIndex = await this.ensureEventKeyIndex();
+    return await this.resolveOrCreateFileForEvent(ev, sidIndex, eventKeyIndex, true);
+  }
 
-    const existingBySid = sidIndex?.get(sid) ?? this.findEventFileByStableId(sid);
-    if (existingBySid && existingBySid.path !== target) {
-      // Переименовываем для “красивого” имени при изменении summary, но сохраняем стабильность через [sid].
-      try {
-        await this.vault.rename(existingBySid, target);
-        sidIndex?.set(sid, existingBySid);
-        return target;
-      } catch {
-        // Если rename не удался (конфликт/права) — остаёмся на текущем пути.
-        return existingBySid.path;
+  private async resolveOrCreateFileForEvent(
+    ev: Event,
+    sidIndex: Map<string, TFile>,
+    eventKeyIndex: Map<string, TFile>,
+    includeUserSections = false,
+  ): Promise<TFile> {
+    const eventKey = makeEventKey(ev.calendar.id, ev.id);
+    const sid = shortStableId(eventKey, 6);
+    const target = this.getEventFilePath(ev);
+
+    // 1) Основной путь: ищем по `(calendar_id, event_id)` (frontmatter) — имя файла не важно.
+    const existingByKey = eventKeyIndex.get(eventKey);
+    if (existingByKey) {
+      // Переименовываем в красивое имя при изменении summary (без [sid]).
+      if (existingByKey.path !== target) {
+        const renamed = await this.tryRenameToTarget(existingByKey, target);
+        return renamed;
       }
+      return existingByKey;
     }
-    return target;
+
+    // 2) Legacy: ищем по [sid] в имени (для старых файлов).
+    const existingBySid = sidIndex.get(sid) ?? this.findEventFileByStableId(sid);
+    if (existingBySid) {
+      // Переводим на красивое имя без [sid] (если возможно), сохраняя связь через `(calendar_id, event_id)`.
+      const renamed = existingBySid.path !== target ? await this.tryRenameToTarget(existingBySid, target) : existingBySid;
+      eventKeyIndex.set(eventKey, renamed);
+      return renamed;
+    }
+
+    // 3) Создаём новый файл с красивым именем (с авто-суффиксами при коллизиях).
+    const pretty = sanitizeFileName(ev.summary).slice(0, 80);
+    const content = renderEventFile(ev, includeUserSections);
+    const created = await createUniqueMarkdownFile(this.vault, this.eventsDir, pretty, content);
+    eventKeyIndex.set(eventKey, created);
+    return created;
+  }
+
+  private async tryRenameToTarget(file: TFile, targetPath: string): Promise<TFile> {
+    try {
+      await this.vault.rename(file, targetPath);
+      return file;
+    } catch {
+      // Если rename не удался (коллизия/права) — остаёмся на текущем пути.
+      return file;
+    }
   }
 
   /**
@@ -177,6 +254,54 @@ export class EventNoteService {
       if (sid) out.set(sid, f);
     }
     return out;
+  }
+
+  /**
+   * Индекс существующих заметок встреч по frontmatter `(calendar_id, event_id)`.
+   *
+   * Это “DB-подобный” слой: позволяет находить файл встречи по ID, не полагаясь на имя файла.
+   */
+  private buildEventKeyIndex(): Map<string, TFile> {
+    const dirPrefix = normalizePath(this.eventsDir) + "/";
+    const out = new Map<string, TFile>();
+    const files = this.vault.getFiles();
+    for (const f of files) {
+      if (!f.path.startsWith(dirPrefix)) continue;
+      const cache = this.app.metadataCache.getFileCache(f);
+      const fm = cache?.frontmatter as Record<string, unknown> | undefined;
+      const calId = typeof fm?.[FM.calendarId] === "string" ? String(fm[FM.calendarId]) : "";
+      const evId = typeof fm?.[FM.eventId] === "string" ? String(fm[FM.eventId]) : "";
+      const key = calId && evId ? makeEventKey(calId, evId) : "";
+      if (key) out.set(key, f);
+    }
+    return out;
+  }
+
+  private async ensureEventKeyIndex(): Promise<Map<string, TFile>> {
+    if (this.eventKeyIndexLoaded) return this.eventKeyIndex;
+    this.eventKeyIndexLoaded = true;
+
+    // 1) Пытаемся загрузить persistent cache.
+    if (this.indexCache) {
+      try {
+        const loaded = await this.indexCache.load(this.vault, this.eventsDir);
+        this.eventKeyIndex = loaded;
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2) Если кэш пуст — строим по metadataCache.
+    if (this.eventKeyIndex.size === 0) {
+      this.eventKeyIndex = this.buildEventKeyIndex();
+    }
+    return this.eventKeyIndex;
+  }
+
+  private async persistEventKeyIndex(): Promise<void> {
+    if (!this.indexCache) return;
+    if (!this.eventKeyIndexLoaded) return;
+    await this.indexCache.save({ eventsDir: this.eventsDir, byEventKey: this.eventKeyIndex });
   }
 
   private findEventFileByStableId(sid: string): TFile | undefined {
@@ -197,22 +322,47 @@ function extractStableIdFromPath(path: string): string | null {
   return m ? (m[1] ?? "").toLowerCase() : null;
 }
 
-function renderEventFile(ev: CalendarEvent, includeUserSections: boolean): string {
+function renderEventFile(ev: Event, includeUserSections: boolean): string {
   const startIso = ev.start.toISOString();
   const endIso = ev.end ? ev.end.toISOString() : "";
-  const eventKey = makeEventKey(ev.calendarId, ev.uid);
+  const eventKey = makeEventKey(ev.calendar.id, ev.id);
+
+  const grouped = groupAttendeePersonIds(ev.attendees ?? []);
+  const attendeesFrontmatter = [
+    ...yamlStringArray(FM.attendeesAccepted, grouped.accepted),
+    ...yamlStringArray(FM.attendeesDeclined, grouped.declined),
+    ...yamlStringArray(FM.attendeesTentative, grouped.tentative),
+    ...yamlStringArray(FM.attendeesNeedsAction, grouped.needsAction),
+    ...yamlStringArray(FM.attendeesUnknown, grouped.unknown),
+    ...yamlStringArray(FM.attendees, grouped.all),
+  ];
+
+  const organizerEmail = (ev.organizer?.emails?.[0] ?? "").trim();
+  const organizerCn = (ev.organizer?.displayName ?? "").trim();
+
   const header = [
     "---",
-    `assistant_type: calendar_event`,
-    `event_key: ${yamlEscape(eventKey)}`,
-    `calendar_id: ${yamlEscape(ev.calendarId)}`,
-    `uid: ${yamlEscape(ev.uid)}`,
-    `summary: ${yamlEscape(ev.summary)}`,
-    `start: ${yamlEscape(startIso)}`,
-    `end: ${yamlEscape(endIso)}`,
-    ev.myPartstat ? `my_partstat: ${yamlEscape(ev.myPartstat)}` : "",
-    ev.url ? `url: ${yamlEscape(ev.url)}` : "",
-    ev.location ? `location: ${yamlEscape(ev.location)}` : "",
+    `${FM.assistantType}: calendar_event`,
+    `${FM.calendarId}: ${yamlEscape(ev.calendar.id)}`,
+    `${FM.eventId}: ${yamlEscape(ev.id)}`,
+    `${FM.summary}: ${yamlEscape(ev.summary)}`,
+    `${FM.start}: ${yamlEscape(startIso)}`,
+    `${FM.end}: ${yamlEscape(endIso)}`,
+    ev.timeZone ? `timezone: ${yamlEscape(ev.timeZone)}` : "",
+    ev.recurrence?.rrule ? `rrule: ${yamlEscape(ev.recurrence.rrule)}` : "",
+    ev.reminders?.length
+      ? `reminders_minutes_before: [${ev.reminders
+          .map((r) => r.minutesBefore)
+          .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+          .join(", ")}]`
+      : "",
+    ev.color?.value ? `event_color: ${yamlEscape(ev.color.value)}` : "",
+    ev.status ? `${FM.status}: ${yamlEscape(ev.status)}` : "",
+    organizerEmail ? `${FM.organizerEmail}: ${yamlEscape(organizerEmail)}` : "",
+    organizerCn ? `${FM.organizerCn}: ${yamlEscape(organizerCn)}` : "",
+    ...attendeesFrontmatter,
+    ev.url ? `${FM.url}: ${yamlEscape(ev.url)}` : "",
+    ev.location ? `${FM.location}: ${yamlEscape(ev.location)}` : "",
     "---",
     "",
     `## ${ev.summary}`,
@@ -223,6 +373,10 @@ function renderEventFile(ev: CalendarEvent, includeUserSections: boolean): strin
     ev.location ? `- Место: ${ev.location}` : "",
     "",
     ev.description ? `## Описание\n\n${ev.description}\n` : "",
+    "## Участники",
+    "",
+    renderAttendeesBlock(ev.attendees ?? []),
+    "",
     "## Протоколы",
     "<!-- ASSISTANT:PROTOCOLS -->",
   ]
@@ -235,135 +389,64 @@ function renderEventFile(ev: CalendarEvent, includeUserSections: boolean): strin
   return base + ["", "- (пока пусто)", "", "## Заметки", "", "<!-- ASSISTANT:USER -->", ""].join("\n");
 }
 
-function mergePreservingSections(existing: string, regenerated: string): string {
-  // Обратная совместимость: старые версии использовали ASSISTANT:NOTES как единственный маркер сохранённых секций.
-  const userMarkerNew = "<!-- ASSISTANT:USER -->";
-  const userMarkerOld = "<!-- ASSISTANT:NOTES -->";
-  const protocolsMarkerNew = "<!-- ASSISTANT:PROTOCOLS -->";
-
-  // Извлекаем пользовательский контент
-  const userIdxNew = existing.indexOf(userMarkerNew);
-  const userIdxOld = existing.indexOf(userMarkerOld);
-  const userMarker = userIdxNew !== -1 ? userMarkerNew : userMarkerOld;
-  const userIdx = userIdxNew !== -1 ? userIdxNew : userIdxOld;
-  const userTail = userIdx === -1 ? "" : existing.slice(userIdx + userMarker.length).trimStart();
-
-  // Извлекаем список протоколов (предпочитаем marker, иначе fallback на заголовок секции)
-  const protocolsBody = extractProtocolsBody(existing);
-
-  // Вклеиваем в заново сгенерированный шаблон
-  let out = regenerated;
-
-  // Вставляем тело секции “Протоколы”
-  const regenProtoIdx = out.indexOf(protocolsMarkerNew);
-  if (regenProtoIdx !== -1) {
-    const insertAt = regenProtoIdx + protocolsMarkerNew.length;
-    const after = out.slice(insertAt);
-    const nextSectionIdx = after.search(/\n##\s+/);
-    const sliceEnd = nextSectionIdx === -1 ? out.length : insertAt + nextSectionIdx;
-    const beforePart = out.slice(0, insertAt);
-    const afterPart = out.slice(sliceEnd);
-    const body = protocolsBody.trim();
-    const normalizedBody = body ? "\n" + body + "\n" : "\n- (пока пусто)\n";
-    out = beforePart + normalizedBody + afterPart;
-  }
-
-  // Вставляем сохранённый “хвост” пользовательской секции
-  const regenUserIdx = out.indexOf(userMarkerNew);
-  if (regenUserIdx !== -1) {
-    const before = out.slice(0, regenUserIdx + userMarkerNew.length);
-    const after = out.slice(regenUserIdx + userMarkerNew.length);
-    // Удаляем всё после marker в regenerated и заменяем сохранённым содержимым.
-    out = before + "\n" + (userTail ? userTail.trimStart() : "") + "\n";
-    // Сохраняем завершающий перевод строки
-    if (!out.endsWith("\n")) out += "\n";
-    // Игнорируем старый regenerated tail
-    void after;
-  }
-
-  return out;
-}
-
 // yamlEscape перенесён в src/vault/yamlEscape.ts
 
-function extractProtocolsBody(text: string): string {
-  const protocolsMarkerNew = "<!-- ASSISTANT:PROTOCOLS -->";
-  const userMarkerNew = "<!-- ASSISTANT:USER -->";
-  const userMarkerOld = "<!-- ASSISTANT:NOTES -->";
-
-  const mIdx = text.indexOf(protocolsMarkerNew);
-  if (mIdx !== -1) {
-    const start = mIdx + protocolsMarkerNew.length;
-    const after = text.slice(start);
-    const endByUserNew = after.indexOf(userMarkerNew);
-    const endByUserOld = after.indexOf(userMarkerOld);
-    const endByH2 = after.search(/\n##\s+/);
-    const ends = [endByUserNew, endByUserOld, endByH2].filter((x) => x !== -1);
-    const end = ends.length === 0 ? after.length : Math.min(...ends);
-    return after.slice(0, end).trim();
-  }
-
-  // Fallback: парсим между заголовком секции и следующим "##"
-  const heading = "## Протоколы";
-  const hIdx = text.indexOf(heading);
-  if (hIdx === -1) return "";
-  const afterH = text.slice(hIdx + heading.length);
-  const endByNext = afterH.search(/\n##\s+/);
-  const body = endByNext === -1 ? afterH : afterH.slice(0, endByNext);
-  // Убираем возможные маркеры
-  return body.replace(protocolsMarkerNew, "").replace(userMarkerNew, "").replace(userMarkerOld, "").trim();
+function yamlStringArray(key: string, values: string[]): string[] {
+  if (!values.length) return [`${key}: []`];
+  return [`${key}:`, ...values.map((v) => `  - ${yamlEscape(v)}`)];
 }
 
-function extractWikiLinkTargets(text: string): string[] {
-  const out: string[] = [];
-  for (const line of text.split("\n")) {
-    const m = line.match(/\[\[([^\]]+)\]\]/);
-    if (!m) continue;
-    const inside = m[1] ?? "";
-    const target = inside.split("|")[0]?.trim() ?? "";
-    if (target) out.push(target);
+function groupAttendeePersonIds(attendees: Array<{ email: string; partstat?: string }>): {
+  all: string[];
+  accepted: string[];
+  declined: string[];
+  tentative: string[];
+  needsAction: string[];
+  unknown: string[];
+} {
+  const accepted: string[] = [];
+  const declined: string[] = [];
+  const tentative: string[] = [];
+  const needsAction: string[] = [];
+  const unknown: string[] = [];
+  const allSet = new Set<string>();
+
+  for (const a of attendees) {
+    const email = String(a?.email ?? "").trim();
+    if (!email) continue;
+    const pid = makePersonIdFromEmail(email);
+    allSet.add(pid);
+
+    const ps = String(a?.partstat ?? "")
+      .trim()
+      .toUpperCase();
+    if (ps === "ACCEPTED") accepted.push(pid);
+    else if (ps === "DECLINED") declined.push(pid);
+    else if (ps === "TENTATIVE") tentative.push(pid);
+    else if (ps === "NEEDS-ACTION") needsAction.push(pid);
+    else unknown.push(pid);
   }
-  return out;
+
+  const all = Array.from(allSet.values());
+  return { all, accepted, declined, tentative, needsAction, unknown };
 }
 
-function upsertProtocolLink(text: string, linkLine: string): string {
-  if (text.includes(linkLine)) return text;
-  const protocolsMarkerNew = "<!-- ASSISTANT:PROTOCOLS -->";
-  const idx = text.indexOf(protocolsMarkerNew);
-
-  if (idx === -1) {
-    // Fallback: дописываем в секцию протоколов (или создаём её)
-    const heading = "## Протоколы";
-    const hIdx = text.indexOf(heading);
-    if (hIdx === -1) return text + `\n\n${heading}\n${protocolsMarkerNew}\n${linkLine}\n`;
-    const insertPos = hIdx + heading.length;
-    return text.slice(0, insertPos) + `\n${protocolsMarkerNew}\n${linkLine}\n` + text.slice(insertPos);
-  }
-
-  const insertAt = idx + protocolsMarkerNew.length;
-  const before = text.slice(0, insertAt);
-  const after = text.slice(insertAt);
-
-  // Убираем placeholder, если он стоит в начале тела секции
-  const cleanedAfter = after.replace(/^\s*\n- \(пока пусто\)\s*\n/, "\n");
-  return before + `\n${linkLine}\n` + cleanedAfter;
-}
-
-function upsertCancelledFlagInUserSection(text: string): string {
-  const userMarkerNew = "<!-- ASSISTANT:USER -->";
-  const userMarkerOld = "<!-- ASSISTANT:NOTES -->";
-  const userIdxNew = text.indexOf(userMarkerNew);
-  const userIdxOld = text.indexOf(userMarkerOld);
-  const marker = userIdxNew !== -1 ? userMarkerNew : userMarkerOld;
-  const idx = userIdxNew !== -1 ? userIdxNew : userIdxOld;
-  if (idx === -1) return text;
-
-  const head = text.slice(0, idx + marker.length);
-  const tail = text.slice(idx + marker.length);
-  const line = "- Статус: отменена";
-  if (tail.includes(line)) return text;
-
-  return head + "\n" + line + "\n" + tail.trimStart();
+function renderAttendeesBlock(attendees: Array<{ email: string; cn?: string; partstat?: string }>): string {
+  if (!attendees.length) return "- (пока не удалось извлечь из календаря)";
+  const lines = attendees
+    .slice()
+    .sort((a, b) => String(a.email ?? "").localeCompare(String(b.email ?? "")))
+    .map((a) => {
+      const email = (a.email ?? "").trim();
+      const cn = (a.cn ?? "").trim();
+      const ps = String(a.partstat ?? "")
+        .trim()
+        .toUpperCase();
+      const label = ps === "ACCEPTED" ? "придёт" : ps === "DECLINED" ? "не придёт" : ps === "TENTATIVE" ? "возможно" : "не указал";
+      const who = cn ? `${cn} <${email}>` : email;
+      return `- ${who} — ${label}`;
+    });
+  return lines.join("\n");
 }
 
 // ensureFile перенесён в src/vault/ensureFile.ts

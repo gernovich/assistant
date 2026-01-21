@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { redactSecretsInStringForLog } from "../log/redact";
 
-export type OutboxItemKind = "set_event_plan_partstat";
+export type OutboxItemKind = "set_event_partstat";
 
 export type OutboxItemV1 = {
   version: 1;

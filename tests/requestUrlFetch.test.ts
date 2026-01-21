@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { headersToRecord, bodyToRequestUrlBody, requestUrlFetch } from "../src/caldav/requestUrlFetch";
+import { toUrl, headersToRecord, bodyToRequestUrlBody, requestUrlFetch } from "../src/caldav/requestUrlFetch";
 import * as obsidian from "obsidian";
 
 describe("requestUrlFetch helpers", () => {
+  it("toUrl поддерживает string, URL и Request", () => {
+    expect(toUrl("https://example.com/a")).toBe("https://example.com/a");
+    expect(toUrl(new URL("https://example.com/b"))).toBe("https://example.com/b");
+    const req = new Request("https://example.com/c");
+    expect(toUrl(req)).toBe("https://example.com/c");
+  });
+
   it("headersToRecord поддерживает Headers и массив пар", () => {
     const h = new Headers();
     h.set("a", "1");
@@ -35,6 +42,11 @@ describe("requestUrlFetch helpers", () => {
     expect(bodyToRequestUrlBody(undefined)).toBeUndefined();
     expect(bodyToRequestUrlBody(null)).toBeUndefined();
   });
+
+  it("bodyToRequestUrlBody фолбечит на String(body) для нестандартных значений", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(bodyToRequestUrlBody(123 as any)).toBe("123");
+  });
 });
 
 describe("requestUrlFetch", () => {
@@ -48,9 +60,39 @@ describe("requestUrlFetch", () => {
       json: null,
     });
 
-    const res = await requestUrlFetch("https://example.com", { method: "POST", body: "x", headers: { a: "1" } });
+    const res = await requestUrlFetch(new Request("https://example.com"), { method: "post", body: "x", headers: { a: "1" } });
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("ok");
-    expect(spy).toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      // Request('https://example.com') нормализуется в 'https://example.com/'
+      url: "https://example.com/",
+      method: "POST",
+      headers: { a: "1" },
+      body: "x",
+      throw: false,
+    });
+  });
+
+  it("без init: использует GET и пустые headers/body", async () => {
+    const spy = vi.spyOn(obsidian, "requestUrl").mockResolvedValue({
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      text: "ok",
+      arrayBuffer: new TextEncoder().encode("ok").buffer,
+      json: null,
+    });
+
+    const res = await requestUrlFetch("https://example.com/ping");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("ok");
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      url: "https://example.com/ping",
+      method: "GET",
+      headers: {},
+      body: undefined,
+      throw: false,
+    });
   });
 });

@@ -76,11 +76,16 @@ export class LogView extends ItemView {
     const openBtn = actions.createEl("button", { text: "Открыть файл" });
     openBtn.onclick = () => this.openTodayFile?.();
 
-    const clearPanelBtn = actions.createEl("button", { text: "Очистить панель" });
-    clearPanelBtn.onclick = () => this.log.clear();
-
-    const clearFileBtn = actions.createEl("button", { text: "Очистить файл (сегодня)" });
-    clearFileBtn.onclick = () => this.clearTodayFile?.();
+    const clearBtn = actions.createEl("button", { text: "Очистить лог" });
+    clearBtn.onclick = async () => {
+      // UX: одна кнопка очищает и панель, и файл (чтобы "лог как есть" был консистентным).
+      this.log.clear();
+      try {
+        await this.clearTodayFile?.();
+      } catch {
+        // ignore
+      }
+    };
 
     const list = el.createDiv({ cls: "assistant-log__list" });
     const items = this.log.list();
@@ -96,21 +101,33 @@ export class LogView extends ItemView {
 }
 
 function renderEntry(e: LogEntry): HTMLElement {
-  const row = document.createElement("div");
-  row.className = `assistant-log__row assistant-log__row--${e.level}`;
+  const hasData = Boolean(e.data && Object.keys(e.data).length > 0);
+  const root = document.createElement(hasData ? "details" : "div");
+  root.className = `assistant-log__item assistant-log__item--${e.level}`;
+  if (hasData) (root as HTMLDetailsElement).open = false;
 
-  const ts = document.createElement("div");
+  const head = document.createElement(hasData ? "summary" : "div");
+  head.className = "assistant-log__line";
+
+  const ts = document.createElement("span");
   ts.className = "assistant-log__ts";
-  ts.textContent = new Date(e.ts).toLocaleString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  ts.textContent = fmtTime(e.ts);
+  ts.title = new Date(e.ts).toISOString();
 
-  const msg = document.createElement("div");
+  const lvl = document.createElement("span");
+  lvl.className = `assistant-log__lvl assistant-log__lvl--${e.level}`;
+  lvl.textContent = e.level.toUpperCase();
+
+  const msg = document.createElement("span");
   msg.className = "assistant-log__msg";
   msg.textContent = e.message;
 
-  row.appendChild(ts);
-  row.appendChild(msg);
+  head.appendChild(ts);
+  head.appendChild(lvl);
+  head.appendChild(msg);
+  root.appendChild(head);
 
-  if (e.data && Object.keys(e.data).length > 0) {
+  if (hasData) {
     const pre = document.createElement("pre");
     pre.className = "assistant-log__data";
     try {
@@ -118,8 +135,17 @@ function renderEntry(e: LogEntry): HTMLElement {
     } catch {
       pre.textContent = String(e.data);
     }
-    row.appendChild(pre);
+    root.appendChild(pre);
   }
 
-  return row;
+  return root;
+}
+
+function fmtTime(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `${hh}:${mm}:${ss}.${ms}`;
 }

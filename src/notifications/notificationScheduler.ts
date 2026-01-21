@@ -1,8 +1,7 @@
 import { Notice } from "obsidian";
-import type { AssistantSettings, CalendarEvent } from "../types";
-import { linuxNotifySend } from "../os/linuxNotify";
-import { linuxPopupWindow } from "../os/linuxPopup";
+import type { AssistantSettings, Event } from "../types";
 import { MS_PER_HOUR, NOTIFICATIONS_HORIZON_HOURS } from "../calendar/constants";
+import { showElectronReminderWindow } from "./electronWindowReminder";
 
 /**
  * Планировщик уведомлений по событиям календаря.
@@ -16,7 +15,6 @@ export class NotificationScheduler {
   private settings: AssistantSettings;
   private timers: number[] = [];
   private onLog?: (message: string) => void;
-  private linuxNotifyFailedOnce = false;
 
   /**
    * @param onLog Логгер для диагностики (используется в LogService).
@@ -26,9 +24,9 @@ export class NotificationScheduler {
     settings: AssistantSettings,
     onLog?: (message: string) => void,
     private actions?: {
-      createProtocol?: (ev: CalendarEvent) => void | Promise<void>;
-      startRecording?: (ev: CalendarEvent) => void | Promise<void>;
-      meetingCancelled?: (ev: CalendarEvent) => void | Promise<void>;
+      createProtocol?: (ev: Event) => unknown | Promise<unknown>;
+      startRecording?: (ev: Event) => void | Promise<void>;
+      meetingCancelled?: (ev: Event) => void | Promise<void>;
     },
   ) {
     this.settings = settings;
@@ -47,7 +45,7 @@ export class NotificationScheduler {
   }
 
   /** Пересобрать расписание уведомлений по списку событий. */
-  schedule(events: CalendarEvent[]) {
+  schedule(events: Event[]) {
     this.clear();
     if (!this.settings.notifications.enabled) return;
 
@@ -68,7 +66,7 @@ export class NotificationScheduler {
         this.timers.push(
           window.setTimeout(() => {
             const msg = `Через ${minutesBefore} мин: ${formatEvent(ev)}`;
-            void this.showGlobal(ev, msg);
+            void this.showGlobal(ev, msg, "before");
           }, beforeMs - now),
         );
       }
@@ -77,70 +75,34 @@ export class NotificationScheduler {
         this.timers.push(
           window.setTimeout(() => {
             const msg = `Началась: ${formatEvent(ev)}`;
-            void this.showGlobal(ev, msg);
+            void this.showGlobal(ev, msg, "start");
           }, startMs - now),
         );
       }
     }
   }
 
-  debugShowReminder(ev: CalendarEvent) {
+  debugShowReminder(ev: Event) {
     const minutesBefore = Math.max(0, this.settings.notifications.minutesBefore);
     const msg = `Через ${minutesBefore} мин: ${formatEvent(ev)}`;
-    void this.showGlobal(ev, msg, true);
+    void this.showGlobal(ev, msg, "before", true);
   }
 
-  private async showGlobal(ev: CalendarEvent, msg: string, isDebug = false) {
+  private async showGlobal(ev: Event, msg: string, kind: "before" | "start", isDebug = false) {
     const prefix = isDebug ? "DEBUG уведомление" : "Показано уведомление";
     this.onLog?.(`${prefix}: ${msg}`);
-    // Обратная совместимость: старые настройки (например из тестов) могли не иметь delivery.*.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const anyNotifications = this.settings.notifications as any;
-    const method =
-      this.settings.notifications.delivery?.method ??
-      (anyNotifications?.global?.enabled === true ? "system_notify_send" : "obsidian_notice");
-
-    if (method === "obsidian_notice") {
-      new Notice(msg);
-      return;
-    }
-
-    if (method === "system_notify_send") {
-      try {
-        await linuxNotifySend("Ассистент", msg, this.settings);
-      } catch (e) {
-        if (!this.linuxNotifyFailedOnce) {
-          this.linuxNotifyFailedOnce = true;
-          this.onLog?.("notify-send: ошибка (поставьте пакет libnotify-bin), уведомление не показано");
-        }
-        void e;
-      }
-      return;
-    }
-
-    // popup_window (yad)
     try {
-      const action = await linuxPopupWindow(ev, msg, this.settings);
-      if (action === "start_recording") {
-        this.onLog?.("Popup: нажато «Начать запись» (MVP — без записи)");
-        await this.actions?.startRecording?.(ev);
-      }
-      if (action === "create_protocol") {
-        this.onLog?.("Popup: нажато «Создать протокол»");
-        await this.actions?.createProtocol?.(ev);
-      }
-      if (action === "cancelled") {
-        this.onLog?.("Popup: нажато «Встреча отменена»");
-        await this.actions?.meetingCancelled?.(ev);
-      }
+      // Единый способ: отдельное окно поверх всех (Electron).
+      showElectronReminderWindow({ ev, kind, minutesBefore: Math.max(0, this.settings.notifications.minutesBefore), actions: this.actions });
     } catch (e) {
-      this.onLog?.("popup_window: ошибка (требуется пакет yad), уведомление не показано");
-      void e;
+      // Safety: если BrowserWindow недоступен (тесты/необычное окружение) — хотя бы Notice внутри Obsidian.
+      this.onLog?.(`electron_window: ошибка (${String((e as unknown) ?? "неизвестно")}), fallback на Notice`);
+      new Notice(msg);
     }
   }
 }
 
-function formatEvent(ev: CalendarEvent): string {
+function formatEvent(ev: Event): string {
   const t = ev.allDay ? "весь день" : ev.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${t} — ${ev.summary}`;
 }

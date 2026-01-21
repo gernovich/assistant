@@ -142,10 +142,13 @@ export class LogFileWriter {
       const files = await fs.readdir(this.logsDirPath);
       const nowUtcMidnight = utcMidnightMs(nowMs);
       for (const name of files) {
-        const m = /^(\d{4}-\d{2}-\d{2})\.log$/.exec(name);
+        // Парсим дату прямо из имени файла (YYYY-MM-DD.log), чтобы не плодить недостижимые ветки.
+        const m = /^(\d{4})-(\d{2})-(\d{2})\.log$/.exec(name);
         if (!m) continue;
-        const fileUtcMidnight = parseYmdUtcMidnightMs(m[1]);
-        if (fileUtcMidnight === null) continue;
+        const y = Number(m[1]);
+        const mo = Number(m[2]);
+        const day = Number(m[3]);
+        const fileUtcMidnight = Date.UTC(y, mo - 1, day);
         const ageDays = Math.floor((nowUtcMidnight - fileUtcMidnight) / MS_PER_DAY);
         if (ageDays >= keepDays) {
           await fs.rm(path.join(this.logsDirPath, name), { force: true });
@@ -176,16 +179,6 @@ function normalizeRetentionDays(v: unknown): number {
 function utcMidnightMs(ts: number): number {
   const d = new Date(ts);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-
-function parseYmdUtcMidnightMs(ymd: string): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const day = Number(m[3]);
-  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(day)) return null;
-  return Date.UTC(y, mo - 1, day);
 }
 
 function formatDateYmd(d: Date): string {

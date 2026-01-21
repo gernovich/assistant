@@ -1,6 +1,7 @@
 import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
-import type { AssistantSettings, CalendarEvent } from "../types";
+import type { AssistantSettings, Event } from "../types";
 import type { CalendarService } from "../calendar/calendarService";
+import { makeEventKey } from "../ids/stableIds";
 
 /** Тип Obsidian view для “Повестки”. */
 export const AGENDA_VIEW_TYPE = "assistant-agenda";
@@ -16,45 +17,53 @@ export class AgendaView extends ItemView {
   private settings: AssistantSettings;
   private calendarService: CalendarService;
   private openLog?: () => void;
-  private openEvent?: (ev: CalendarEvent) => void;
-  private getProtocolMenuState?: (ev: CalendarEvent) => Promise<{
+  private openEvent?: (ev: Event) => void;
+  private setMyPartstat?: (ev: Event, partstat: NonNullable<Event["status"]>) => Promise<void> | void;
+  private getProtocolMenuState?: (ev: Event) => Promise<{
     hasCurrent: boolean;
     hasLatest: boolean;
     currentIsLatest: boolean;
   }>;
-  private openCurrentProtocol?: (ev: CalendarEvent) => void | Promise<void>;
-  private openLatestProtocol?: (ev: CalendarEvent) => void | Promise<void>;
-  private createProtocol?: (ev: CalendarEvent) => void;
-  private debugShowReminder?: (ev: CalendarEvent) => void;
+  private openCurrentProtocol?: (ev: Event) => void | Promise<void>;
+  private openLatestProtocol?: (ev: Event) => void | Promise<void>;
+  private createProtocol?: (ev: Event) => unknown | Promise<unknown>;
+  private openRecorder?: (ev: Event) => void | Promise<void>;
+  private debugShowReminder?: (ev: Event) => void;
   private unsubscribe?: () => void;
   private tickTimer?: number;
   private dayOffset = 0;
+  /** Оптимистичное значение status, чтобы UI обновлялся сразу после клика. */
+  private optimisticPartstatByEventKey = new Map<string, Event["status"]>();
 
   constructor(
     leaf: WorkspaceLeaf,
     settings: AssistantSettings,
     calendarService: CalendarService,
     openLog?: () => void,
-    openEvent?: (ev: CalendarEvent) => void,
-    getProtocolMenuState?: (ev: CalendarEvent) => Promise<{
+    openEvent?: (ev: Event) => void,
+    setMyPartstat?: (ev: Event, partstat: NonNullable<Event["status"]>) => Promise<void> | void,
+    getProtocolMenuState?: (ev: Event) => Promise<{
       hasCurrent: boolean;
       hasLatest: boolean;
       currentIsLatest: boolean;
     }>,
-    openCurrentProtocol?: (ev: CalendarEvent) => void | Promise<void>,
-    openLatestProtocol?: (ev: CalendarEvent) => void | Promise<void>,
-    createProtocol?: (ev: CalendarEvent) => void,
-    debugShowReminder?: (ev: CalendarEvent) => void,
+    openCurrentProtocol?: (ev: Event) => void | Promise<void>,
+    openLatestProtocol?: (ev: Event) => void | Promise<void>,
+    createProtocol?: (ev: Event) => unknown | Promise<unknown>,
+    openRecorder?: (ev: Event) => void | Promise<void>,
+    debugShowReminder?: (ev: Event) => void,
   ) {
     super(leaf);
     this.settings = settings;
     this.calendarService = calendarService;
     this.openLog = openLog;
     this.openEvent = openEvent;
+    this.setMyPartstat = setMyPartstat;
     this.getProtocolMenuState = getProtocolMenuState;
     this.openCurrentProtocol = openCurrentProtocol;
     this.openLatestProtocol = openLatestProtocol;
     this.createProtocol = createProtocol;
+    this.openRecorder = openRecorder;
     this.debugShowReminder = debugShowReminder;
   }
 
@@ -76,6 +85,11 @@ export class AgendaView extends ItemView {
   /** Применить новые настройки (например после saveSettingsAndApply). */
   setSettings(settings: AssistantSettings) {
     this.settings = settings;
+    this.render();
+  }
+
+  /** Принудительно перерисовать повестку (например после изменения карточки встречи). */
+  refresh() {
     this.render();
   }
 
@@ -139,8 +153,8 @@ export class AgendaView extends ItemView {
     header.createDiv({ text: formatNow(), cls: "assistant-agenda__now", attr: { "data-assistant-now": "1" } });
 
     // Баннер “данные устарели”: если часть календарей не обновилась — показываем предупреждение, но продолжаем отображать кэш.
-    const status = this.calendarService.getPerCalendarStatus?.();
-    if (status) {
+    const status = this.calendarService.getRefreshResult().perCalendar;
+    {
       const entries = Object.entries(status);
       const stale = entries.filter(([, s]) => s.status === "stale");
       const total = entries.length;
@@ -160,7 +174,7 @@ export class AgendaView extends ItemView {
       }
     }
 
-    const events = selectDay(this.calendarService.getEvents(), this.settings, this.dayOffset);
+    const events = this.calendarService.getDayEvents(this.dayOffset, this.settings.agenda.maxEvents);
 
     const allDay = events.filter((e) => e.allDay);
     const timed = events.filter((e) => !e.allDay);
@@ -171,9 +185,11 @@ export class AgendaView extends ItemView {
       const pills = box.createDiv({ cls: "assistant-agenda__allday-items" });
       for (const ev of allDay) {
         const pill = pills.createDiv({ cls: "assistant-agenda__allday-pill" });
+        const cal = this.settings.calendars.find((c) => c.id === ev.calendar.id);
+        pill.title = this.buildEventTooltip(ev, cal?.name);
         pill.createSpan({ text: ev.summary });
-        const resp = partstatLabel(ev.myPartstat);
-        if (resp) pill.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(ev.myPartstat)}` });
+        const resp = partstatLabel(ev.status);
+        if (resp) pill.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(ev.status)}` });
         pill.onclick = () => {
           if (this.openEvent) this.openEvent(ev);
           else new Notice(`${formatWhen(ev)} — ${ev.summary}`);
@@ -219,10 +235,13 @@ export class AgendaView extends ItemView {
       node.style.left = `calc(${(b.col / b.colCount) * 100}% + 4px)`;
       node.style.width = `calc(${100 / b.colCount}% - 8px)`;
 
+      const cal = this.settings.calendars.find((c) => c.id === b.event.calendar.id);
+      node.title = this.buildEventTooltip(b.event, cal?.name);
+
       const title = node.createDiv({ cls: "assistant-agenda__block-title" });
       title.createSpan({ text: b.event.summary });
-      const resp = partstatLabel(b.event.myPartstat);
-      if (resp) title.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(b.event.myPartstat)}` });
+      const resp = partstatLabel(b.event.status);
+      if (resp) title.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(b.event.status)}` });
 
       node.onclick = () => {
         if (this.openEvent) this.openEvent(b.event);
@@ -236,11 +255,11 @@ export class AgendaView extends ItemView {
     }
   }
 
-  private openEventMenu(ev: CalendarEvent, e: MouseEvent) {
+  private openEventMenu(ev: Event, e: MouseEvent) {
     void this.openEventMenuAsync(ev, e);
   }
 
-  private async openEventMenuAsync(ev: CalendarEvent, e: MouseEvent) {
+  private async openEventMenuAsync(ev: Event, e: MouseEvent) {
     const menu = new Menu();
 
     menu.addItem((it) => {
@@ -252,18 +271,47 @@ export class AgendaView extends ItemView {
         });
     });
 
+    if (this.openRecorder) {
+      menu.addItem((it) => {
+        it.setTitle("Диктофон")
+          .setIcon("microphone")
+          .onClick(() => void this.openRecorder?.(ev));
+      });
+    }
+
+    if (this.setMyPartstat) {
+      const ps = this.getMyPartstat(ev);
+      menu.addSeparator();
+      menu.addItem((it) => {
+        it.setTitle(ps === "accepted" ? "✓ Принято" : "Принято")
+          .setIcon("check")
+          .onClick(() => void this.applyMyPartstat(ev, "accepted"));
+      });
+      menu.addItem((it) => {
+        it.setTitle(ps === "declined" ? "✓ Отклонено" : "Отклонено")
+          .setIcon("x")
+          .onClick(() => void this.applyMyPartstat(ev, "declined"));
+      });
+      menu.addItem((it) => {
+        it.setTitle(ps === "tentative" ? "✓ Возможно" : "Возможно")
+          .setIcon("help-circle")
+          .onClick(() => void this.applyMyPartstat(ev, "tentative"));
+      });
+      menu.addItem((it) => {
+        it.setTitle(ps === "needs_action" ? "✓ Нет ответа" : "Нет ответа")
+          .setIcon("minus-circle")
+          .onClick(() => void this.applyMyPartstat(ev, "needs_action"));
+      });
+    }
+
     if (this.getProtocolMenuState) {
       const state = await this.getProtocolMenuState(ev);
 
-      if (state.hasCurrent && this.openCurrentProtocol) {
-        menu.addItem((it) => {
-          it.setTitle("Открыть текущий протокол")
-            .setIcon("file-text")
-            .onClick(() => void this.openCurrentProtocol?.(ev));
-        });
-      }
+      const canOpenLatest = state.hasLatest && this.openLatestProtocol;
+      const canCreate = Boolean(this.createProtocol);
+      if (canOpenLatest || canCreate) menu.addSeparator();
 
-      if (state.hasLatest && !state.currentIsLatest && this.openLatestProtocol) {
+      if (canOpenLatest) {
         menu.addItem((it) => {
           it.setTitle("Открыть последний протокол")
             .setIcon("file-text")
@@ -271,7 +319,7 @@ export class AgendaView extends ItemView {
         });
       }
 
-      if (!state.hasCurrent && this.createProtocol) {
+      if (canCreate) {
         menu.addItem((it) => {
           it.setTitle("Создать новый протокол")
             .setIcon("file-plus")
@@ -279,7 +327,7 @@ export class AgendaView extends ItemView {
         });
       }
     } else if (this.createProtocol) {
-      // Запасной вариант (если нет функции определения “текущего/последнего” протокола).
+      menu.addSeparator();
       menu.addItem((it) => {
         it.setTitle("Создать новый протокол")
           .setIcon("file-plus")
@@ -298,6 +346,37 @@ export class AgendaView extends ItemView {
 
     menu.showAtPosition({ x: e.pageX, y: e.pageY });
   }
+
+  private getMyPartstat(ev: Event): Event["status"] | undefined {
+    const key = makeEventKey(ev.calendar.id, ev.id);
+    if (this.optimisticPartstatByEventKey.has(key)) {
+      return this.optimisticPartstatByEventKey.get(key);
+    }
+    return ev.status;
+  }
+
+  private async applyMyPartstat(ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> {
+    const key = makeEventKey(ev.calendar.id, ev.id);
+    this.optimisticPartstatByEventKey.set(key, partstat);
+    this.render();
+    try {
+      await this.setMyPartstat?.(ev, partstat);
+    } finally {
+      // Дальше дождёмся refresh календаря с актуальным PARTSTAT; тут просто снимаем оверрайд на следующем рендере.
+      this.optimisticPartstatByEventKey.delete(key);
+    }
+  }
+
+  private buildEventTooltip(ev: Event, calendarName?: string): string {
+    const parts: string[] = [];
+    const calName = String(calendarName ?? "").trim();
+    if (calName) parts.push(`Календарь: ${calName}`);
+    const org = String(ev.organizer?.emails?.[0] ?? "").trim();
+    if (org) parts.push(`Организатор: ${org}`);
+    const att = attendeesTooltip(ev);
+    if (att) parts.push(att);
+    return parts.join("\n");
+  }
 }
 
 function formatNow(): string {
@@ -311,25 +390,49 @@ function formatNow(): string {
   });
 }
 
-function formatWhen(ev: CalendarEvent): string {
+function formatWhen(ev: Event): string {
   if (ev.allDay) return ev.start.toLocaleDateString(RU, { month: "2-digit", day: "2-digit" }) + " • весь день";
   return ev.start.toLocaleString(RU, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function partstatLabel(ps: CalendarEvent["myPartstat"]): string {
-  if (ps === "accepted") return " • принята";
-  if (ps === "declined") return " • отклонена";
-  if (ps === "tentative") return " • под вопросом";
-  if (ps === "needs_action") return " • не отвечено";
+function partstatLabel(ps: Event["status"]): string {
+  if (ps === "accepted") return " • принято";
+  if (ps === "declined") return " • отклонено";
+  if (ps === "tentative") return " • возможно";
+  if (ps === "needs_action") return " • нет ответа";
   return "";
 }
 
-function partstatClass(ps: CalendarEvent["myPartstat"]): string {
+function partstatClass(ps: Event["status"]): string {
   if (ps === "accepted") return "assistant-agenda__resp--accepted";
   if (ps === "declined") return "assistant-agenda__resp--declined";
   if (ps === "tentative") return "assistant-agenda__resp--tentative";
   if (ps === "needs_action") return "assistant-agenda__resp--needs-action";
   return "";
+}
+
+function attendeesTooltip(ev: Event): string {
+  const a = ev.attendees ?? [];
+  if (!a.length) return "";
+  let yes = 0;
+  let no = 0;
+  let maybe = 0;
+  let unknown = 0;
+  for (const x of a) {
+    const ps = String(x.partstat ?? "")
+      .trim()
+      .toUpperCase();
+    if (ps === "ACCEPTED") yes++;
+    else if (ps === "DECLINED") no++;
+    else if (ps === "TENTATIVE") maybe++;
+    else unknown++;
+  }
+  const parts: string[] = [];
+  if (yes > 0) parts.push(`Принято: ${yes}`);
+  if (no > 0) parts.push(`Отклонено: ${no}`);
+  if (maybe > 0) parts.push(`Возможно: ${maybe}`);
+  if (unknown > 0) parts.push(`Нет ответа: ${unknown}`);
+  return parts.length ? parts.join("; ") + ";" : "";
 }
 
 function formatDayLabel(dayOffset: number): string {
@@ -339,7 +442,7 @@ function formatDayLabel(dayOffset: number): string {
   return d.toLocaleDateString(RU, { weekday: "short", year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
-function selectDay(events: CalendarEvent[], settings: AssistantSettings, dayOffset: number): CalendarEvent[] {
+function selectDay(events: Event[], settings: AssistantSettings, dayOffset: number): Event[] {
   const day = new Date();
   day.setHours(0, 0, 0, 0);
   day.setDate(day.getDate() + dayOffset);
@@ -355,7 +458,7 @@ function selectDay(events: CalendarEvent[], settings: AssistantSettings, dayOffs
 }
 
 type TimedBlock = {
-  event: CalendarEvent;
+  event: Event;
   top: number;
   height: number;
   col: number;
@@ -363,7 +466,7 @@ type TimedBlock = {
   timeLabel: string;
 };
 
-function layoutTimedEvents(events: CalendarEvent[], dayOffset: number): TimedBlock[] {
+function layoutTimedEvents(events: Event[], dayOffset: number): TimedBlock[] {
   const day = new Date();
   day.setHours(0, 0, 0, 0);
   day.setDate(day.getDate() + dayOffset);

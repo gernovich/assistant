@@ -1,4 +1,4 @@
-import type { AssistantSettings, CalendarConfig, CalendarEvent } from "../../types";
+import type { AssistantSettings, CalendarConfig, Event } from "../../types";
 import type { CalendarProvider } from "./calendarProvider";
 import { DAVClient, type DAVAccount, type DAVCalendar, getOauthHeaders } from "tsdav";
 import { parseIcs } from "../ics";
@@ -52,7 +52,7 @@ export class CaldavProvider implements CalendarProvider {
     // (учёт смены учётных данных/сервера без лишнего давления на сеть).
   }
 
-  async refresh(cal: CalendarConfig): Promise<CalendarEvent[]> {
+  async refresh(cal: CalendarConfig): Promise<Event[]> {
     const cfg = cal.caldav;
     if (!cfg?.accountId || !cfg.calendarUrl) return [];
 
@@ -69,7 +69,6 @@ export class CaldavProvider implements CalendarProvider {
     const calendar: DAVCalendar = {
       url: cfg.calendarUrl,
       displayName: cal.name,
-      calendarColor: cal.color,
     };
 
     const objects = await client.fetchCalendarObjects({
@@ -101,22 +100,81 @@ export class CaldavProvider implements CalendarProvider {
       }
     }
 
-    const out: CalendarEvent[] = [];
+    const runtimeCalendar: import("../../types").Calendar = { id: cal.id, name: cal.name, type: cal.type, config: cal };
+    const out: Event[] = [];
     for (const obj of objects) {
       const text = typeof obj.data === "string" ? obj.data : "";
       if (!text) continue;
       out.push(
-        ...parseIcs(cal.id, text, {
+        ...parseIcs(runtimeCalendar, text, {
           now: new Date(),
           horizonDays: CALENDAR_EVENTS_HORIZON_DAYS,
-          myEmail: this.settings.calendar.myEmail,
+          // Если пользователь не задал email явно, для CalDAV логин аккаунта — хороший дефолт.
+          myEmail: (this.settings.calendar.myEmail || account.username).trim(),
         }),
       );
     }
     return out;
   }
 
-  async discoverCalendars(accountId: string): Promise<Array<{ displayName: string; url: string; color?: string }>> {
+  /**
+   * Изменить мой PARTSTAT в календаре (CalDAV write-back).
+   *
+   * Ограничения MVP:
+   * - работает только если в VEVENT есть ATTENDEE для текущего пользователя (email аккаунта/настроек)
+   * - обновляем конкретный calendar object через PUT (If-Match по etag)
+   */
+  async setMyPartstat(cal: CalendarConfig, ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> {
+    const cfg = cal.caldav;
+    if (!cfg?.accountId || !cfg.calendarUrl) throw new Error("CalDAV календарь не настроен");
+
+    const account = this.settings.caldav.accounts.find((a) => a.id === cfg.accountId);
+    if (!account) throw new Error("CalDAV аккаунт не найден");
+    const readiness = getCaldavAccountReadiness(account);
+    if (!readiness.ok) throw new Error("CalDAV аккаунт не готов (проверьте настройки)");
+
+    const client = await this.getOrLoginClient(account);
+    const calendar: DAVCalendar = {
+      url: cfg.calendarUrl,
+      displayName: cal.name,
+    };
+
+    // Узкое окно поиска, чтобы не тянуть весь горизонт.
+    const start = new Date(ev.start.getTime() - 12 * 60 * 60_000);
+    const end = new Date(ev.start.getTime() + 36 * 60 * 60_000);
+    const objects = await client.fetchCalendarObjects({
+      calendar,
+      timeRange: { start: start.toISOString(), end: end.toISOString() },
+      expand: false,
+      useMultiGet: true,
+    });
+
+    const desired = partstatToIcs(partstat);
+    const myEmails = splitEmails((this.settings.calendar.myEmail || account.username).trim());
+    if (myEmails.length === 0) throw new Error("Невозможно определить мой email для RSVP (проверьте логин/настройки)");
+
+    const target = findBestCalendarObject(objects, ev, myEmails);
+    if (!target) throw new Error("Не удалось найти CalDAV object для этого события (UID/DTSTART не совпали)");
+
+    const updated = updateMyAttendeePartstatInIcal(String(target.data ?? ""), myEmails, desired);
+    if (updated === String(target.data ?? "")) {
+      throw new Error(
+        "Не удалось обновить PARTSTAT: ATTENDEE для вашего email не найден в VEVENT. " +
+          "Обычно это значит, что вы не участник (ATTENDEE) этой встречи (например, вы организатор или встреча без гостей). " +
+          `Проверенные emails: ${myEmails.join(", ")}`,
+      );
+    }
+
+    const res = await client.updateCalendarObject({
+      calendarObject: { ...target, data: updated },
+    });
+    if (!res.ok) {
+      const txt = await safeReadText(res);
+      throw new Error(`CalDAV: updateCalendarObject не удался: HTTP ${res.status} ${res.statusText}${txt ? ` — ${txt}` : ""}`);
+    }
+  }
+
+  async discoverCalendars(accountId: string): Promise<Array<{ displayName: string; url: string }>> {
     const account = this.settings.caldav.accounts.find((a) => a.id === accountId);
     if (!account) return [];
     const readiness = getCaldavAccountReadiness(account);
@@ -167,7 +225,6 @@ export class CaldavProvider implements CalendarProvider {
     return cals.map((c) => ({
       displayName: String(c.displayName ?? "Календарь"),
       url: String(c.url ?? ""),
-      color: typeof c.calendarColor === "string" ? c.calendarColor : undefined,
     }));
   }
 
@@ -241,4 +298,141 @@ const GOOGLE_CALDAV_ROOT_URL = "https://apidata.googleusercontent.com/caldav/v2/
 function googlePrimaryEventsUrl(email: string): string {
   const e = (email ?? "").trim();
   return `${GOOGLE_CALDAV_ROOT_URL}${encodeURIComponent(e)}/events/`;
+}
+
+function splitEmails(raw: string): string[] {
+  return raw
+    .split(/[,\s;]+/g)
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function normalizeMailto(v: string): string {
+  const s = String(v ?? "").trim();
+  const m = s.match(/^mailto:(.+)$/i);
+  return (m ? m[1] : s).trim().toLowerCase();
+}
+
+function partstatToIcs(ps: NonNullable<Event["status"]>): string {
+  if (ps === "accepted") return "ACCEPTED";
+  if (ps === "declined") return "DECLINED";
+  if (ps === "tentative") return "TENTATIVE";
+  return "NEEDS-ACTION";
+}
+
+type CalendarObject = { url: string; etag?: string; data?: unknown };
+
+function findBestCalendarObject(objects: CalendarObject[], ev: Event, myEmails: string[]): CalendarObject | null {
+  const startMs = ev.start.getTime();
+  const uid = String(ev.id ?? "").trim();
+  if (!uid) return null;
+
+  let best: { obj: CalendarObject; score: number } | null = null;
+  for (const obj of objects) {
+    const text = String(obj.data ?? "");
+    if (!text) continue;
+    const blocks = extractVevents(text);
+    for (const b of blocks) {
+      const buid = getIcsProp(b, "UID");
+      if (!buid || buid.trim() !== uid) continue;
+      const dt = getIcsProp(b, "DTSTART");
+      if (!dt) continue;
+      const dtMs = parseIcsDateMs(dt);
+      if (dtMs == null) continue;
+      // Ищем VEVENT с совпадающим DTSTART (обычно это override-экземпляр или отдельный object).
+      // Если совпадения нет, fallback на master (по UID) тоже допустим, но с меньшим приоритетом.
+      const sameStart = dtMs === startMs;
+      const hasMe = hasAttendeeForAnyEmail(b, myEmails);
+      const score = (sameStart ? 10 : 0) + (hasMe ? 2 : 0) + (text.length > 0 ? 1 : 0);
+      if (!best || score > best.score) best = { obj, score };
+    }
+  }
+  return best?.obj ?? null;
+}
+
+function extractVevents(ical: string): string[] {
+  const out: string[] = [];
+  const re = /BEGIN:VEVENT[\s\S]*?\nEND:VEVENT/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(ical))) out.push(m[0]);
+  return out;
+}
+
+function getIcsProp(block: string, name: string): string | null {
+  const re = new RegExp(`^${name}(;[^:]*)?:(.*)$`, "im");
+  const m = block.match(re);
+  return m ? String(m[2] ?? "").trim() : null;
+}
+
+function hasAttendeeForAnyEmail(block: string, emails: string[]): boolean {
+  const re = /^ATTENDEE(?:;[^:]*)?:(.*)$/gim;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block))) {
+    const v = normalizeMailto(String(m[1] ?? ""));
+    if (v && emails.includes(v)) return true;
+  }
+  return false;
+}
+
+function updateMyAttendeePartstatInIcal(ical: string, myEmails: string[], desiredPartstat: string): string {
+  // Обновляем все VEVENT в объекте (некоторые серверы держат один VEVENT на объект, но лучше не предполагать).
+  return ical.replace(/BEGIN:VEVENT[\s\S]*?\nEND:VEVENT/gm, (ve) => updateMyAttendeePartstatInVevent(ve, myEmails, desiredPartstat));
+}
+
+function updateMyAttendeePartstatInVevent(vevent: string, myEmails: string[], desiredPartstat: string): string {
+  const lines = vevent.split("\n");
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (!/^ATTENDEE/i.test(line)) continue;
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const left = line.slice(0, idx);
+    const right = line.slice(idx + 1);
+    const email = normalizeMailto(right);
+    if (!email || !myEmails.includes(email)) continue;
+
+    // Удаляем старый PARTSTAT и вставляем новый.
+    const without = left.replace(/;PARTSTAT=[^;:]*/gi, "");
+    lines[i] = `${without};PARTSTAT=${desiredPartstat}:${right}`;
+    changed = true;
+    break;
+  }
+  return changed ? lines.join("\n") : vevent;
+}
+
+function parseIcsDateMs(v: string): number | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  // YYYYMMDD
+  if (/^\d{8}$/.test(s)) {
+    const y = Number(s.slice(0, 4));
+    const m = Number(s.slice(4, 6)) - 1;
+    const d = Number(s.slice(6, 8));
+    const dt = new Date(y, m, d, 0, 0, 0, 0);
+    const ms = dt.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const hh = Number(m[4]);
+  const mm = Number(m[5]);
+  const ss = m[6] ? Number(m[6]) : 0;
+  const isUtc = Boolean(m[7]);
+  const dt = isUtc ? new Date(Date.UTC(y, mo, d, hh, mm, ss, 0)) : new Date(y, mo, d, hh, mm, ss, 0);
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+async function safeReadText(res: Response): Promise<string> {
+  try {
+    const t = await res.text();
+    const s = String(t ?? "").trim();
+    return s.length > 300 ? `${s.slice(0, 300)}…` : s;
+  } catch {
+    return "";
+  }
 }

@@ -23,6 +23,22 @@ describe("LogService", () => {
     expect(log.list()[0].message).toBe("40");
   });
 
+  it("гарантирует минимум 10 записей и setMaxEntries делает trim и emit", () => {
+    const log = new LogService(1);
+    for (let i = 0; i < 50; i++) log.info(String(i));
+    // min 10
+    expect(log.list()).toHaveLength(10);
+    expect(log.list()[0].message).toBe("40");
+
+    const cb = vi.fn();
+    log.onChange(cb);
+    // setMaxEntries тоже держит минимум 10: проверяем, что происходит trim и emit
+    log.setMaxEntries(5);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(log.list()).toHaveLength(10);
+    expect(log.list()[0].message).toBe("40");
+  });
+
   it("onChange вызывается при добавлении и clear", () => {
     const log = new LogService(200);
     const cb = vi.fn();
