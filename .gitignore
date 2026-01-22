@@ -27,6 +27,7 @@ touch
 # Project
 main.js
 dist/
+logs/
 node_modules/
 coverage/
 recordings/
