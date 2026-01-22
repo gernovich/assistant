@@ -2,6 +2,8 @@ import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type { AssistantSettings, Event } from "../types";
 import type { CalendarService } from "../calendar/calendarService";
 import { makeEventKey } from "../ids/stableIds";
+import { rsvpStatusBadgeRu } from "../domain/policies/rsvpStatusBadgeRu";
+import { attendeesTooltipRu } from "../domain/policies/attendeesSummaryRu";
 
 /** Тип Obsidian view для “Повестки”. */
 export const AGENDA_VIEW_TYPE = "assistant-agenda";
@@ -396,11 +398,7 @@ function formatWhen(ev: Event): string {
 }
 
 function partstatLabel(ps: Event["status"]): string {
-  if (ps === "accepted") return " • принято";
-  if (ps === "declined") return " • отклонено";
-  if (ps === "tentative") return " • возможно";
-  if (ps === "needs_action") return " • нет ответа";
-  return "";
+  return rsvpStatusBadgeRu(ps);
 }
 
 function partstatClass(ps: Event["status"]): string {
@@ -412,27 +410,7 @@ function partstatClass(ps: Event["status"]): string {
 }
 
 function attendeesTooltip(ev: Event): string {
-  const a = ev.attendees ?? [];
-  if (!a.length) return "";
-  let yes = 0;
-  let no = 0;
-  let maybe = 0;
-  let unknown = 0;
-  for (const x of a) {
-    const ps = String(x.partstat ?? "")
-      .trim()
-      .toUpperCase();
-    if (ps === "ACCEPTED") yes++;
-    else if (ps === "DECLINED") no++;
-    else if (ps === "TENTATIVE") maybe++;
-    else unknown++;
-  }
-  const parts: string[] = [];
-  if (yes > 0) parts.push(`Принято: ${yes}`);
-  if (no > 0) parts.push(`Отклонено: ${no}`);
-  if (maybe > 0) parts.push(`Возможно: ${maybe}`);
-  if (unknown > 0) parts.push(`Нет ответа: ${unknown}`);
-  return parts.length ? parts.join("; ") + ";" : "";
+  return attendeesTooltipRu(ev.attendees ?? []);
 }
 
 function formatDayLabel(dayOffset: number): string {

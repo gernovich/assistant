@@ -10,6 +10,12 @@ import { yamlEscape } from "../vault/yamlEscape";
 import type { EventNoteIndexCache } from "./store/eventNoteIndexCache";
 import { upsertFrontmatter } from "../vault/frontmatter";
 import { FM } from "../vault/frontmatterKeys";
+import { extractLegacyStableIdFromPath, legacyStableIdSuffix } from "../domain/policies/legacyStableId";
+import { meetingNoteBaseName } from "../domain/policies/meetingNoteNaming";
+import { wikiLinkLine } from "../domain/policies/wikiLink";
+import { attendeesMarkdownBlockRu } from "../domain/policies/attendeesMarkdownRu";
+import { buildMeetingFrontmatterData } from "../domain/policies/meetingFrontmatterData";
+import { renderMeetingNoteMarkdown } from "../domain/policies/meetingNoteTemplate";
 import {
   extractProtocolsBody,
   extractWikiLinkTargets,
@@ -53,7 +59,7 @@ export class EventNoteService {
   /** Рассчитать “идеальный” путь файла встречи по событию. */
   getEventFilePath(ev: Event): string {
     // Имя файла делаем “красивым” (без `[sid]`); связь и поиск держим через `(calendar_id, event_id)`.
-    const pretty = sanitizeFileName(ev.summary).slice(0, 80);
+    const pretty = meetingNoteBaseName({ summary: ev.summary, sanitizeFileName, maxLen: 80 });
     return normalizePath(`${this.eventsDir}/${pretty}.md`);
   }
 
@@ -118,8 +124,7 @@ export class EventNoteService {
   async linkProtocol(ev: Event, protocolFile: TFile) {
     const evFile = await this.ensureEventFile(ev);
     const cur = await this.vault.read(evFile);
-    const linkTarget = protocolFile.path.replace(/\.md$/i, "");
-    const link = `- [[${linkTarget}|${protocolFile.basename}]]`;
+    const link = wikiLinkLine({ targetPath: protocolFile.path, label: protocolFile.basename });
     const updated = upsertProtocolLink(cur, link);
     if (updated !== cur) await this.vault.modify(evFile, updated);
   }
@@ -223,7 +228,7 @@ export class EventNoteService {
     }
 
     // 3) Создаём новый файл с красивым именем (с авто-суффиксами при коллизиях).
-    const pretty = sanitizeFileName(ev.summary).slice(0, 80);
+    const pretty = meetingNoteBaseName({ summary: ev.summary, sanitizeFileName, maxLen: 80 });
     const content = renderEventFile(ev, includeUserSections);
     const created = await createUniqueMarkdownFile(this.vault, this.eventsDir, pretty, content);
     eventKeyIndex.set(eventKey, created);
@@ -250,7 +255,7 @@ export class EventNoteService {
     const files = this.vault.getFiles();
     for (const f of files) {
       if (!f.path.startsWith(dirPrefix)) continue;
-      const sid = extractStableIdFromPath(f.path);
+      const sid = extractLegacyStableIdFromPath(f.path);
       if (sid) out.set(sid, f);
     }
     return out;
@@ -305,7 +310,7 @@ export class EventNoteService {
   }
 
   private findEventFileByStableId(sid: string): TFile | undefined {
-    const suffix = ` [${sid}].md`;
+    const suffix = legacyStableIdSuffix(sid);
     const dirPrefix = normalizePath(this.eventsDir) + "/";
     const files = this.vault.getFiles();
     for (const f of files) {
@@ -316,137 +321,40 @@ export class EventNoteService {
   }
 }
 
-function extractStableIdFromPath(path: string): string | null {
-  // Ожидаемый суффикс: " [abcdef].md" (длина sid сейчас 6)
-  const m = path.match(/ \[([0-9a-fA-F]{6})\]\.md$/);
-  return m ? (m[1] ?? "").toLowerCase() : null;
-}
-
 function renderEventFile(ev: Event, includeUserSections: boolean): string {
-  const startIso = ev.start.toISOString();
-  const endIso = ev.end ? ev.end.toISOString() : "";
-  const eventKey = makeEventKey(ev.calendar.id, ev.id);
-
-  const grouped = groupAttendeePersonIds(ev.attendees ?? []);
-  const attendeesFrontmatter = [
-    ...yamlStringArray(FM.attendeesAccepted, grouped.accepted),
-    ...yamlStringArray(FM.attendeesDeclined, grouped.declined),
-    ...yamlStringArray(FM.attendeesTentative, grouped.tentative),
-    ...yamlStringArray(FM.attendeesNeedsAction, grouped.needsAction),
-    ...yamlStringArray(FM.attendeesUnknown, grouped.unknown),
-    ...yamlStringArray(FM.attendees, grouped.all),
-  ];
-
-  const organizerEmail = (ev.organizer?.emails?.[0] ?? "").trim();
-  const organizerCn = (ev.organizer?.displayName ?? "").trim();
-
-  const header = [
-    "---",
-    `${FM.assistantType}: calendar_event`,
-    `${FM.calendarId}: ${yamlEscape(ev.calendar.id)}`,
-    `${FM.eventId}: ${yamlEscape(ev.id)}`,
-    `${FM.summary}: ${yamlEscape(ev.summary)}`,
-    `${FM.start}: ${yamlEscape(startIso)}`,
-    `${FM.end}: ${yamlEscape(endIso)}`,
-    ev.timeZone ? `timezone: ${yamlEscape(ev.timeZone)}` : "",
-    ev.recurrence?.rrule ? `rrule: ${yamlEscape(ev.recurrence.rrule)}` : "",
-    ev.reminders?.length
-      ? `reminders_minutes_before: [${ev.reminders
-          .map((r) => r.minutesBefore)
-          .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
-          .join(", ")}]`
-      : "",
-    ev.color?.value ? `event_color: ${yamlEscape(ev.color.value)}` : "",
-    ev.status ? `${FM.status}: ${yamlEscape(ev.status)}` : "",
-    organizerEmail ? `${FM.organizerEmail}: ${yamlEscape(organizerEmail)}` : "",
-    organizerCn ? `${FM.organizerCn}: ${yamlEscape(organizerCn)}` : "",
-    ...attendeesFrontmatter,
-    ev.url ? `${FM.url}: ${yamlEscape(ev.url)}` : "",
-    ev.location ? `${FM.location}: ${yamlEscape(ev.location)}` : "",
-    "---",
-    "",
-    `## ${ev.summary}`,
-    "",
-    `- Начало: ${startIso}`,
-    ev.end ? `- Конец: ${endIso}` : "",
-    ev.url ? `- Ссылка: ${ev.url}` : "",
-    ev.location ? `- Место: ${ev.location}` : "",
-    "",
-    ev.description ? `## Описание\n\n${ev.description}\n` : "",
-    "## Участники",
-    "",
-    renderAttendeesBlock(ev.attendees ?? []),
-    "",
-    "## Протоколы",
-    "<!-- ASSISTANT:PROTOCOLS -->",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const base = header.endsWith("\n") ? header : header + "\n";
-  if (!includeUserSections) return base;
-
-  return base + ["", "- (пока пусто)", "", "## Заметки", "", "<!-- ASSISTANT:USER -->", ""].join("\n");
+  const fm = buildMeetingFrontmatterData(ev);
+  return renderMeetingNoteMarkdown({
+    fm,
+    description: ev.description,
+    attendeesMarkdown: renderAttendeesBlock(ev.attendees ?? []),
+    includeUserSections,
+    keys: {
+      assistantType: FM.assistantType,
+      calendarId: FM.calendarId,
+      eventId: FM.eventId,
+      summary: FM.summary,
+      start: FM.start,
+      end: FM.end,
+      url: FM.url,
+      location: FM.location,
+      status: FM.status,
+      organizerEmail: FM.organizerEmail,
+      organizerCn: FM.organizerCn,
+      attendees: FM.attendees,
+      attendeesAccepted: FM.attendeesAccepted,
+      attendeesDeclined: FM.attendeesDeclined,
+      attendeesTentative: FM.attendeesTentative,
+      attendeesNeedsAction: FM.attendeesNeedsAction,
+      attendeesUnknown: FM.attendeesUnknown,
+    },
+    escape: yamlEscape,
+  });
 }
 
 // yamlEscape перенесён в src/vault/yamlEscape.ts
 
-function yamlStringArray(key: string, values: string[]): string[] {
-  if (!values.length) return [`${key}: []`];
-  return [`${key}:`, ...values.map((v) => `  - ${yamlEscape(v)}`)];
-}
-
-function groupAttendeePersonIds(attendees: Array<{ email: string; partstat?: string }>): {
-  all: string[];
-  accepted: string[];
-  declined: string[];
-  tentative: string[];
-  needsAction: string[];
-  unknown: string[];
-} {
-  const accepted: string[] = [];
-  const declined: string[] = [];
-  const tentative: string[] = [];
-  const needsAction: string[] = [];
-  const unknown: string[] = [];
-  const allSet = new Set<string>();
-
-  for (const a of attendees) {
-    const email = String(a?.email ?? "").trim();
-    if (!email) continue;
-    const pid = makePersonIdFromEmail(email);
-    allSet.add(pid);
-
-    const ps = String(a?.partstat ?? "")
-      .trim()
-      .toUpperCase();
-    if (ps === "ACCEPTED") accepted.push(pid);
-    else if (ps === "DECLINED") declined.push(pid);
-    else if (ps === "TENTATIVE") tentative.push(pid);
-    else if (ps === "NEEDS-ACTION") needsAction.push(pid);
-    else unknown.push(pid);
-  }
-
-  const all = Array.from(allSet.values());
-  return { all, accepted, declined, tentative, needsAction, unknown };
-}
-
 function renderAttendeesBlock(attendees: Array<{ email: string; cn?: string; partstat?: string }>): string {
-  if (!attendees.length) return "- (пока не удалось извлечь из календаря)";
-  const lines = attendees
-    .slice()
-    .sort((a, b) => String(a.email ?? "").localeCompare(String(b.email ?? "")))
-    .map((a) => {
-      const email = (a.email ?? "").trim();
-      const cn = (a.cn ?? "").trim();
-      const ps = String(a.partstat ?? "")
-        .trim()
-        .toUpperCase();
-      const label = ps === "ACCEPTED" ? "придёт" : ps === "DECLINED" ? "не придёт" : ps === "TENTATIVE" ? "возможно" : "не указал";
-      const who = cn ? `${cn} <${email}>` : email;
-      return `- ${who} — ${label}`;
-    });
-  return lines.join("\n");
+  return attendeesMarkdownBlockRu(attendees);
 }
 
 // ensureFile перенесён в src/vault/ensureFile.ts

@@ -1,5 +1,6 @@
 import type { AssistantSettings, Event } from "../types";
 import type { RecordingService, RecordingStats } from "./recordingService";
+import { parseAssistantActionFromTitle } from "../presentation/electronWindow/bridge/titleActionTransport";
 
 type ElectronLike = {
   remote?: { BrowserWindow?: any };
@@ -1012,10 +1013,16 @@ export class RecordingDialog {
     win.webContents.on("page-title-updated", (e: unknown, title: string) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (e as any)?.preventDefault?.();
-      const t = String(title ?? "");
-      const m = t.match(/^assistant-action:([a-z_]+(?::.*)?)$/);
-      if (!m) return;
-      void onAction(String(m[1] ?? ""));
+      const parsed = parseAssistantActionFromTitle(String(title ?? ""));
+      if (!parsed.ok) return;
+      const a = parsed.action;
+      if (a.kind === "close") void onAction("close");
+      else if (a.kind === "recording.stop") void onAction("rec_stop");
+      else if (a.kind === "recording.pause") void onAction("rec_pause");
+      else if (a.kind === "recording.resume") void onAction("rec_resume");
+      else if (a.kind === "recording.openProtocol") void onAction(`open_protocol:${encodeURIComponent(a.protocolFilePath)}`);
+      else if (a.kind === "recording.start") void onAction(`rec_start:${encodeURIComponent(JSON.stringify(a.payload))}`);
+      else return;
     });
 
     win.once("ready-to-show", () => {

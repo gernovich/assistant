@@ -1,9 +1,8 @@
 import type { AssistantSettings, CalendarConfig, Event } from "../types";
-import { IcsUrlProvider } from "./providers/icsUrlProvider";
-import { CaldavProvider } from "./providers/caldavProvider";
 import { CalendarEventStore } from "./store/calendarEventStore";
 import type { RefreshResult } from "./store/calendarEventStore";
 import { MS_PER_HOUR, NOTIFICATIONS_HORIZON_HOURS } from "./constants";
+import type { CalendarProviderRegistry } from "./providers/calendarProviderRegistry";
 
 type Listener = () => void;
 
@@ -26,20 +25,15 @@ export class CalendarService {
   private settings: AssistantSettings;
   private store = new CalendarEventStore();
   private listeners = new Set<Listener>();
-  private icsUrlProvider: IcsUrlProvider;
-  private caldavProvider: CaldavProvider;
 
-  constructor(settings: AssistantSettings) {
+  constructor(settings: AssistantSettings, private providers: CalendarProviderRegistry) {
     this.settings = settings;
-    this.icsUrlProvider = new IcsUrlProvider(settings);
-    this.caldavProvider = new CaldavProvider(settings);
   }
 
   /** Применить новые настройки без пересоздания сервиса. */
   setSettings(settings: AssistantSettings) {
     this.settings = settings;
-    this.icsUrlProvider.setSettings(settings);
-    this.caldavProvider.setSettings(settings);
+    this.providers.setSettings(settings);
   }
 
   /** Подписка на изменения событий/статуса (после refresh). */
@@ -95,7 +89,8 @@ export class CalendarService {
     if (!cal) throw new Error("Календарь не найден");
     if (!cal.enabled) throw new Error("Календарь отключён");
     if (cal.type !== "caldav") throw new Error("Этот календарь read-only (ICS URL не поддерживает запись)");
-    await this.caldavProvider.setMyPartstat(cal, ev, partstat);
+    if (!this.providers.rsvpWriter?.setMyPartstat) throw new Error("Write-back недоступен (нет CalDAV провайдера)");
+    await this.providers.rsvpWriter.setMyPartstat(cal, ev, partstat);
     await this.refreshOneAndMerge(cal.id);
   }
 
@@ -198,9 +193,9 @@ export class CalendarService {
   }
 
   private async refreshOneCalendar(cal: CalendarConfig): Promise<Event[]> {
-    if (cal.type === "ics_url") return await this.icsUrlProvider.refresh(cal);
-    if (cal.type === "caldav") return await this.caldavProvider.refresh(cal);
-    return [];
+    const p = this.providers.get(cal.type);
+    if (!p) return [];
+    return await p.refresh(cal);
   }
 
   private emit() {

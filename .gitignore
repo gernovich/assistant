@@ -1,14 +1,32 @@
-node_modules/
-main.js
-*.map
-.DS_Store
-dist/
+# tmp files
+*~
+._*
+*.log
 
-# recordings (keep audio out of git)
+# OS
+.DS_Store
+.Trashes
+.Spotlight-V100
+Thumbs.db
+Desktop.ini
+touch
+
+# IDE
+.settings
+.idea
+.classpath
+.buildpath
+.project
+.realsync
+*.iml
+*.iws
+*.swp
+*.sublime-project
+*.sublime-workspace
+
+# Project
+main.js
+dist/
+node_modules/
+coverage/
 recordings/
-audio/
-*.wav
-*.mp3
-*.m4a
-*.ogg
-*.flac

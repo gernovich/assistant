@@ -1,7 +1,6 @@
 /** Стабильный ключ события (используется для связи “календарь ↔ протокол/встреча”). */
-export function makeEventKey(calendarId: string, eventId: string): string {
-  return `${calendarId}:${eventId}`;
-}
+export { makeEventKey } from "../domain/identity/eventKey";
+export type { EventKey } from "../domain/identity/eventKey";
 
 /** Нормализовать email для стабильных идентификаторов/поиска. */
 function normalizeEmail(v: string): string {

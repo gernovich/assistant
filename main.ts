@@ -31,6 +31,9 @@ import { RecordingDialog } from "./src/recording/recordingDialog";
 import { pickDefaultRecordingTarget } from "./src/recording/recordingTarget";
 import { commandExists } from "./src/os/commandExists";
 import { redactUrlForLog } from "./src/log/redact";
+import { registerAssistantCommands } from "./src/presentation/obsidian/commands/registerAssistantCommands";
+import { registerAssistantViews } from "./src/presentation/obsidian/views/registerAssistantViews";
+import { createDefaultCalendarProviderRegistry } from "./src/calendar/providers/calendarProviderRegistry";
 
 /**
  * Основной класс Obsidian-плагина “Ассистент”.
@@ -119,7 +122,7 @@ export default class AssistantPlugin extends Plugin {
       version: (this.manifest as any)?.version ?? "",
       ts: new Date().toISOString(),
     });
-    this.calendarService = new CalendarService(this.settings);
+    this.calendarService = new CalendarService(this.settings, createDefaultCalendarProviderRegistry(this.settings));
     this.eventNoteIndexCache = new EventNoteIndexCache({
       filePath: this.getEventNoteIndexCacheFilePath(),
       logService: () => this.logService,
@@ -152,56 +155,44 @@ export default class AssistantPlugin extends Plugin {
 
     this.addSettingTab(new AssistantSettingsTab(this.app, this));
 
-    this.registerView(
-      AGENDA_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) =>
-        new AgendaView(
-          leaf,
-          this.settings,
-          this.calendarService,
-          () => void this.activateLogView(),
-          (ev) => void this.eventNoteService.openEvent(ev),
-          async (ev, partstat) => {
-            try {
-              const myEmails = this.getMyEmailsForEvent(ev);
-              if (!myEmails.length) {
-                new Notice("Ассистент: невозможно определить мой email для RSVP (проверьте myEmail/логин CalDAV)");
-                return;
-              }
-              if (!this.hasMyAttendee(ev, myEmails)) {
-                new Notice("Ассистент: RSVP недоступен — ваш email не найден среди ATTENDEE этой встречи");
-                return;
-              }
-              await this.calendarService.setMyPartstat(ev, partstat);
-            } catch (e) {
-              const msg = String((e as unknown) ?? "неизвестная ошибка");
-              new Notice(`Ассистент: не удалось изменить статус в календаре: ${msg}`);
-              this.logService.error("RSVP: не удалось изменить статус в календаре", { error: msg, eventKey: `${ev.calendar.id}:${ev.id}` });
+    registerAssistantViews(
+      this,
+      { settings: this.settings, calendarService: this.calendarService, logService: this.logService },
+      {
+        openLog: () => void this.activateLogView(),
+        openAgenda: () => void this.activateAgendaView(),
+        openEvent: (ev) => void this.eventNoteService.openEvent(ev),
+        setMyPartstat: async (ev, partstat) => {
+          try {
+            const myEmails = this.getMyEmailsForEvent(ev);
+            if (!myEmails.length) {
+              new Notice("Ассистент: невозможно определить мой email для RSVP (проверьте myEmail/логин CalDAV)");
+              return;
             }
-            for (const l of this.app.workspace.getLeavesOfType(AGENDA_VIEW_TYPE)) {
-              const v = l.view;
-              if (v instanceof AgendaView) v.refresh();
+            if (!this.hasMyAttendee(ev, myEmails)) {
+              new Notice("Ассистент: RSVP недоступен — ваш email не найден среди ATTENDEE этой встречи");
+              return;
             }
-          },
-          (ev) => this.getProtocolMenuState(ev),
-          (ev) => void this.openCurrentProtocolFromEvent(ev),
-          (ev) => void this.openLatestProtocolFromEvent(ev),
-          (ev) => void this.createProtocolFromEvent(ev),
-          (ev) => this.openRecordingDialog(ev),
-          (ev) => void this.debugShowReminder(ev),
-        ),
-    );
-
-    this.registerView(
-      LOG_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) =>
-        new LogView(
-          leaf,
-          this.logService,
-          () => void this.logFileWriter.openTodayLog(),
-          () => void this.logFileWriter.clearTodayLogFile(),
-          () => void this.activateAgendaView(),
-        ),
+            await this.calendarService.setMyPartstat(ev, partstat);
+          } catch (e) {
+            const msg = String((e as unknown) ?? "неизвестная ошибка");
+            new Notice(`Ассистент: не удалось изменить статус в календаре: ${msg}`);
+            this.logService.error("RSVP: не удалось изменить статус в календаре", { error: msg, eventKey: `${ev.calendar.id}:${ev.id}` });
+          }
+          for (const l of this.app.workspace.getLeavesOfType(AGENDA_VIEW_TYPE)) {
+            const v = l.view;
+            if (v instanceof AgendaView) v.refresh();
+          }
+        },
+        getProtocolMenuState: (ev) => this.getProtocolMenuState(ev),
+        openCurrentProtocol: (ev) => void this.openCurrentProtocolFromEvent(ev),
+        openLatestProtocol: (ev) => void this.openLatestProtocolFromEvent(ev),
+        createProtocol: (ev) => void this.createProtocolFromEvent(ev),
+        openRecorder: (ev) => this.openRecordingDialog(ev),
+        debugShowReminder: (ev) => void this.debugShowReminder(ev),
+        openTodayLog: () => void this.logFileWriter.openTodayLog(),
+        clearTodayLogFile: () => void this.logFileWriter.clearTodayLogFile(),
+      },
     );
 
     // Используем встроенные иконки для стабильности при включении/выключении плагина без рестарта Obsidian.
@@ -217,103 +208,26 @@ export default class AssistantPlugin extends Plugin {
     // Важно: это работает на уровне Electron session и действует на всё приложение Obsidian для внутренних страниц.
     this.applyRecordingMediaPermissions();
 
-    this.addCommand({
-      id: "open-agenda",
-      name: "Открыть повестку",
-      callback: () => this.activateAgendaView(),
-    });
-
-    this.addCommand({
-      id: "recording-open-dialog",
-      name: "Диктофон",
-      callback: () => void this.openRecordingDialog(),
-    });
-
-    this.addCommand({
-      id: "open-log",
-      name: "Открыть лог",
-      callback: () => this.activateLogView(),
-    });
-
-    this.addCommand({
-      id: "refresh-calendars",
-      name: "Обновить календари",
-      callback: () => this.refreshCalendars(),
-    });
-
-    this.addCommand({
-      id: "create-meeting-card",
-      name: "Создать карточку встречи",
-      callback: () => void this.createManualMeetingCard(),
-    });
-
-    this.addCommand({
-      id: "create-protocol-card",
-      name: "Создать карточку протокола",
-      callback: () => void this.createEmptyProtocolCard(),
-    });
-
-    this.addCommand({
-      id: "create-protocol-from-open-meeting",
-      name: "Создать протокол из открытой карточки",
-      callback: () => void this.createProtocolFromOpenMeeting(),
-    });
-
-    this.addCommand({
-      id: "create-person-card",
-      name: "Создать карточку человека",
-      callback: () => void this.personNoteService.createAndOpen(),
-    });
-
-    this.addCommand({
-      id: "create-project-card",
-      name: "Создать карточку проекта",
-      callback: () => void this.projectNoteService.createAndOpen(),
-    });
-
-    this.addCommand({
-      id: "meeting-create-people-from-attendees",
-      name: "Создать карточки людей из участников",
-      callback: () => void this.createPeopleCardsFromActiveMeeting(),
-    });
-
-    this.addCommand({
-      id: "apply-outbox",
-      name: "Применить офлайн-очередь",
-      callback: () => void this.applyOutbox(),
-    });
-
-    this.addCommand({
-      id: "event-status-accepted",
-      name: "Принято (в календаре, из заметки встречи)",
-      callback: () => void this.setActiveEventPartstat("accepted"),
-    });
-    this.addCommand({
-      id: "event-status-declined",
-      name: "Отклонено (в календаре, из заметки встречи)",
-      callback: () => void this.setActiveEventPartstat("declined"),
-    });
-    this.addCommand({
-      id: "event-status-tentative",
-      name: "Возможно (в календаре, из заметки встречи)",
-      callback: () => void this.setActiveEventPartstat("tentative"),
-    });
-    this.addCommand({
-      id: "event-status-needs-action",
-      name: "Нет ответа (в календаре, из заметки встречи)",
-      callback: () => void this.setActiveEventPartstat("needs_action"),
-    });
-
-    this.addCommand({
-      id: "meeting-apply-status-from-note",
-      name: "Применить статус из заметки в календарь",
-      callback: () => void this.applyStatusFromActiveMeetingNote(),
-    });
-
-    this.addCommand({
-      id: "create-meeting-from-active-event",
-      name: "Создать протокол из текущей встречи",
-      callback: () => this.createProtocolFromActiveEvent(),
+    // Команды: вынесены в presentation-слой, но коллбеки остаются тут (чтобы не трогать приватные методы).
+    // Важно: формат ID/названий команд не меняем.
+    registerAssistantCommands(this, {
+      openAgenda: () => void this.activateAgendaView(),
+      openRecordingDialog: () => void this.openRecordingDialog(),
+      openLog: () => void this.activateLogView(),
+      refreshCalendars: () => void this.refreshCalendars(),
+      createMeetingCard: () => void this.createManualMeetingCard(),
+      createProtocolCard: () => void this.createEmptyProtocolCard(),
+      createProtocolFromOpenMeeting: () => void this.createProtocolFromOpenMeeting(),
+      createPersonCard: () => void this.personNoteService.createAndOpen(),
+      createProjectCard: () => void this.projectNoteService.createAndOpen(),
+      createPeopleFromAttendees: () => void this.createPeopleCardsFromActiveMeeting(),
+      applyOutbox: () => void this.applyOutbox(),
+      eventStatusAccepted: () => void this.setActiveEventPartstat("accepted"),
+      eventStatusDeclined: () => void this.setActiveEventPartstat("declined"),
+      eventStatusTentative: () => void this.setActiveEventPartstat("tentative"),
+      eventStatusNeedsAction: () => void this.setActiveEventPartstat("needs_action"),
+      applyStatusFromMeetingNote: () => void this.applyStatusFromActiveMeetingNote(),
+      createProtocolFromActiveEvent: () => void this.createProtocolFromActiveEvent(),
     });
 
     // Асинхронная инициализация после layoutReady (безопасно при restore workspace)

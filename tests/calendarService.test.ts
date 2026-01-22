@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CalendarService } from "../src/calendar/calendarService";
 import type { AssistantSettings, Calendar, Event } from "../src/types";
+import { createDefaultCalendarProviderRegistry } from "../src/calendar/providers/calendarProviderRegistry";
 
 function cal(id: string): Calendar {
   return { id, name: id, type: "ics_url", config: { id, name: id, type: "ics_url", enabled: true } };
@@ -42,7 +43,8 @@ function makeSettings(): AssistantSettings {
 
 describe("calendar/calendarService", () => {
   it("getRefreshResult возвращает единый срез состояния после seedFromCache", () => {
-    const svc = new CalendarService(makeSettings());
+    const settings = makeSettings();
+    const svc = new CalendarService(settings, createDefaultCalendarProviderRegistry(settings));
     const ev: Event = {
       calendar: cal("calA"),
       id: "u1",

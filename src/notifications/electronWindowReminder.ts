@@ -1,4 +1,5 @@
 import type { Event } from "../types";
+import { parseAssistantActionFromTitle } from "../presentation/electronWindow/bridge/titleActionTransport";
 
 type ElectronLike = {
   remote?: { BrowserWindow?: any };
@@ -336,11 +337,14 @@ export function showElectronReminderWindow(params: {
   win.webContents.on("page-title-updated", (e: unknown, title: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (e as any)?.preventDefault?.();
-    const t = String(title ?? "");
-    const m = t.match(/^assistant-action:([a-z_]+)$/);
-    if (!m) return;
-    // Группа всегда есть, если regex совпал.
-    void onAction(String(m[1]));
+    const parsed = parseAssistantActionFromTitle(String(title ?? ""));
+    if (!parsed.ok) return;
+    const a = parsed.action;
+    if (a.kind === "reminder.startRecording") void onAction("start_recording");
+    else if (a.kind === "reminder.createProtocol") void onAction("create_protocol");
+    else if (a.kind === "reminder.meetingCancelled") void onAction("cancelled");
+    else if (a.kind === "close") void onAction("close");
+    else return;
   });
 
   win.once("ready-to-show", () => {

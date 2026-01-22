@@ -25,3 +25,39 @@ export async function requestUrl(_req: {
 }): Promise<{ status: number; headers: Record<string, string>; text?: string; arrayBuffer: ArrayBuffer }> {
   throw new Error("requestUrl: stub — используйте vi.spyOn для подмены в тестах");
 }
+
+// ---- Workspace/View stubs (нужно для импорта views в unit-тестах) ----
+
+export type WorkspaceLeaf = {
+  view?: unknown;
+  setViewState?: (state: unknown) => Promise<void>;
+};
+
+export class ItemView {
+  // В Obsidian ItemView принимает leaf и имеет contentEl для рендера.
+  leaf: WorkspaceLeaf;
+  contentEl: HTMLElement;
+
+  constructor(leaf: WorkspaceLeaf) {
+    this.leaf = leaf;
+    this.contentEl = globalThis.document?.createElement?.("div") ?? ({} as any);
+  }
+
+  getViewType(): string {
+    return "stub-view";
+  }
+  getDisplayText(): string {
+    return "stub";
+  }
+  getIcon(): string {
+    return "";
+  }
+
+  // Методы, которые используют views
+  addAction(_icon: string, _title: string, _callback: () => void): HTMLElement {
+    return globalThis.document?.createElement?.("div") ?? ({} as any);
+  }
+
+  async onOpen(): Promise<void> {}
+  async onClose(): Promise<void> {}
+}

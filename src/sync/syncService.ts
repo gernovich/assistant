@@ -1,10 +1,10 @@
 import type { CalendarService } from "../calendar/calendarService";
-import type { EventNoteService } from "../calendar/eventNoteService";
 import type { LogService } from "../log/logService";
 import type { NotificationScheduler } from "../notifications/notificationScheduler";
-import type { PersonNoteService } from "../people/personNoteService";
 import type { AssistantSettings } from "../types";
 import { MS_PER_DAY, NOTES_SYNC_HORIZON_DAYS } from "../calendar/constants";
+import type { MeetingNoteRepository } from "../application/contracts/meetingNoteRepository";
+import type { PersonRepository } from "../application/contracts/personRepository";
 
 /**
  * Оркестратор обновления/синхронизации:
@@ -15,10 +15,10 @@ import { MS_PER_DAY, NOTES_SYNC_HORIZON_DAYS } from "../calendar/constants";
 export class SyncService {
   constructor(
     private calendarService: CalendarService,
-    private eventNoteService: EventNoteService,
+    private eventNoteService: MeetingNoteRepository,
     private notificationScheduler: NotificationScheduler,
     private log: LogService,
-    private personNoteService?: PersonNoteService,
+    private personNoteService?: PersonRepository,
   ) {}
 
   /** Применить новые настройки к зависимым сервисам. */
