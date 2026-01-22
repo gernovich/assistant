@@ -11,6 +11,29 @@ import type { LogService } from "../log/logService";
 import * as os from "node:os";
 import * as fs from "node:fs/promises";
 import { execFile as execFileNode } from "node:child_process";
+import { linuxNativeFilterGraphPolicy } from "../domain/policies/ffmpegFilterGraph";
+import { pickMediaRecorderMimeType } from "../domain/policies/mediaRecorderMimeType";
+import { nextChunkInMsPolicy, shouldRotateChunkPolicy } from "../domain/policies/recordingChunkTiming";
+import { amp01FromLufsPolicy, amp01FromRmsPolicy, amp01FromTimeDomainRmsPolicy, smoothAmp01Policy } from "../domain/policies/recordingVizAmp";
+import { parseMomentaryLufsFromEbur128Line } from "../domain/policies/ebur128";
+import { shouldEmitByInterval } from "../domain/policies/rateLimit";
+import { rms01FromS16leMonoFrame } from "../domain/policies/pcmRms";
+import { parseJsonStringArray } from "../domain/policies/frontmatterJsonArrays";
+import { appendRollingText, splitLinesKeepRemainder } from "../domain/policies/rollingTextBuffer";
+import { recordingChunkFileName, recordingFilePrefixFromEventKey } from "../domain/policies/recordingFileNaming";
+import { DEFAULT_RECORDINGS_DIR } from "../domain/policies/recordingPaths";
+import { recordingExtFromMimeType } from "../domain/policies/recordingExt";
+import { pickDesktopCapturerSourceId } from "../domain/policies/desktopCapturerSource";
+import {
+  buildPulseMonitorCandidates,
+  buildPulseMicCandidates,
+  parsePactlDefaultSinkFromInfo,
+  parsePactlDefaultSourceFromInfo,
+  parsePactlGetDefaultSink,
+} from "../domain/policies/pactl";
+import { linuxNativeFfmpegArgsPolicy } from "../domain/policies/linuxNativeFfmpegArgs";
+import { buildLinuxNativeSourceAttemptPlan } from "../domain/policies/linuxNativeSourcePlan";
+import { trimForLogPolicy } from "../domain/policies/logText";
 
 export type RecordingStatus = "idle" | "recording" | "paused";
 
@@ -92,8 +115,6 @@ type LinuxNativeSession = BaseSession & {
 
 type Session = ElectronSession | LinuxNativeSession;
 
-const DEFAULT_RECORDINGS_DIR = "Ассистент/Записи";
-
 function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -107,22 +128,9 @@ async function execShell(cmd: string, timeoutMs = 2000): Promise<{ ok: boolean; 
 }
 
 function pickMimeType(): string {
-  const prefs = [
-    "audio/ogg;codecs=opus",
-    "audio/ogg",
-    // webm/opus часто плохо дружит с длительностью/seek в некоторых плеерах Obsidian,
-    // поэтому предпочитаем ogg, но оставляем webm как fallback.
-    "audio/webm;codecs=opus",
-    "audio/webm",
-  ];
-  for (const t of prefs) {
-    try {
-      if (typeof MediaRecorder !== "undefined" && (MediaRecorder as any).isTypeSupported?.(t)) return t;
-    } catch {
-      // ignore
-    }
-  }
-  return "";
+  return pickMediaRecorderMimeType({
+    isSupported: (t) => typeof MediaRecorder !== "undefined" && Boolean((MediaRecorder as any).isTypeSupported?.(t)),
+  });
 }
 
 export class RecordingService {
@@ -166,102 +174,14 @@ export class RecordingService {
   }
 
   private trimForLog(s: unknown, max = 1200): string {
-    const text = String(s ?? "");
-    if (text.length <= max) return text;
-    return text.slice(0, max) + "…(truncated)";
+    return trimForLogPolicy(s, max);
   }
 
   private linuxNativeFilterGraph(
     processing: "none" | "normalize" | "voice",
     wantVizPcm: boolean,
   ): { withMonitor: string; micOnly: string; withMonitorViz?: string; micOnlyViz?: string } {
-    // Важно: запись Linux Native может включать mic+monitor. Шумодав после микса может портить системный звук,
-    // поэтому "voice" обрабатывает только mic-вход до amix.
-    const postNormalize = "loudnorm=I=-16:TP=-1.5:LRA=11:linear=true,alimiter=limit=0.97";
-    const micVoice = "highpass=f=80,lowpass=f=12000,afftdn=nf=-25";
-    // Важно для стабильности: приводим оба входа к одному формату/частоте/каналам ДО микса.
-    // Иначе mic (mono) + monitor (stereo) могут миксоваться/маппиться непредсказуемо на разных системах.
-    const prep = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,aresample=48000";
-    // Метр для UI (осциллограмма/индикатор): печатаем RMS в /dev/stderr через ametadata=print,
-    // чтобы не зависеть от ffmpeg loglevel.
-    // Для плавной визуализации лучше читать реальные аудио-сэмплы.
-    // `vizPcm`: берём финальный микс, режем в моно 8kHz и фиксируем блоки по ~25мс (200 сэмплов).
-    // Это даёт более плавный график без сильной нагрузки.
-    const vizPcm = "aresample=8000,aformat=sample_fmts=s16:channel_layouts=mono,asetnsamples=n=200:p=0";
-    // Фолбек-метр (если не читаем PCM): `ebur128` печатает строки во время записи.
-    const meter = "ebur128=peak=true:framelog=info,anullsink";
-
-    if (processing === "none") {
-      const base = {
-        withMonitor:
-          `[0:a]${prep}[mic];` +
-          `[1:a]${prep}[mon];` +
-          "[mic][mon]amix=inputs=2:weights=1 1:duration=longest:dropout_transition=2:normalize=0[mix];" +
-          "[mix]asplit=2[out][m];" +
-          `[m]${meter}`,
-        micOnly: `[0:a]${prep}[out];[out]asplit=2[a][m];[m]${meter}`,
-      };
-      if (!wantVizPcm) return base;
-      return {
-        ...base,
-        withMonitorViz:
-          `[0:a]${prep}[mic];` +
-          `[1:a]${prep}[mon];` +
-          "[mic][mon]amix=inputs=2:weights=1 1:duration=longest:dropout_transition=2:normalize=0[mix];" +
-          "[mix]asplit=2[out][v];" +
-          `[v]${vizPcm}[viz]`,
-        micOnlyViz: `[0:a]${prep}[a];[a]asplit=2[out][v];[v]${vizPcm}[viz]`,
-      };
-    }
-
-    if (processing === "voice") {
-      const base = {
-        withMonitor:
-          `[0:a]${prep},${micVoice}[mic];` +
-          `[1:a]${prep}[mon];` +
-          "[mic][mon]amix=inputs=2:weights=1 1:duration=longest:dropout_transition=2:normalize=0[mix];" +
-          "[mix]asplit=2[a][m];" +
-          `[a]${postNormalize}[out];` +
-          `[m]${meter}`,
-        micOnly: `[0:a]${prep},${micVoice},${postNormalize}[out];[out]asplit=2[a][m];[m]${meter}`,
-      };
-      if (!wantVizPcm) return base;
-      return {
-        ...base,
-        withMonitorViz:
-          `[0:a]${prep},${micVoice}[mic];` +
-          `[1:a]${prep}[mon];` +
-          "[mic][mon]amix=inputs=2:weights=1 1:duration=longest:dropout_transition=2:normalize=0[mix];" +
-          `[mix]${postNormalize}[mixn];` +
-          "[mixn]asplit=2[out][v];" +
-          `[v]${vizPcm}[viz]`,
-        micOnlyViz: `[0:a]${prep},${micVoice},${postNormalize}[a];[a]asplit=2[out][v];[v]${vizPcm}[viz]`,
-      };
-    }
-
-    // normalize
-    const base = {
-      withMonitor:
-        `[0:a]${prep}[mic];` +
-        `[1:a]${prep}[mon];` +
-        "[mic][mon]amix=inputs=2:weights=1 1:duration=longest:dropout_transition=2:normalize=0[mix];" +
-        "[mix]asplit=2[a][m];" +
-        `[a]${postNormalize}[out];` +
-        `[m]${meter}`,
-      micOnly: `[0:a]${prep},${postNormalize}[out];[out]asplit=2[a][m];[m]${meter}`,
-    };
-    if (!wantVizPcm) return base;
-    return {
-      ...base,
-      withMonitorViz:
-        `[0:a]${prep}[mic];` +
-        `[1:a]${prep}[mon];` +
-        "[mic][mon]amix=inputs=2:weights=1 1:duration=longest:dropout_transition=2:normalize=0[mix];" +
-        `[mix]${postNormalize}[mixn];` +
-        "[mixn]asplit=2[out][v];" +
-        `[v]${vizPcm}[viz]`,
-      micOnlyViz: `[0:a]${prep},${postNormalize}[a];[a]asplit=2[out][v];[v]${vizPcm}[viz]`,
-    };
+    return linuxNativeFilterGraphPolicy(processing, wantVizPcm);
   }
 
   setOnStats(cb?: (s: RecordingStats) => void) {
@@ -275,10 +195,9 @@ export class RecordingService {
   getStats(): RecordingStats {
     if (!this.session) return { status: "idle", filesTotal: 0, filesRecognized: 0 };
     const now = Date.now();
-    const nextChunkInMs =
-      this.session.status === "recording"
-        ? Math.max(0, this.session.chunkEveryMs - Math.max(0, now - this.session.lastChunkAtMs))
-        : undefined;
+    const nextChunkInMs = this.session.status === "recording"
+      ? nextChunkInMsPolicy({ nowMs: now, lastChunkAtMs: this.session.lastChunkAtMs, chunkEveryMs: this.session.chunkEveryMs })
+      : undefined;
     return {
       status: this.session.status === "paused" ? "paused" : "recording",
       startedAtMs: this.session.startedAtMs,
@@ -344,11 +263,7 @@ export class RecordingService {
       if (!sources) return null;
       if (!Array.isArray(sources) || sources.length === 0) return null;
 
-      const pick =
-        sources.find((s: any) => /chrome|chromium|brave|firefox|yandex/i.test(String(s?.name ?? ""))) ??
-        sources.find((s: any) => /screen|entire/i.test(String(s?.name ?? ""))) ??
-        sources[0];
-      const id = String(pick?.id ?? "").trim();
+      const id = pickDesktopCapturerSourceId(sources as any);
       if (!id) return null;
 
       // Для desktop capture в Chromium нужно указать chromeMediaSource в VIDEO constraints.
@@ -415,24 +330,6 @@ export class RecordingService {
         stdout: this.trimForLog(srcList.stdout, 1600),
         stderr: this.trimForLog(srcList.stderr, 400),
       });
-      const srcRows = srcList.stdout
-        .split("\n")
-        .map((x) => x.trim())
-        .filter(Boolean);
-
-      const monitorSources = new Set<string>();
-      const runningMonitors: string[] = [];
-      const idleMonitors: string[] = [];
-      for (const row of srcRows) {
-        const parts = row.split(/\s+/);
-        const name = String(parts[1] ?? "").trim();
-        const state = String(parts[parts.length - 1] ?? "").trim().toUpperCase();
-        if (!name.endsWith(".monitor")) continue;
-        monitorSources.add(name);
-        if (state === "RUNNING") runningMonitors.push(name);
-        else if (state === "IDLE") idleMonitors.push(name);
-      }
-
       // Best practice: в первую очередь выбираем monitor того sink, куда реально выводят приложения сейчас.
       // Для этого берём sink-inputs и считаем, какой sink наиболее "активный".
       try {
@@ -442,109 +339,29 @@ export class RecordingService {
           stdout: this.trimForLog(sinks.stdout, 1600),
           stderr: this.trimForLog(sinks.stderr, 400),
         });
-        const sinkRows = sinks.stdout
-          .split("\n")
-          .map((x) => x.trim())
-          .filter(Boolean);
-        const sinkIdxToName = new Map<string, string>();
-        const runningSinks: string[] = [];
-        for (const row of sinkRows) {
-          const parts = row.split(/\s+/);
-          const idx = String(parts[0] ?? "").trim();
-          const name = String(parts[1] ?? "").trim();
-          const state = String(parts[parts.length - 1] ?? "").trim().toUpperCase();
-          if (idx && name) sinkIdxToName.set(idx, name);
-          if (name && state === "RUNNING") runningSinks.push(name);
-        }
-
         const sinkInputs = await execShell("pactl list short sink-inputs 2>/dev/null");
         this.logInfo("Linux Native: pactl list short sink-inputs", {
           ok: sinkInputs.ok,
           stdout: this.trimForLog(sinkInputs.stdout, 1600),
           stderr: this.trimForLog(sinkInputs.stderr, 400),
         });
-        const inRows = sinkInputs.stdout
-          .split("\n")
-          .map((x) => x.trim())
-          .filter(Boolean);
-        const counts = new Map<string, { running: number; total: number }>();
-        for (const row of inRows) {
-          const parts = row.split(/\s+/);
-          const sinkIdx = String(parts[1] ?? "").trim();
-          const state = String(parts[parts.length - 1] ?? "").trim().toUpperCase();
-          if (!sinkIdx) continue;
-          const cur = counts.get(sinkIdx) ?? { running: 0, total: 0 };
-          cur.total += 1;
-          if (state === "RUNNING") cur.running += 1;
-          counts.set(sinkIdx, cur);
-        }
-
-        const activeSinkNames = Array.from(counts.entries())
-          .map(([idx, c]) => ({ name: sinkIdxToName.get(idx) ?? "", running: c.running, total: c.total }))
-          .filter((x) => Boolean(x.name))
-          .sort((a, b) => (b.running - a.running) || (b.total - a.total))
-          .map((x) => x.name);
-
-        for (const sinkName of activeSinkNames) {
-          const mon = `${sinkName}.monitor`;
-          if (monitorSources.has(mon)) candidates.push(mon);
-        }
-        // Если sink-inputs пуст — пробуем RUNNING sinks.
-        for (const sinkName of runningSinks) {
-          const mon = `${sinkName}.monitor`;
-          if (monitorSources.has(mon)) candidates.push(mon);
-        }
-        this.logInfo("Linux Native: auto-monitor кандидаты по sink-inputs", {
-          activeSinkNames,
-          candidates: candidates.slice(0, 10),
+        // Собираем кандидатов чистой policy, сохраняя прежний порядок/алиасы.
+        const info = await execShell("pactl info 2>/dev/null");
+        const r1 = await execShell("pactl get-default-sink 2>/dev/null | head -n1");
+        const next = buildPulseMonitorCandidates({
+          sourcesStdout: srcList.stdout,
+          sinksStdout: sinks.stdout,
+          sinkInputsStdout: sinkInputs.stdout,
+          defaultSinkFromInfo: parsePactlDefaultSinkFromInfo(info.stdout),
+          defaultSinkFromGetDefaultSink: parsePactlGetDefaultSink(r1.stdout),
         });
+        for (const c of next) candidates.push(c);
       } catch (e) {
         this.logWarn("Linux Native: ошибка при анализе sinks/sink-inputs для авто-выбора monitor", { error: String((e as unknown) ?? "") });
       }
-
-      // Затем — активные monitor-источники (RUNNING/IDLE).
-      for (const n of runningMonitors) candidates.push(n);
-      for (const n of idleMonitors) candidates.push(n);
-
-      // Самый надёжный путь: pactl info -> Default Sink -> <sink>.monitor
-      const info = await execShell("pactl info 2>/dev/null");
-      this.logInfo("Linux Native: pactl info", { ok: info.ok, stdout: this.trimForLog(info.stdout, 1600), stderr: this.trimForLog(info.stderr, 400) });
-      const mSink = info.stdout.match(/^Default Sink:\s*(.+)$/m);
-      const sinkInfo = (mSink?.[1] ?? "").trim();
-      if (sinkInfo) {
-        const mon = `${sinkInfo}.monitor`;
-        if (monitorSources.has(mon)) candidates.push(mon);
-      }
-
-      const r1 = await execShell("pactl get-default-sink 2>/dev/null | head -n1");
-      const sink1 = r1.stdout.trim();
-      if (sink1) {
-        const mon = `${sink1}.monitor`;
-        if (monitorSources.has(mon)) candidates.push(mon);
-      }
-
-      if (!sink1) {
-        const r2 = await execShell("pactl info 2>/dev/null | sed -n 's/^Default Sink: //p' | head -n1");
-        const sink2 = r2.stdout.trim();
-        if (sink2) {
-          const mon = `${sink2}.monitor`;
-          if (monitorSources.has(mon)) candidates.push(mon);
-        }
-      }
-
-      // Как фолбек — первые monitor-источники из списка.
-      const more = srcRows
-        .map((row) => String(row.split(/\s+/)[1] ?? "").trim())
-        .filter((n) => n.endsWith(".monitor"))
-        .slice(0, 8);
-      for (const n of more) candidates.push(n);
     }
 
-    // PipeWire-Pulse алиасы (не везде работают, но дешёвый фолбек)
-    candidates.push("@DEFAULT_MONITOR@");
-    candidates.push("default.monitor");
-
-    // уникализируем, сохраняя порядок
+    // buildPulseMonitorCandidates уже добавляет алиасы и дедуп.
     const seen = new Set<string>();
     const out: string[] = [];
     for (const c of candidates) {
@@ -553,6 +370,8 @@ export class RecordingService {
       seen.add(k);
       out.push(k);
     }
+    // Если pactl отсутствует/не сработал — оставляем прежние алиасы.
+    if (out.length === 0) return ["@DEFAULT_MONITOR@", "default.monitor"];
     return out;
   }
 
@@ -566,13 +385,10 @@ export class RecordingService {
         stdout: this.trimForLog(info.stdout, 900),
         stderr: this.trimForLog(info.stderr, 300),
       });
-      const mSrc = info.stdout.match(/^Default Source:\s*(.+)$/m);
-      const srcInfo = (mSrc?.[1] ?? "").trim();
-      if (srcInfo) candidates.push(srcInfo);
+      const srcInfo = parsePactlDefaultSourceFromInfo(info.stdout);
+      const next = buildPulseMicCandidates({ defaultSourceFromInfo: srcInfo });
+      for (const c of next) candidates.push(c);
     }
-    // PulseAudio alias
-    candidates.push("@DEFAULT_SOURCE@");
-    candidates.push("default");
 
     const seen = new Set<string>();
     const out: string[] = [];
@@ -621,22 +437,16 @@ export class RecordingService {
     const trySpawn = async (micName: string, monitorName: string | null): Promise<import("child_process").ChildProcess | null> => {
       // Для плавной визуализации читаем PCM со stdout. Если подписчика нет — не включаем второй output.
       const wantViz = Boolean(this.onViz);
-      const args = ["-hide_banner", "-nostats", "-loglevel", wantViz ? "error" : "error"];
-      // буфер на входах, чтобы Pulse не ронял/не дропал при кратких пиках нагрузки
-      args.push("-thread_queue_size", "1024", "-f", "pulse", "-i", micName);
-      if (monitorName) {
-        args.push("-thread_queue_size", "1024", "-f", "pulse", "-i", monitorName);
-        const processing = this.settings.recording?.linuxNativeAudioProcessing ?? "normalize";
-        const g = this.linuxNativeFilterGraph(processing, wantViz);
-        const graph = wantViz && g.withMonitorViz ? g.withMonitorViz : g.withMonitor;
-        args.push("-filter_complex", graph, "-map", "[out]");
-      }
-      // Output #0: файл (opus/ogg)
-      args.push("-ac", "2", "-ar", "48000", "-c:a", "libopus", "-b:a", "96k", "-application", "audio", "-y", tmpPath);
-      // Output #1: PCM для визуализации (stdout), только если нужно.
-      if (wantViz) {
-        args.push("-map", "[viz]", "-f", "s16le", "-ac", "1", "-ar", "8000", "pipe:1");
-      }
+      const processing = this.settings.recording?.linuxNativeAudioProcessing ?? "normalize";
+      const g = this.linuxNativeFilterGraph(processing, wantViz);
+      const args = linuxNativeFfmpegArgsPolicy({
+        micName,
+        monitorName,
+        tmpPath,
+        wantViz,
+        processing,
+        filterGraph: { withMonitor: g.withMonitor, withMonitorViz: g.withMonitorViz },
+      });
 
       this.logInfo("Linux Native: ffmpeg spawn", {
         micName,
@@ -668,32 +478,29 @@ export class RecordingService {
       });
       proc.stderr?.on("data", (buf: Buffer) => {
         const s = String(buf ?? "");
-        session.native.stderrTail = (session.native.stderrTail + s).slice(-2000);
+        session.native.stderrTail = appendRollingText({ prev: session.native.stderrTail, chunk: s, maxChars: 2000 });
 
         // Фолбек: если визуализация включена не через PCM (или PCM не активен), парсим ebur128 из stderr.
         try {
-          session.native.vizBuf = (String(session.native.vizBuf ?? "") + s).slice(-8000);
+          session.native.vizBuf = appendRollingText({ prev: String(session.native.vizBuf ?? ""), chunk: s, maxChars: 8000 });
           // ffmpeg часто пишет прогресс через '\r' (без '\n'), поэтому делим по обоим.
-          const parts = session.native.vizBuf.split(/[\r\n]+/);
-          session.native.vizBuf = parts.pop() ?? "";
-          for (const line of parts) {
+          const { lines, remainder } = splitLinesKeepRemainder(session.native.vizBuf);
+          session.native.vizBuf = remainder;
+          for (const line of lines) {
             // Пример ebur128:
             // "... t: 3.28  M: -28.3 S: ... I: ... LUFS ..."
-            const mLufs = line.match(/\bM:\s*([-\d.]+)\b/);
-            if (!mLufs?.[1]) continue;
-            const lufs = Number(mLufs[1]);
-            if (!Number.isFinite(lufs)) continue;
+            const lufs = parseMomentaryLufsFromEbur128Line(line);
+            if (lufs == null) continue;
             // Маппим LUFS в 0..1. Для визуализации берём более “чувствительный” диапазон:
             // примерно -70..-20 (обычная речь/системный звук). Иначе на тихом звуке индикатор почти нулевой.
-            const amp01raw = Math.max(0, Math.min(1, (lufs + 70) / 50));
-
+            const amp01raw = amp01FromLufsPolicy(lufs);
             const prev = Number(session.native.lastAmp01 ?? 0);
-            const amp01 = Math.max(0, Math.min(1, prev * 0.75 + amp01raw * 0.25));
+            const amp01 = smoothAmp01Policy({ prev, raw: amp01raw, alpha: 0.25 });
             session.native.lastAmp01 = amp01;
 
             const now = Date.now();
             const lastAt = Number(session.native.lastVizAtMs ?? 0);
-            if (now - lastAt < 50) continue; // не чаще 20fps
+            if (!shouldEmitByInterval({ nowMs: now, lastAtMs: lastAt, intervalMs: 50 })) continue; // не чаще 20fps
             session.native.lastVizAtMs = now;
 
             if (this.session === session && session.status !== "paused") {
@@ -739,25 +546,18 @@ export class RecordingService {
             while (off + frameBytes <= buf.length) {
               const frame = buf.subarray(off, off + frameBytes);
               off += frameBytes;
-              let sumSq = 0;
               const n = 200;
-              for (let i = 0; i < frame.length; i += 2) {
-                const s16 = frame.readInt16LE(i);
-                const v = s16 / 32768;
-                sumSq += v * v;
-              }
-              const rms = Math.sqrt(sumSq / n); // 0..1
+              const rms = rms01FromS16leMonoFrame(frame, n);
               // Маппинг RMS->dBFS->0..1 делает визуализацию заметной даже на тихих уровнях.
               // db ~= [-inf..0], берём диапазон -60..-12 dBFS.
-              const db = 20 * Math.log10(Math.max(1e-6, rms));
-              const amp01raw = Math.max(0, Math.min(1, (db + 60) / 48));
+              const { db, amp01raw } = amp01FromRmsPolicy(rms);
               const prev = Number(session.native.lastAmp01 ?? 0);
-              const amp01 = Math.max(0, Math.min(1, prev * 0.75 + amp01raw * 0.25));
+              const amp01 = smoothAmp01Policy({ prev, raw: amp01raw, alpha: 0.25 });
               session.native.lastAmp01 = amp01;
 
               const now = Date.now();
               const lastAt = Number(session.native.lastVizAtMs ?? 0);
-              if (now - lastAt >= 25) {
+              if (shouldEmitByInterval({ nowMs: now, lastAtMs: lastAt, intervalMs: 25 })) {
                 session.native.lastVizAtMs = now;
                 if (this.session === session && session.status !== "paused") this.onViz?.(amp01);
               }
@@ -809,16 +609,13 @@ export class RecordingService {
     let proc: import("child_process").ChildProcess | null = null;
     let pickedMonitor: string | undefined;
     let pickedMic: string | undefined;
-    for (const mic of micCandidates) {
-      for (const m of monitorCandidates) {
-        proc = await trySpawn(mic, m);
-        if (proc) {
-          pickedMic = mic;
-          pickedMonitor = m;
-          break;
-        }
-      }
-      if (proc) break;
+    const attempts = buildLinuxNativeSourceAttemptPlan({ micCandidates, monitorCandidates });
+    for (const a of attempts) {
+      proc = await trySpawn(a.mic, a.monitor);
+      if (!proc) continue;
+      pickedMic = a.mic;
+      pickedMonitor = a.monitor ?? undefined;
+      break;
     }
 
     if (!proc) {
@@ -914,8 +711,7 @@ export class RecordingService {
 
         const buf = await fs.readFile(tmpPath);
         if (!buf || buf.byteLength === 0) return;
-        const ts = new Date().toISOString().replace(/[:.]/g, "-");
-        const name = `${session.filePrefix}-${ts}.${session.native.ext}`;
+        const name = recordingChunkFileName({ prefix: session.filePrefix, iso: new Date().toISOString(), ext: session.native.ext });
         const path = normalizePath(`${session.recordingsDir}/${name}`);
         await this.app.vault.createBinary(path, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
         session.filesTotal += 1;
@@ -952,7 +748,7 @@ export class RecordingService {
       if (!blob || blob.size === 0) return;
       const p = (async () => {
         try {
-          const ext = (session.mimeType || "").includes("ogg") ? "ogg" : "webm";
+          const ext = recordingExtFromMimeType(session.mimeType || "");
           const durationMs = Math.max(0, Date.now() - session.currentFileStartedAtMs);
 
           // MediaRecorder WebM часто не содержит duration/cues → Obsidian (и Chromium) плохо видят длительность/seek.
@@ -969,8 +765,8 @@ export class RecordingService {
             typeof (fixedBlob as any).arrayBuffer === "function"
               ? await (fixedBlob as any).arrayBuffer()
               : await new Response(fixedBlob).arrayBuffer();
-          const ts = new Date().toISOString().replace(/[:.]/g, "-");
-          const name = `${filePrefix}-${ts}.${ext}`;
+          const iso = new Date().toISOString();
+          const name = recordingChunkFileName({ prefix: filePrefix, iso, ext });
           const path = normalizePath(`${recordingsDir}/${name}`);
           await vault.createBinary(path, buf);
           session.filesTotal += 1;
@@ -998,15 +794,7 @@ export class RecordingService {
       const map = frontmatter ? parseFrontmatterMap(frontmatter) : {};
 
       const raw = String(map[FM.files] ?? "[]").trim();
-      let files: string[] = [];
-      if (raw.startsWith("[")) {
-        try {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) files = parsed.map((x) => String(x));
-        } catch {
-          files = [];
-        }
-      }
+      const files = parseJsonStringArray(raw);
 
       if (!files.includes(recordingFilePath)) files.push(recordingFilePath);
       const next = upsertFrontmatter(md, { [FM.files]: JSON.stringify(files) });
@@ -1109,7 +897,7 @@ export class RecordingService {
     const startedAtMs = Date.now();
 
     const recordingsDir = normalizePath(DEFAULT_RECORDINGS_DIR);
-    const filePrefix = params.eventKey ? params.eventKey.replace(/[^a-zA-Z0-9._:-]+/g, "_") : "manual";
+    const filePrefix = recordingFilePrefixFromEventKey(params.eventKey);
 
     // Маркер: пишем всегда, чтобы понимать, что start() реально вызвался и какой backend выбран.
     this.logInfo("Recording: start()", {
@@ -1148,7 +936,7 @@ export class RecordingService {
         if (s.stopping) return;
         if (s.status !== "recording") return;
         const now = Date.now();
-        if (now - s.lastChunkAtMs < s.chunkEveryMs) return;
+        if (!shouldRotateChunkPolicy({ nowMs: now, lastChunkAtMs: s.lastChunkAtMs, chunkEveryMs: s.chunkEveryMs })) return;
         this.rotateChunk(s, now);
       }, 1000);
       this.onStats?.(this.getStats());
@@ -1226,7 +1014,7 @@ export class RecordingService {
               n++;
             }
             const rms = n ? Math.sqrt(sumSq / n) : 0;
-            const amp01 = Math.max(0, Math.min(1, rms * 2.2));
+            const amp01 = amp01FromTimeDomainRmsPolicy(rms, 2.2);
             this.onViz(amp01);
           } catch {
             // ignore
@@ -1252,7 +1040,7 @@ export class RecordingService {
       if (session.stopping) return;
       if (session.status !== "recording") return;
       const now = Date.now();
-      if (now - session.lastChunkAtMs < session.chunkEveryMs) return;
+      if (!shouldRotateChunkPolicy({ nowMs: now, lastChunkAtMs: session.lastChunkAtMs, chunkEveryMs: session.chunkEveryMs })) return;
       this.rotateChunk(session, now);
     }, 1000);
     this.onStats?.(this.getStats());
@@ -1321,7 +1109,7 @@ export class RecordingService {
         if (s.stopping) return;
         if (s.status !== "recording") return;
         const now = Date.now();
-        if (now - s.lastChunkAtMs < s.chunkEveryMs) return;
+        if (!shouldRotateChunkPolicy({ nowMs: now, lastChunkAtMs: s.lastChunkAtMs, chunkEveryMs: s.chunkEveryMs })) return;
         this.rotateChunk(s, now);
       }, 1000);
       this.onStats?.(this.getStats());

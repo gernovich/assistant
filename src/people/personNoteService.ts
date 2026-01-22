@@ -3,9 +3,13 @@ import { normalizePath } from "obsidian";
 import { ensureFolder } from "../vault/ensureFolder";
 import { revealOrOpenInNewLeaf } from "../vault/revealOrOpenFile";
 import { createUniqueMarkdownFile, sanitizeFileName } from "../vault/fileNaming";
-import { yamlEscape } from "../vault/yamlEscape";
-import { FM } from "../vault/frontmatterKeys";
+import { yamlEscape } from "../domain/policies/yamlEscape";
+import { FM } from "../domain/policies/frontmatterKeys";
 import { makePersonIdFromEmail } from "../ids/stableIds";
+import { normalizeEmail } from "../domain/policies/normalizeEmail";
+import { makePseudoRandomId } from "../domain/policies/pseudoRandomId";
+import { renderPersonCardMarkdown } from "../domain/policies/personNoteTemplate";
+import type { PersonRepository } from "../application/contracts/personRepository";
 
 /**
  * Сервис карточек людей (md-файлы в vault).
@@ -13,7 +17,7 @@ import { makePersonIdFromEmail } from "../ids/stableIds";
  * Карточки людей — ручная сущность: создаём шаблон и открываем файл,
  * дальше пользователь заполняет поля (и/или позже мы начнём автозаполнение из календаря).
  */
-export class PersonNoteService {
+export class PersonNoteService implements PersonRepository {
   private app: App;
   private vault: Vault;
   private peopleDir: string;
@@ -38,7 +42,30 @@ export class PersonNoteService {
       this.vault,
       this.peopleDir,
       name,
-      renderPersonCard({ displayName: params?.displayName ?? "" }),
+      renderPersonCardMarkdown({
+        id: makePseudoRandomId({ prefix: "person", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) }),
+        displayName: params?.displayName ?? "",
+        keys: {
+          assistantType: FM.assistantType,
+          personId: FM.personId,
+          displayName: FM.displayName,
+          firstName: FM.firstName,
+          lastName: FM.lastName,
+          middleName: FM.middleName,
+          nickName: FM.nickName,
+          gender: FM.gender,
+          photo: FM.photo,
+          birthday: FM.birthday,
+          voiceprint: FM.voiceprint,
+          emails: FM.emails,
+          phones: FM.phones,
+          companies: FM.companies,
+          positions: FM.positions,
+          mailboxes: FM.mailboxes,
+          messengers: FM.messengers,
+        },
+        escape: yamlEscape,
+      }),
     );
     await revealOrOpenInNewLeaf(this.app, file);
     return file;
@@ -62,7 +89,31 @@ export class PersonNoteService {
       this.vault,
       this.peopleDir,
       baseName,
-      renderPersonCard({ displayName: params.displayName ?? "", email }),
+      renderPersonCardMarkdown({
+        id: makePersonIdFromEmail(email),
+        displayName: params.displayName ?? "",
+        email,
+        keys: {
+          assistantType: FM.assistantType,
+          personId: FM.personId,
+          displayName: FM.displayName,
+          firstName: FM.firstName,
+          lastName: FM.lastName,
+          middleName: FM.middleName,
+          nickName: FM.nickName,
+          gender: FM.gender,
+          photo: FM.photo,
+          birthday: FM.birthday,
+          voiceprint: FM.voiceprint,
+          emails: FM.emails,
+          phones: FM.phones,
+          companies: FM.companies,
+          positions: FM.positions,
+          mailboxes: FM.mailboxes,
+          messengers: FM.messengers,
+        },
+        escape: yamlEscape,
+      }),
     );
     return file;
   }
@@ -85,60 +136,32 @@ export class PersonNoteService {
 }
 
 export function renderPersonCard(params: { displayName: string; email?: string }): string {
-  const id = params.email ? makePersonIdFromEmail(params.email) : makePersonId();
-  return [
-    "---",
-    `${FM.assistantType}: person`,
-    `${FM.personId}: ${yamlEscape(id)}`,
-    `${FM.displayName}: ${yamlEscape(params.displayName)}`,
-    `${FM.firstName}: `,
-    `${FM.lastName}: `,
-    `${FM.middleName}: `,
-    `${FM.nickName}: `,
-    `${FM.gender}: `,
-    `${FM.photo}: `,
-    `${FM.birthday}: `,
-    `${FM.voiceprint}: `,
-    `${FM.emails}: ${params.email ? `[${yamlEscape(params.email)}]` : "[]"}`,
-    `${FM.phones}: []`,
-    `${FM.companies}: []`,
-    `${FM.positions}: []`,
-    `${FM.mailboxes}: []`,
-    `${FM.messengers}: []`,
-    "---",
-    "",
-    `## ${params.displayName ? params.displayName : "Новый человек"}`,
-    "",
-    "### Контакты",
-    "",
-    "- Email: ",
-    "- Телефон: ",
-    "- Мессенджеры: ",
-    "",
-    "### Досье",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Факты",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Связи",
-    "",
-    "- Проекты: ",
-    "- Встречи: ",
-    "",
-  ].join("\n");
+  const id = params.email ? makePersonIdFromEmail(params.email) : makePseudoRandomId({ prefix: "person", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) });
+  return renderPersonCardMarkdown({
+    id,
+    displayName: params.displayName,
+    email: params.email,
+    keys: {
+      assistantType: FM.assistantType,
+      personId: FM.personId,
+      displayName: FM.displayName,
+      firstName: FM.firstName,
+      lastName: FM.lastName,
+      middleName: FM.middleName,
+      nickName: FM.nickName,
+      gender: FM.gender,
+      photo: FM.photo,
+      birthday: FM.birthday,
+      voiceprint: FM.voiceprint,
+      emails: FM.emails,
+      phones: FM.phones,
+      companies: FM.companies,
+      positions: FM.positions,
+      mailboxes: FM.mailboxes,
+      messengers: FM.messengers,
+    },
+    escape: yamlEscape,
+  });
 }
 
-function makePersonId(): string {
-  return `person-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
-}
-
-function normalizeEmail(v: string): string {
-  const s = String(v ?? "")
-    .trim()
-    .toLowerCase();
-  const m = s.match(/^mailto:(.+)$/i);
-  return (m ? m[1] : s).trim().toLowerCase();
-}
+// normalizeEmail/renderPersonCardMarkdown вынесены в domain/policies

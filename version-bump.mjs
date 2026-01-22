@@ -8,7 +8,7 @@ function writeJson(path, obj) {
   fs.writeFileSync(path, JSON.stringify(obj, null, 2) + "\n", "utf8");
 }
 
-const manifestPath = "manifest.json";
+const manifestPath = "resources/manifest.json";
 const versionsPath = "versions.json";
 
 const manifest = readJson(manifestPath);

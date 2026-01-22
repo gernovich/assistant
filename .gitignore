@@ -25,7 +25,6 @@ touch
 *.sublime-workspace
 
 # Project
-main.js
 dist/
 logs/
 node_modules/

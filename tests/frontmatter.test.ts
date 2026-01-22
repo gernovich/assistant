@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseFrontmatterMap, splitFrontmatter, stringifyFrontmatterMap, upsertFrontmatter } from "../src/vault/frontmatter";
-import { parseMeetingNoteFromMd, parsePersonNoteFromCache, parseProjectNoteFromCache, parseProtocolNoteFromCache } from "../src/vault/frontmatterDtos";
-import { isAssistantEntityType } from "../src/vault/frontmatterKeys";
+import { parseFrontmatterMap, splitFrontmatter, stringifyFrontmatterMap, upsertFrontmatter } from "../src/domain/policies/frontmatter";
+import { parseMeetingNoteFromMd, parsePersonNoteFromCache, parseProjectNoteFromCache, parseProtocolNoteFromCache } from "../src/domain/policies/frontmatterDtos";
+import { isAssistantEntityType } from "../src/domain/policies/frontmatterKeys";
 
-describe("vault/frontmatter", () => {
+describe("domain/policies/frontmatter", () => {
   it("splitFrontmatter возвращает null, если frontmatter отсутствует", () => {
     const md = "## Заголовок\n\nТекст\n";
     const { frontmatter, body } = splitFrontmatter(md);

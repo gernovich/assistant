@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { sanitizeFileName, createUniqueMarkdownFile, isTFile as isTFileFromFileNaming } from "../src/vault/fileNaming";
+import { createUniqueMarkdownFile, isTFile as isTFileFromFileNaming } from "../src/vault/fileNaming";
+import { sanitizeFileName } from "../src/domain/policies/sanitizeFileName";
 import { ensureFile, isTFile } from "../src/vault/ensureFile";
-import { yamlEscape } from "../src/vault/yamlEscape";
+import { yamlEscape } from "../src/domain/policies/yamlEscape";
 
 class FakeVault {
   private files = new Map<string, { path: string; extension?: string; content: string }>();

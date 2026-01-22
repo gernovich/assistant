@@ -1,4 +1,5 @@
 import type { Calendar, Event, EventColor, EventReminderDto, EventRecurrenceDto, Person } from "../types";
+import { normalizeEmail } from "../domain/policies/normalizeEmail";
 
 // Минимальный ICS (VEVENT) парсер для MVP.
 // Поддерживаемые поля: UID, DTSTART, DTEND, SUMMARY, DESCRIPTION, LOCATION, URL, RRULE, EXDATE, ATTENDEE(PARTSTAT)
@@ -257,12 +258,6 @@ function toBaseEvent(calendar: Calendar, ve: ParsedVEvent, myEmail?: string): Ev
     organizer,
     attendees,
   };
-}
-
-function normalizeEmail(v: string): string {
-  const s = (v ?? "").trim();
-  const m = s.match(/^mailto:(.+)$/i);
-  return (m ? m[1] : s).trim().toLowerCase();
 }
 
 function detectMyPartstat(

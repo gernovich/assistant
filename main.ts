@@ -34,6 +34,7 @@ import { redactUrlForLog } from "./src/log/redact";
 import { registerAssistantCommands } from "./src/presentation/obsidian/commands/registerAssistantCommands";
 import { registerAssistantViews } from "./src/presentation/obsidian/views/registerAssistantViews";
 import { createDefaultCalendarProviderRegistry } from "./src/calendar/providers/calendarProviderRegistry";
+import { createPluginContext, type PluginContext } from "./src/plugin/pluginContext";
 
 /**
  * Основной класс Obsidian-плагина “Ассистент”.
@@ -45,6 +46,7 @@ import { createDefaultCalendarProviderRegistry } from "./src/calendar/providers/
  */
 export default class AssistantPlugin extends Plugin {
   settings: AssistantSettings = DEFAULT_SETTINGS;
+  private ctx!: PluginContext;
   calendarService!: CalendarService;
   eventNoteService!: EventNoteService;
   protocolNoteService!: ProtocolNoteService;
@@ -109,49 +111,36 @@ export default class AssistantPlugin extends Plugin {
 
     // Инициализируем сервисы дефолтами сразу (без await)
     this.settings = DEFAULT_SETTINGS;
-    this.logFileWriter = new LogFileWriter({
+    this.ctx = createPluginContext({
       app: this.app,
-      logsDirPath: this.getPluginLogsDirPath(),
-      retentionDays: this.settings.log.retentionDays,
-    });
-    this.logService = new LogService(this.settings.log.maxEntries, (entry) => {
-      this.logFileWriter.enqueue(entry);
-    });
-    // Маркер, чтобы по логу было видно, что плагин реально перезагрузился после install:obsidian.
-    this.logService.info("Ассистент: инициализация плагина", {
+      settings: this.settings,
+      paths: {
+        logsDirPath: this.getPluginLogsDirPath(),
+        calendarCacheFilePath: this.getCalendarCacheFilePath(),
+        eventNoteIndexCacheFilePath: this.getEventNoteIndexCacheFilePath(),
+        outboxFilePath: this.getOutboxFilePath(),
+      },
+      actions: {
+        createProtocol: (ev) => this.createProtocolFromEvent(ev),
+        startRecording: (ev) => this.startRecordingFromReminder(ev),
+        meetingCancelled: (ev) => this.meetingCancelledFromReminder(ev),
+      },
       version: (this.manifest as any)?.version ?? "",
-      ts: new Date().toISOString(),
     });
-    this.calendarService = new CalendarService(this.settings, createDefaultCalendarProviderRegistry(this.settings));
-    this.eventNoteIndexCache = new EventNoteIndexCache({
-      filePath: this.getEventNoteIndexCacheFilePath(),
-      logService: () => this.logService,
-    });
-    this.eventNoteService = new EventNoteService(this.app, this.settings.folders.calendarEvents, this.eventNoteIndexCache);
-    this.protocolNoteService = new ProtocolNoteService(this.app, this.settings.folders.protocols);
-    this.personNoteService = new PersonNoteService(this.app, this.settings.folders.people);
-    this.projectNoteService = new ProjectNoteService(this.app, this.settings.folders.projects);
-    this.baseWorkspaceService = new BaseWorkspaceService(this.app, {
-      meetingsDir: this.settings.folders.calendarEvents,
-      protocolsDir: this.settings.folders.protocols,
-      peopleDir: this.settings.folders.people,
-      projectsDir: this.settings.folders.projects,
-    });
-    this.calendarEventCache = new CalendarEventCache({
-      filePath: this.getCalendarCacheFilePath(),
-      logService: () => this.logService,
-    });
-    this.outboxService = new OutboxService({
-      filePath: this.getOutboxFilePath(),
-      logService: () => this.logService,
-    });
-    this.notificationScheduler = new NotificationScheduler(this.settings, (msg) => this.logService.info(msg), {
-      createProtocol: (ev) => this.createProtocolFromEvent(ev),
-      startRecording: (ev) => this.startRecordingFromReminder(ev),
-      meetingCancelled: (ev) => this.meetingCancelledFromReminder(ev),
-    });
-    this.recordingService = new RecordingService(this.app, this.settings, this.logService);
-    this.syncService = new SyncService(this.calendarService, this.eventNoteService, this.notificationScheduler, this.logService, this.personNoteService);
+    this.logFileWriter = this.ctx.logFileWriter;
+    this.logService = this.ctx.logService;
+    this.calendarService = this.ctx.calendarService;
+    this.eventNoteIndexCache = this.ctx.eventNoteIndexCache;
+    this.eventNoteService = this.ctx.eventNoteService;
+    this.protocolNoteService = this.ctx.protocolNoteService;
+    this.personNoteService = this.ctx.personNoteService;
+    this.projectNoteService = this.ctx.projectNoteService;
+    this.baseWorkspaceService = this.ctx.baseWorkspaceService;
+    this.calendarEventCache = this.ctx.calendarEventCache;
+    this.outboxService = this.ctx.outboxService;
+    this.notificationScheduler = this.ctx.notificationScheduler;
+    this.recordingService = this.ctx.recordingService;
+    this.syncService = this.ctx.syncService;
 
     this.addSettingTab(new AssistantSettingsTab(this.app, this));
 
@@ -327,23 +316,9 @@ export default class AssistantPlugin extends Plugin {
       this.settings = DEFAULT_SETTINGS;
     }
 
-    // Применяем настройки к сервисам
-    this.logService.setMaxEntries(this.settings.log.maxEntries);
-    await this.logFileWriter.setRetentionDays(this.settings.log.retentionDays);
-    // Лог-файлы пишем вне vault (в папку плагина). Конфиг папки/включения не настраивается.
-    this.syncService.applySettings(this.settings);
-    // Важно: RecordingService создаётся до loadSettings(), поэтому после загрузки обязаны прокинуть актуальные настройки.
-    this.recordingService.setSettings(this.settings);
+    // Применяем настройки к сервисам (централизовано через Composition Root)
+    await this.ctx.applySettings(this.settings);
     this.logService.info("Настройки: загружены и применены", { settings: this.getSettingsSummaryForLog() });
-    this.protocolNoteService.setProtocolsDir(this.settings.folders.protocols);
-    this.personNoteService.setPeopleDir(this.settings.folders.people);
-    this.projectNoteService.setProjectsDir(this.settings.folders.projects);
-    this.baseWorkspaceService.setPaths({
-      meetingsDir: this.settings.folders.calendarEvents,
-      protocolsDir: this.settings.folders.protocols,
-      peopleDir: this.settings.folders.people,
-      projectsDir: this.settings.folders.projects,
-    });
 
     // Обновляем уже восстановленные views загруженными настройками (важно для debug-элементов UI и т.п.)
     for (const leaf of this.app.workspace.getLeavesOfType(AGENDA_VIEW_TYPE)) {
@@ -390,18 +365,7 @@ export default class AssistantPlugin extends Plugin {
     this.logService.info("Настройки: сохранить+применить (start)", { settings: summary });
     try {
       await this.saveData(this.settings);
-      this.logService.setMaxEntries(this.settings.log.maxEntries);
-      await this.logFileWriter.setRetentionDays(this.settings.log.retentionDays);
-      // Лог-файлы пишем вне vault (в папку плагина). Конфиг папки/включения не настраивается.
-      this.syncService.applySettings(this.settings);
-      this.protocolNoteService.setProtocolsDir(this.settings.folders.protocols);
-      this.recordingService.setSettings(this.settings);
-      this.baseWorkspaceService.setPaths({
-        meetingsDir: this.settings.folders.calendarEvents,
-        protocolsDir: this.settings.folders.protocols,
-        peopleDir: this.settings.folders.people,
-        projectsDir: this.settings.folders.projects,
-      });
+      await this.ctx.applySettings(this.settings);
     } catch (e) {
       const msg = String((e as unknown) ?? "неизвестная ошибка");
       this.logService.error("Настройки: сохранить+применить (ошибка)", { error: msg, settings: summary });

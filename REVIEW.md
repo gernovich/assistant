@@ -131,7 +131,7 @@
 - P2**: включить лёгкий CI (GitHub Actions)
   - `npm ci`, `npm run format:check`, `npm run typecheck`, `npm test`, `npm run test:coverage`.
 - **P3**: добавить guard на “сборка перед релизом”
-  - сейчас `main.js` коммитится в репо; полезно иметь CI/проверку, что `npm run build` выполнен и `main.js` соответствует `main.ts`
+  - теперь артефакты сборки живут в `dist/`; полезно иметь CI/проверку, что `npm run build` выполнен и `dist/main.js` соответствует `main.ts`
 
 ---
 

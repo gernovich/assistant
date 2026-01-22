@@ -2,6 +2,7 @@ import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from "module";
 import path from "path";
+import fs from "node:fs/promises";
 
 const isDev = process.argv[2] === "dev";
 
@@ -39,7 +40,7 @@ const buildOptions = {
   logLevel: "info",
   sourcemap: isDev ? "inline" : false,
   treeShaking: true,
-  outfile: "main.js",
+  outfile: "dist/main.js",
   minify: !isDev,
   plugins: [
     {
@@ -49,6 +50,16 @@ const buildOptions = {
           return {
             path: path.resolve(process.cwd(), "src/caldav/crossFetchObsidian.ts"),
           };
+        });
+      },
+    },
+    {
+      name: "copy-plugin-static",
+      setup(build) {
+        build.onEnd(async () => {
+          await fs.mkdir("dist", { recursive: true });
+          await fs.copyFile("resources/manifest.json", "dist/manifest.json");
+          await fs.copyFile("resources/styles.css", "dist/styles.css");
         });
       },
     },

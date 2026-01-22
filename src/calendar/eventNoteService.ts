@@ -10,6 +10,7 @@ import { yamlEscape } from "../vault/yamlEscape";
 import type { EventNoteIndexCache } from "./store/eventNoteIndexCache";
 import { upsertFrontmatter } from "../vault/frontmatter";
 import { FM } from "../vault/frontmatterKeys";
+import type { MeetingNoteRepository } from "../application/contracts/meetingNoteRepository";
 import { extractLegacyStableIdFromPath, legacyStableIdSuffix } from "../domain/policies/legacyStableId";
 import { meetingNoteBaseName } from "../domain/policies/meetingNoteNaming";
 import { wikiLinkLine } from "../domain/policies/wikiLink";
@@ -32,7 +33,7 @@ import {
  * - создание/обновление файла встречи
  * - связь “встреча ↔ протоколы” через секцию `ASSISTANT:PROTOCOLS`
  */
-export class EventNoteService {
+export class EventNoteService implements MeetingNoteRepository {
   private app: App;
   private vault: Vault;
   private eventsDir: string;

@@ -16,7 +16,7 @@ function ev(params: { calId: string; id: string; start: string; end?: string; su
   };
 }
 
-describe("recordingTarget", () => {
+describe("recordingTarget (compat wrapper)", () => {
   it("selects ongoing event over soon event", () => {
     const now = new Date("2026-01-21T10:00:00.000Z");
     const events = [

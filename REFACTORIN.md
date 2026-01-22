@@ -11,7 +11,8 @@
 
 - **Entry point / wiring**
   - `main.ts`: основной класс `AssistantPlugin` (инициализация, сборка сервисов, команды, views, таймеры, интеграции).
-  - `main.js`: билд-артефакт для Obsidian (генерируется сборкой).
+  - `dist/main.js`: билд-артефакт для Obsidian (генерируется сборкой).
+  - `resources/*`: исходные статические файлы (например `manifest.json`, `styles.css`), которые копируются в `dist/`.
 - **Документация / контракты данных**
   - `README.md`: назначение, сборка, установка, CalDAV/ICS, команды, диктофон.
   - `TZ.md`: фактически архитектурное ТЗ + функциональные требования и заметки по evolution.
@@ -582,6 +583,63 @@ src/
   - ✅ Вынесено: policy извлечения frontmatter-данных встречи (organizer/reminders/attendees grouping и т.п.) как pure-функция: `src/domain/policies/meetingFrontmatterData.ts` (+ тест `tests/domain/meetingFrontmatterData.test.ts`). `EventNoteService` переиспользует эту policy.
   - ✅ Вынесено: policy генерации YAML-строк для frontmatter списков как pure-функция: `src/domain/policies/frontmatterYaml.ts` (+ тест `tests/domain/frontmatterYaml.test.ts`). `EventNoteService` переиспользует эту policy.
   - ✅ Вынесено: policy шаблона карточки встречи (markdown) как pure-функция: `src/domain/policies/meetingNoteTemplate.ts` (+ тест `tests/domain/meetingNoteTemplate.test.ts`). `EventNoteService.renderEventFile` теперь делегирует в эту policy.
+  - ✅ Вынесено: чистые политики работы с markdown‑секциями и frontmatter:
+    - `src/domain/policies/assistantMarkdownSections.ts` (ASSISTANT markers: merge/extract/upsert)
+    - `src/domain/policies/frontmatter.ts` (split/parse/stringify/upsert)
+    - `src/domain/policies/yamlEscape.ts` (yamlEscape)
+    - `src/vault/{markdownSections,frontmatter,yamlEscape}.ts` теперь тонкие re-export’ы; тесты переведены на domain/policies импорты.
+  - ✅ Вынесено: парсинг DTO и ключи frontmatter как чистые policy:
+    - `src/domain/policies/frontmatterKeys.ts` (FM + `isAssistantEntityType`)
+    - `src/domain/policies/frontmatterDtos.ts` (parseMeeting/Protocol/Person/Project)
+    - `src/vault/{frontmatterKeys,frontmatterDtos}.ts` теперь re-export’ы; тесты переведены на domain/policies импорты.
+  - ✅ Продолжение выноса policy (templates/naming/ids/normalize):
+    - `src/domain/policies/normalizeEmail.ts` (+ тест `tests/domain/normalizeEmail.test.ts`) — убирает дубли (ICS/person/stableIds).
+    - `src/domain/policies/sanitizeFileName.ts` — `src/vault/fileNaming.ts` re-export.
+    - `src/domain/policies/vaultPaths.ts` — `src/vault/vaultPaths.ts` re-export.
+    - `src/domain/policies/pseudoRandomId.ts` (+ тест `tests/domain/pseudoRandomId.test.ts`) — “нестабильные” id через инъекцию now/random.
+    - `src/domain/policies/protocolNoteNaming.ts`, `src/domain/policies/protocolNoteTemplate.ts` (+ тест `tests/domain/protocolNoteTemplate.test.ts`) — ProtocolNoteService делегирует в policy.
+    - `src/domain/policies/projectNoteTemplate.ts`, `src/domain/policies/personNoteTemplate.ts` — Project/Person services используют чистые шаблоны.
+  - ✅ Recording: вынесены чистые куски в policy:
+    - `src/domain/policies/recordingTarget.ts` (+ тест `tests/domain/recordingTarget.test.ts`) — выбор дефолтной цели записи (встреча/новый протокол).
+    - `src/domain/policies/ffmpegFilterGraph.ts` (+ тест `tests/domain/ffmpegFilterGraph.test.ts`) — генерация Linux ffmpeg filtergraph.
+    - `src/domain/policies/escHtml.ts` (+ тест `tests/domain/escHtml.test.ts`) — HTML escaping для диалога записи.
+  - ✅ Recording dialog / MediaRecorder:
+    - `src/domain/policies/recordingDialogModel.ts` (+ тест `tests/domain/recordingDialogModel.test.ts`) — подготовка данных для диалога записи (occurrences/meetingNames/lockedLabel/meta/autoSeconds).
+    - `src/domain/policies/mediaRecorderMimeType.ts` (+ тест `tests/domain/mediaRecorderMimeType.test.ts`) — выбор mimeType через инъекцию `isSupported`, использовано в `RecordingService`.
+  - ✅ Recording: chunk timing как policy:
+    - `src/domain/policies/recordingChunkTiming.ts` (+ тест `tests/domain/recordingChunkTiming.test.ts`) — вычисление `nextChunkInMs` и условия ротации чанка.
+  - ✅ Recording: визуализация уровня как policy:
+    - `src/domain/policies/recordingVizAmp.ts` (+ тест `tests/domain/recordingVizAmp.test.ts`) — mapping LUFS/RMS→amp01 и сглаживание, используется в `RecordingService`.
+  - ✅ Recording: вынос “pure” частей парсинга метрик:
+    - `src/domain/policies/ebur128.ts` (+ тест `tests/domain/ebur128.test.ts`) — парсинг `M:` LUFS из stderr ebur128.
+    - `src/domain/policies/pcmRms.ts` (+ тест `tests/domain/pcmRms.test.ts`) — RMS из PCM s16le mono кадра.
+    - `src/domain/policies/rateLimit.ts` (+ тест `tests/domain/rateLimit.test.ts`) — rate-limit эмита визуализации.
+  - ✅ Recording: парсинг JSON-массивов из frontmatter:
+    - `src/domain/policies/frontmatterJsonArrays.ts` (+ тест `tests/domain/frontmatterJsonArrays.test.ts`) — чтение `files:` (и подобных) как JSON массива строк.
+  - ✅ Recording: rolling buffers / file naming как policy:
+    - `src/domain/policies/rollingTextBuffer.ts` (+ тест `tests/domain/rollingTextBuffer.test.ts`) — append+truncate и splitLinesKeepRemainder для stderr/viz буферов.
+    - `src/domain/policies/recordingFileNaming.ts` (+ тест `tests/domain/recordingFileNaming.test.ts`) — prefix/timestamp/filename для файлов записи, используется в `RecordingService`.
+  - ✅ Recording: desktop/pactl эвристики как policy:
+    - `src/domain/policies/desktopCapturerSource.ts` (+ тест `tests/domain/desktopCapturerSource.test.ts`) — выбор `desktopCapturer` sourceId по имени.
+    - `src/domain/policies/pactl.ts` (+ тест `tests/domain/pactl.test.ts`) — парсинг `pactl` stdout и построение кандидатов monitor/mic.
+    - `buildPulseMicCandidates` вынесен в policy (default source + алиасы + дедуп); `RecordingService.guessPulseMicSource` делегирует в policy.
+  - ✅ Recording (Linux Native): ffmpeg args builder как policy:
+    - `src/domain/policies/linuxNativeFfmpegArgs.ts` (+ тест `tests/domain/linuxNativeFfmpegArgs.test.ts`) — сборка argv для `ffmpeg` (inputs/outputs/viz).
+  - ✅ Recording (Linux Native): план перебора источников как policy:
+    - `src/domain/policies/linuxNativeSourcePlan.ts` (+ тест `tests/domain/linuxNativeSourcePlan.test.ts`) — стратегия попыток mic×monitor в порядке кандидатов.
+  - ✅ Recording: логирование/текст как policy:
+    - `src/domain/policies/logText.ts` (+ тест `tests/domain/logText.test.ts`) — `trimForLogPolicy`.
+  - ✅ Recording: последние мелкие policy:
+    - `src/domain/policies/recordingPaths.ts` — дефолтный путь записей (`DEFAULT_RECORDINGS_DIR`).
+    - `src/domain/policies/recordingExt.ts` (+ тест `tests/domain/recordingExt.test.ts`) — выбор расширения `ogg/webm` по mimeType.
+  - ✅ Vault ports: существующие Obsidian-сервисы теперь явно реализуют контракты Application слоя:
+    - `EventNoteService implements MeetingNoteRepository`
+    - `ProtocolNoteService implements ProtocolNoteRepository`
+    - `PersonNoteService implements PersonRepository`
+    - `ProjectNoteService implements ProjectRepository`
+- ✅ `PluginContext` подключён к runtime (Composition Root):
+  - `src/plugin/pluginContext.ts` теперь создаёт сервисы вместо wiring в `main.ts`
+  - и централизует применение настроек через `applySettings()` (используется в `initAsync` и `saveSettingsAndApply`)
 
 ### Этап 5: Рефакторинг записи (Recording) в 2 уровня (L)
 

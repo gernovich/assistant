@@ -13,7 +13,7 @@
     "format": "node scripts/format.mjs --write",
     "format:check": "node scripts/format.mjs --check",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "version": "node version-bump.mjs && git add manifest.json versions.json"
+    "version": "node version-bump.mjs && git add resources/manifest.json versions.json"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

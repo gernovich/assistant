@@ -54,7 +54,7 @@ npm run test:coverage
 npm run build
 ```
 
-В результате появится `main.js` рядом с `manifest.json` — это формат, который Obsidian ожидает от плагина.
+В результате появится папка `dist/` — это формат, который Obsidian ожидает от плагина (внутри будут `main.js`, `manifest.json`, `styles.css`).
 
 ### Быстрый цикл “собрать + установить в Obsidian”
 
@@ -72,7 +72,7 @@ npm run dev
 
 ### Установка в Obsidian (автоматически)
 
-Скопирует `manifest.json`, `main.js`, `styles.css` в `/home/gernovich/notes/.obsidian/plugins/assistant/`.
+Скопирует содержимое `dist/` в `/home/gernovich/notes/.obsidian/plugins/assistant/`.
 
 ```bash
 npm run install:obsidian
@@ -83,9 +83,9 @@ npm run install:obsidian
 - Найди папку хранилища: `<vault>/.obsidian/plugins/`
 - Создай папку плагина, например: `<vault>/.obsidian/plugins/assistant/`
 - Скопируй туда файлы:
-  - `manifest.json`
-  - `main.js`
-  - `styles.css` (опционально)
+  - `dist/manifest.json`
+  - `dist/main.js`
+  - `dist/styles.css` (опционально)
 - В Obsidian открой Settings → Community plugins и включи плагин.
 
 ### Настройка календаря (ICS URL)

@@ -5,9 +5,9 @@ import {
   mergePreservingAssistantSections,
   upsertCancelledFlagInUserSection,
   upsertProtocolLink,
-} from "../src/vault/markdownSections";
+} from "../src/domain/policies/assistantMarkdownSections";
 
-describe("vault/markdownSections", () => {
+describe("domain/policies/assistantMarkdownSections", () => {
   it("mergePreservingAssistantSections сохраняет список протоколов и пользовательский хвост", () => {
     const existing = [
       "---",

@@ -5,12 +5,16 @@ import { ensureFolder } from "../vault/ensureFolder";
 import { revealOrOpenInNewLeaf } from "../vault/revealOrOpenFile";
 import { createUniqueMarkdownFile } from "../vault/fileNaming";
 import { makeEventKey } from "../ids/stableIds";
-import { yamlEscape } from "../vault/yamlEscape";
-import { FM } from "../vault/frontmatterKeys";
-import { parseMeetingNoteFromMd } from "../vault/frontmatterDtos";
+import { yamlEscape } from "../domain/policies/yamlEscape";
+import { FM } from "../domain/policies/frontmatterKeys";
+import { parseMeetingNoteFromMd } from "../domain/policies/frontmatterDtos";
+import { makePseudoRandomId } from "../domain/policies/pseudoRandomId";
+import { emptyProtocolBaseName, protocolBaseNameFromEvent } from "../domain/policies/protocolNoteNaming";
+import { renderEmptyProtocolMarkdown, renderProtocolMarkdown } from "../domain/policies/protocolNoteTemplate";
+import type { ProtocolNoteRepository } from "../application/contracts/protocolNoteRepository";
 
 /** Сервис создания/открытия протоколов встреч (md-файлы в vault). */
-export class ProtocolNoteService {
+export class ProtocolNoteService implements ProtocolNoteRepository {
   private app: App;
   private vault: Vault;
   private protocolsDir: string;
@@ -35,9 +39,26 @@ export class ProtocolNoteService {
     await ensureFolder(this.vault, this.protocolsDir);
 
     // Человекочитаемое имя файла (без UID). Уникальность через суффиксы " 2/3/...".
-    const baseName = `${ev.summary} ${formatRuDate(ev.start)}`;
+    const baseName = protocolBaseNameFromEvent({ summary: ev.summary, start: ev.start });
 
-    const content = renderProtocol(ev, eventFilePath);
+    const content = renderProtocolMarkdown({
+      ev,
+      eventFilePath,
+      keys: {
+        assistantType: FM.assistantType,
+        protocolId: FM.protocolId,
+        calendarId: FM.calendarId,
+        start: FM.start,
+        end: FM.end,
+        summary: FM.summary,
+        transcript: FM.transcript,
+        files: FM.files,
+        participants: FM.participants,
+        projects: FM.projects,
+      },
+      escape: yamlEscape,
+      makeEventKey,
+    });
     const file = await createUniqueMarkdownFile(this.vault, this.protocolsDir, baseName, content);
     return file;
   }
@@ -49,10 +70,26 @@ export class ProtocolNoteService {
   async createEmptyProtocol(): Promise<TFile> {
     await ensureFolder(this.vault, this.protocolsDir);
     const now = new Date();
-    const baseName = `Протокол ${formatRuDate(now)}`;
-    const uid = makeManualUid();
+    const baseName = emptyProtocolBaseName(now);
+    const uid = makePseudoRandomId({ prefix: "manual", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) });
     const id = makeEventKey("manual", uid);
-    const content = renderEmptyProtocol({ id, uid, startIso: now.toISOString() });
+    const content = renderEmptyProtocolMarkdown({
+      id,
+      startIso: now.toISOString(),
+      keys: {
+        assistantType: FM.assistantType,
+        protocolId: FM.protocolId,
+        calendarId: FM.calendarId,
+        start: FM.start,
+        end: FM.end,
+        summary: FM.summary,
+        transcript: FM.transcript,
+        files: FM.files,
+        participants: FM.participants,
+        projects: FM.projects,
+      },
+      escape: yamlEscape,
+    });
     return await createUniqueMarkdownFile(this.vault, this.protocolsDir, baseName, content);
   }
 
@@ -64,7 +101,7 @@ export class ProtocolNoteService {
     const text = await this.vault.read(meetingFile);
     const m = parseMeetingNoteFromMd(text, { fileBasename: meetingFile.basename });
     const calendarId = String(m.calendar_id ?? "manual");
-    const uid = String(m.event_id ?? makeManualUid());
+    const uid = String(m.event_id ?? makePseudoRandomId({ prefix: "manual", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) }));
     const summary = String(m.summary ?? meetingFile.basename ?? "Встреча");
     const startIso = String(m.start ?? "");
     const endIso = String(m.end ?? "");
@@ -85,126 +122,4 @@ export class ProtocolNoteService {
   async openProtocol(file: TFile) {
     await revealOrOpenInNewLeaf(this.app, file);
   }
-}
-
-function renderProtocol(ev: Event, eventFilePath?: string): string {
-  const startIso = ev.start.toISOString();
-  const endIso = ev.end ? ev.end.toISOString() : "";
-  const eventKey = makeEventKey(ev.calendar.id, ev.id);
-  const eventLinkTarget = eventFilePath ? eventFilePath.replace(/\.md$/i, "") : "";
-  return [
-    "---",
-    `${FM.assistantType}: protocol`,
-    `${FM.protocolId}: ${yamlEscape(eventKey)}`,
-    `${FM.calendarId}: ${yamlEscape(ev.calendar.id)}`,
-    `${FM.start}: ${yamlEscape(startIso)}`,
-    `${FM.end}: ${yamlEscape(endIso)}`,
-    `${FM.summary}: `,
-    `${FM.transcript}: `,
-    `${FM.files}: []`,
-    `${FM.participants}: []`,
-    `${FM.projects}: []`,
-    "---",
-    "",
-    `## ${ev.summary}`,
-    "",
-    "### Встреча (календарь)",
-    "",
-    eventLinkTarget ? `- [[${eventLinkTarget}|Встреча]]` : "- [[Встреча]]",
-    "",
-    "### Расшифровка",
-    "",
-    "- (вставь транскрипт сюда)",
-    "",
-    "### Ссылки",
-    "",
-    ev.url ? `- Ссылка: ${ev.url}` : "- Ссылка: ",
-    "",
-    "### Запись",
-    "",
-    "- Файл записи: ",
-    "",
-    "### Транскрипт",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Саммари",
-    "",
-    "- Короткое: ",
-    "- Для календаря: ",
-    "- Расширенное: ",
-    "",
-    "### Окраска",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Факты / обещания / задачи",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Люди",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Проекты",
-    "",
-    "- (пока пусто)",
-    "",
-  ].join("\n");
-}
-
-// yamlEscape moved to src/vault/yamlEscape.ts
-
-function formatRuDate(d: Date): string {
-  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "long" });
-}
-
-function makeManualUid(): string {
-  return `manual-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
-}
-
-function renderEmptyProtocol(params: { id: string; uid: string; startIso: string }): string {
-  return [
-    "---",
-    `${FM.assistantType}: protocol`,
-    `${FM.protocolId}: ${yamlEscape(params.id)}`,
-    `${FM.calendarId}: ${yamlEscape("manual")}`,
-    `${FM.start}: ${yamlEscape(params.startIso)}`,
-    `${FM.end}: `,
-    `${FM.summary}: `,
-    `${FM.transcript}: `,
-    `${FM.files}: []`,
-    `${FM.participants}: []`,
-    `${FM.projects}: []`,
-    "---",
-    "",
-    "## Протокол",
-    "",
-    "### Встреча (карточка)",
-    "",
-    "- [[Встреча]]",
-    "",
-    "### Расшифровка",
-    "",
-    "- (вставь транскрипт сюда)",
-    "",
-    "### Саммари",
-    "",
-    "- Короткое: ",
-    "- Для календаря: ",
-    "- Расширенное: ",
-    "",
-    "### Факты / обещания / задачи",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Люди",
-    "",
-    "- (пока пусто)",
-    "",
-    "### Проекты",
-    "",
-    "- (пока пусто)",
-    "",
-  ].join("\n");
 }

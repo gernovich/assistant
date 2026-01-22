@@ -1,6 +1,8 @@
 import type { AssistantSettings, Event } from "../types";
 import type { RecordingService, RecordingStats } from "./recordingService";
 import { parseAssistantActionFromTitle } from "../presentation/electronWindow/bridge/titleActionTransport";
+import { escHtml } from "../domain/policies/escHtml";
+import { buildRecordingDialogModelPolicy } from "../domain/policies/recordingDialogModel";
 
 type ElectronLike = {
   remote?: { BrowserWindow?: any };
@@ -25,14 +27,6 @@ type RecordingDialogParams = {
   recordingService: RecordingService;
   onLog?: (m: string) => void;
 };
-
-function escHtml(s: string): string {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 export class RecordingDialog {
   private win: any | null = null;
@@ -96,52 +90,36 @@ export class RecordingDialog {
 
     const nowMs = Date.now();
     const defaultKey = this.params.defaultEventKey ?? "";
-
-    const preferredEv =
-      defaultKey && this.params.lockDefaultEvent ? this.params.events.find((ev) => `${ev.calendar.id}:${ev.id}` === defaultKey) : undefined;
-
-    // Occurrence: показываем только будущие (start > now), но включаем выбранное (из напоминания/повестки) даже если оно не в будущем.
-    const occurrences = this.params.events
-      .slice()
-      .filter((ev) => ev.start.getTime() > nowMs || (preferredEv && ev === preferredEv))
-      .sort((a, b) => a.start.getTime() - b.start.getTime())
-      .slice(0, 200);
-
-    const list = occurrences.map((ev) => {
-      const key = `${ev.calendar.id}:${ev.id}`;
-      const label = `${ev.start.toLocaleString("ru-RU", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} — ${ev.summary}`;
-      const startMs = ev.start.getTime();
-      const endMs = (ev.end?.getTime() ?? startMs + 60 * 60_000); // fallback 1h
-      return { key, label, startMs, endMs };
+    const model = buildRecordingDialogModelPolicy({
+      events: this.params.events,
+      nowMs,
+      defaultEventKey: defaultKey,
+      lockDefaultEvent: Boolean(this.params.lockDefaultEvent),
+      autoStartSeconds: this.params.settings.recording.autoStartSeconds,
+      keyOfEvent: (ev) => `${ev.calendar.id}:${ev.id}`,
+      labelOfEvent: (ev) =>
+        `${ev.start.toLocaleString("ru-RU", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} — ${ev.summary}`,
     });
 
     const lockDefaultEvent = this.params.lockDefaultEvent ? "true" : "false";
     const autoEnabled = this.params.settings.recording.autoStartEnabled ? "true" : "false";
-    const autoSeconds = Math.max(1, Math.floor(Number(this.params.settings.recording.autoStartSeconds) || 5));
-    const meta = list.map((x) => ({ key: x.key, startMs: x.startMs, endMs: x.endMs }));
+    const autoSeconds = model.autoSeconds;
+    const meta = model.meta;
 
     const options = [`<option value="">(не выбрано)</option>`]
-      .concat(list.map((x) => `<option value="${escHtml(x.key)}"${x.key === defaultKey ? " selected" : ""}>${escHtml(x.label)}</option>`))
-      .join("");
-
-    // Event: список встреч (без дат), сортируем по дате ближайшего occurrence (из будущих).
-    const nextBySummary = new Map<string, number>();
-    for (const ev of occurrences) {
-      const summary = String(ev.summary || "").trim();
-      if (!summary) continue;
-      const t = ev.start.getTime();
-      const prev = nextBySummary.get(summary);
-      if (prev == null || t < prev) nextBySummary.set(summary, t);
-    }
-    const meetingOptions = [`<option value="">(не выбрано)</option>`]
       .concat(
-        Array.from(nextBySummary.entries())
-          .sort((a, b) => a[1] - b[1])
-          .map(([name]) => `<option value="${escHtml(name)}">${escHtml(name)}</option>`),
+        model.occurrences.map(
+          (x) => `<option value="${escHtml(x.key)}"${x.key === defaultKey ? " selected" : ""}>${escHtml(x.label)}</option>`,
+        ),
       )
       .join("");
 
-    const lockedLabel = list.find((x) => x.key === defaultKey)?.label ?? "";
+    // Event: список встреч (без дат), сортируем по дате ближайшего occurrence (из будущих).
+    const meetingOptions = [`<option value="">(не выбрано)</option>`]
+      .concat(model.meetingNames.map((name) => `<option value="${escHtml(name)}">${escHtml(name)}</option>`))
+      .join("");
+
+    const lockedLabel = model.lockedLabel;
     const protocolOptions = [`<option value="">(не выбрано)</option>`]
       .concat(
         (this.params.protocols ?? [])

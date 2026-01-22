@@ -2,14 +2,7 @@
 export { makeEventKey } from "../domain/identity/eventKey";
 export type { EventKey } from "../domain/identity/eventKey";
 
-/** Нормализовать email для стабильных идентификаторов/поиска. */
-function normalizeEmail(v: string): string {
-  const s = String(v ?? "")
-    .trim()
-    .toLowerCase();
-  const m = s.match(/^mailto:(.+)$/i);
-  return (m ? m[1] : s).trim().toLowerCase();
-}
+import { normalizeEmail } from "../domain/policies/normalizeEmail";
 
 /**
  * Стабильный person_id для случаев, когда у нас есть email (например из календаря).
