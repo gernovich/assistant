@@ -83,6 +83,23 @@ describe("CalendarEventStore", () => {
     expect(store.getDay(1, { baseDate: base }).map((e) => e.id)).toEqual(["d1"]);
   });
 
+  it("getRange returns [] for invalid range (end <= start) and for NaN dates", () => {
+    const store = new CalendarEventStore();
+    store.applyBatch({
+      enabledCalendarIds: ["a"],
+      results: [{ calendarId: "a", ok: true, fetchedAt: 1, events: [ev("a", "1", "2026-01-01T10:00:00.000Z")] }],
+    });
+
+    expect(store.getRange(new Date("2026-01-01T10:00:00.000Z"), new Date("2026-01-01T10:00:00.000Z"))).toEqual([]);
+    expect(store.getRange(new Date("bad-date"), new Date("2026-01-01T10:00:00.000Z"))).toEqual([]);
+  });
+
+  it("getUpcoming returns [] for invalid horizon", () => {
+    const store = new CalendarEventStore();
+    expect(store.getUpcoming(0, Date.now())).toEqual([]);
+    expect(store.getUpcoming(Number.NaN, Date.now())).toEqual([]);
+  });
+
   it("getUpcoming возвращает события в горизонте по start (и включает события чуть в прошлом)", () => {
     const store = new CalendarEventStore();
     store.applyBatch({

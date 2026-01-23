@@ -32,7 +32,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -69,6 +69,57 @@ describe("NotificationScheduler", () => {
     vi.useRealTimers();
   });
 
+  it("atStart: если включена autoStartEnabled и есть startRecording — открывает диктофон и не показывает reminder window", async () => {
+    vi.useFakeTimers();
+    const anyNotice = Notice as unknown as { messages: string[] };
+    anyNotice.messages = [];
+
+    const startRecording = vi.fn().mockResolvedValue(undefined);
+    const reminderSpy = vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => {
+      throw new Error("should not show reminder window");
+    });
+
+    const settings: AssistantSettings = {
+      debug: { enabled: false },
+      calendars: [],
+      calendar: { autoRefreshEnabled: false, autoRefreshMinutes: 10, myEmail: "", persistentCacheMaxEventsPerCalendar: 2000 },
+      caldav: { accounts: [] },
+      folders: {
+        projects: "Ассистент/Проекты",
+        people: "Ассистент/Люди",
+        calendarEvents: "Ассистент/Встречи",
+        protocols: "Ассистент/Протоколы",
+      },
+      // minutesBefore > 0, чтобы не планировать "before" в тот же момент что и "start"
+      notifications: { enabled: true, minutesBefore: 5, atStart: true },
+      recording: {
+        chunkMinutes: 5,
+        audioBackend: "electron_media_devices",
+        linuxNativeAudioProcessing: "normalize",
+        autoStartEnabled: true,
+        autoStartSeconds: 5,
+      },
+      agenda: { maxEvents: 50 },
+      log: { maxEntries: 2048, retentionDays: 7 },
+    };
+
+    const sched = new NotificationScheduler(settings, undefined, { startRecording });
+    vi.setSystemTime(new Date("2026-01-18T11:59:59.000Z"));
+
+    const ev: Event = { calendar: cal("cal1"), id: "u1", summary: "Meeting", start: new Date("2026-01-18T12:00:00.000Z") };
+    sched.schedule([ev]);
+
+    vi.advanceTimersByTime(1000);
+    await Promise.resolve();
+
+    expect(startRecording).toHaveBeenCalledTimes(1);
+    expect(reminderSpy).toHaveBeenCalledTimes(0);
+    expect(anyNotice.messages).toHaveLength(0);
+
+    reminderSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("schedule: если notifications.enabled=false — ничего не планирует", () => {
     vi.useFakeTimers();
     const anyNotice = Notice as unknown as { messages: string[] };
@@ -92,7 +143,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -134,7 +185,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -177,7 +228,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -222,7 +273,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -262,7 +313,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -306,7 +357,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -345,7 +396,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -392,7 +443,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -405,7 +456,7 @@ describe("NotificationScheduler", () => {
     const sched = new NotificationScheduler(settings, (m) => logs.push(m));
     const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:10:00.000Z") };
 
-    const spy = vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => undefined);
+    const spy = vi.spyOn(electronWindowReminder, "showElectronReminderWindow").mockImplementation(() => true);
     await (sched as any).showGlobal(ev, "m", "before");
 
     expect(spy).toHaveBeenCalledTimes(1);
@@ -413,7 +464,7 @@ describe("NotificationScheduler", () => {
     expect(logs.some((x) => x.startsWith("Показано уведомление:"))).toBe(true);
   });
 
-  it("catch-path: при ошибке electron_window и наличии onLog пишет 'electron_window: ошибка ...'", async () => {
+  it("fallback-path: если electron_window недоступен (нет BrowserWindow) — пишем лог и показываем Notice", async () => {
     const anyNotice = Notice as unknown as { messages: string[] };
     anyNotice.messages = [];
 
@@ -439,7 +490,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -453,7 +504,7 @@ describe("NotificationScheduler", () => {
     const ev: Event = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T00:00:00.000Z") };
     await (sched as any).showGlobal(ev, "m", "before");
 
-    expect(logs.some((x) => x.includes("electron_window: ошибка"))).toBe(true);
+    expect(logs.some((x) => x.includes("electron_window: недоступен"))).toBe(true);
     expect(anyNotice.messages).toHaveLength(1);
   });
 
@@ -479,7 +530,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,
@@ -526,7 +577,7 @@ describe("NotificationScheduler", () => {
       },
       recording: {
         chunkMinutes: 5,
-        audioBackend: "electron_desktop_capturer",
+        audioBackend: "electron_media_devices",
         linuxNativeAudioProcessing: "normalize",
         autoStartEnabled: false,
         autoStartSeconds: 5,

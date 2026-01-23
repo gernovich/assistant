@@ -1,6 +1,8 @@
 import type { CalendarId, MeetingNoteDto, PersonLinkDto, PersonNoteDto, ProjectLinkDto, ProjectNoteDto, ProtocolNote } from "../../types";
 import { parseFrontmatterMap, splitFrontmatter } from "./frontmatter";
 import { FM } from "./frontmatterKeys";
+import { err, ok, type Result } from "../../shared/result";
+import { APP_ERROR } from "../../shared/appErrorCodes";
 
 /**
  * Policy: типизированные парсеры frontmatter -> DTO.
@@ -10,13 +12,13 @@ import { FM } from "./frontmatterKeys";
  * - Для списков/объектов используем `metadataCache.frontmatter` (Record<string, unknown>).
  */
 
-export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: string }): MeetingNoteDto {
+export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: string }): Result<MeetingNoteDto> {
   const { frontmatter } = splitFrontmatter(md);
   const map = frontmatter ? parseFrontmatterMap(frontmatter) : {};
 
   const type = String(map[FM.assistantType] ?? "").trim();
   if (type !== "calendar_event") {
-    throw new Error("Файл не является карточкой встречи (assistant_type != calendar_event)");
+    return err({ code: APP_ERROR.VALIDATION, message: "Файл не является карточкой встречи (assistant_type != calendar_event)" });
   }
 
   const calendarId = String(map[FM.calendarId] ?? "").trim() as CalendarId;
@@ -25,9 +27,9 @@ export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: s
   const start = String(map[FM.start] ?? "").trim();
   const end = String(map[FM.end] ?? "").trim();
 
-  if (!calendarId) throw new Error("В карточке встречи отсутствует calendar_id");
-  if (!eventId) throw new Error("В карточке встречи отсутствует event_id");
-  if (!start) throw new Error("В карточке встречи отсутствует start");
+  if (!calendarId) return err({ code: APP_ERROR.VALIDATION, message: "В карточке встречи отсутствует calendar_id" });
+  if (!eventId) return err({ code: APP_ERROR.VALIDATION, message: "В карточке встречи отсутствует event_id" });
+  if (!start) return err({ code: APP_ERROR.VALIDATION, message: "В карточке встречи отсутствует start" });
 
   const url = String(map[FM.url] ?? "").trim();
   const location = String(map[FM.location] ?? "").trim();
@@ -35,7 +37,7 @@ export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: s
   const organizerEmail = String(map[FM.organizerEmail] ?? "").trim();
   const organizerCn = String(map[FM.organizerCn] ?? "").trim();
 
-  return {
+  return ok({
     assistant_type: "calendar_event",
     calendar_id: calendarId,
     event_id: eventId,
@@ -47,7 +49,7 @@ export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: s
     status: (status || undefined) as MeetingNoteDto["status"],
     organizer_email: organizerEmail || undefined,
     organizer_cn: organizerCn || undefined,
-  };
+  });
 }
 
 function readString(fm: Record<string, unknown>, key: string): string | undefined {
@@ -68,22 +70,24 @@ function readObject(fm: Record<string, unknown>, key: string): Record<string, un
   return v as Record<string, unknown>;
 }
 
-function requireType(fm: Record<string, unknown>, expected: string) {
+function requireType(fm: Record<string, unknown>, expected: string): Result<void> {
   const t = readString(fm, FM.assistantType);
-  if (t !== expected) throw new Error(`Неверный assistant_type (ожидали ${expected})`);
+  if (t !== expected) return err({ code: APP_ERROR.VALIDATION, message: `Неверный assistant_type (ожидали ${expected})` });
+  return ok(undefined);
 }
 
-export function parseProtocolNoteFromCache(frontmatter: Record<string, unknown>): ProtocolNote {
-  requireType(frontmatter, "protocol");
+export function parseProtocolNoteFromCache(frontmatter: Record<string, unknown>): Result<ProtocolNote> {
+  const t = requireType(frontmatter, "protocol");
+  if (!t.ok) return t;
 
   const id = String(readString(frontmatter, FM.protocolId) ?? "").trim();
   const calendarId = String(readString(frontmatter, FM.calendarId) ?? "").trim();
   const start = String(readString(frontmatter, FM.start) ?? "").trim();
   const end = String(readString(frontmatter, FM.end) ?? "").trim();
 
-  if (!id) throw new Error("В протоколе отсутствует protocol_id");
-  if (!calendarId) throw new Error("В протоколе отсутствует calendar_id");
-  if (!start) throw new Error("В протоколе отсутствует start");
+  if (!id) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует protocol_id" });
+  if (!calendarId) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует calendar_id" });
+  if (!start) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует start" });
 
   const files = readStringArray(frontmatter, FM.files);
   const participantsRaw = frontmatter[FM.participants];
@@ -117,7 +121,7 @@ export function parseProtocolNoteFromCache(frontmatter: Record<string, unknown>)
         })
     : undefined;
 
-  return {
+  return ok({
     assistant_type: "protocol",
     protocol_id: id,
     calendar_id: calendarId as CalendarId,
@@ -128,15 +132,16 @@ export function parseProtocolNoteFromCache(frontmatter: Record<string, unknown>)
     files,
     participants,
     projects,
-  };
+  });
 }
 
-export function parsePersonNoteFromCache(frontmatter: Record<string, unknown>): PersonNoteDto {
-  requireType(frontmatter, "person");
+export function parsePersonNoteFromCache(frontmatter: Record<string, unknown>): Result<PersonNoteDto> {
+  const t = requireType(frontmatter, "person");
+  if (!t.ok) return t;
   const id = String(readString(frontmatter, FM.personId) ?? "").trim();
-  if (!id) throw new Error("В человеке отсутствует person_id");
+  if (!id) return err({ code: APP_ERROR.VALIDATION, message: "В человеке отсутствует person_id" });
 
-  return {
+  return ok({
     assistant_type: "person",
     person_id: id,
     display_name: readString(frontmatter, FM.displayName),
@@ -154,15 +159,16 @@ export function parsePersonNoteFromCache(frontmatter: Record<string, unknown>): 
     positions: readStringArray(frontmatter, FM.positions),
     mailboxes: readStringArray(frontmatter, FM.mailboxes),
     messengers: Array.isArray(frontmatter[FM.messengers]) ? (frontmatter[FM.messengers] as any) : undefined,
-  };
+  });
 }
 
-export function parseProjectNoteFromCache(frontmatter: Record<string, unknown>): ProjectNoteDto {
-  requireType(frontmatter, "project");
+export function parseProjectNoteFromCache(frontmatter: Record<string, unknown>): Result<ProjectNoteDto> {
+  const t = requireType(frontmatter, "project");
+  if (!t.ok) return t;
   const id = String(readString(frontmatter, FM.projectId) ?? "").trim();
   const title = String(readString(frontmatter, "title") ?? "").trim();
-  if (!id) throw new Error("В проекте отсутствует project_id");
-  if (!title) throw new Error("В проекте отсутствует title");
+  if (!id) return err({ code: APP_ERROR.VALIDATION, message: "В проекте отсутствует project_id" });
+  if (!title) return err({ code: APP_ERROR.VALIDATION, message: "В проекте отсутствует title" });
 
   const ownerObj = readObject(frontmatter, FM.owner);
   const owner: PersonLinkDto | undefined = ownerObj
@@ -173,7 +179,7 @@ export function parseProjectNoteFromCache(frontmatter: Record<string, unknown>):
       }
     : undefined;
 
-  return {
+  return ok({
     assistant_type: "project",
     project_id: id,
     title,
@@ -181,6 +187,6 @@ export function parseProjectNoteFromCache(frontmatter: Record<string, unknown>):
     owner,
     tags: readStringArray(frontmatter, FM.tags),
     protocols: Array.isArray(frontmatter[FM.protocols]) ? (frontmatter[FM.protocols] as any) : undefined,
-  };
+  });
 }
 

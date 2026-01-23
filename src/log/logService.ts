@@ -15,6 +15,8 @@ export interface LogEntry {
 
 type Listener = () => void;
 
+import { redactSecretsInStringForLog, redactUrlForLog } from "./redact";
+
 /**
  * In-memory лог сервиса.
  *
@@ -74,9 +76,10 @@ export class LogService {
   }
 
   private push(e: LogEntry) {
-    this.entries.push(e);
+    const safe = sanitizeLogEntry(e);
+    this.entries.push(safe);
     this.trim();
-    this.onEntry?.(e);
+    this.onEntry?.(safe);
     this.emit();
   }
 
@@ -88,4 +91,74 @@ export class LogService {
   private emit() {
     for (const cb of this.listeners) cb();
   }
+}
+
+function sanitizeLogEntry(e: LogEntry): LogEntry {
+  return {
+    ...e,
+    message: sanitizeString(e.message),
+    data: e.data ? (sanitizeUnknown(e.data, 0) as Record<string, unknown>) : undefined,
+  };
+}
+
+function sanitizeString(s: string): string {
+  const raw = String(s ?? "");
+  // Если это URL — сначала применим URL-aware редактирование, затем общий редакт строк.
+  const maybeUrl = raw.startsWith("http://") || raw.startsWith("https://");
+  const step1 = maybeUrl ? redactUrlForLog(raw) : raw;
+  return redactSecretsInStringForLog(step1);
+}
+
+function sanitizeUnknown(v: unknown, depth: number): unknown {
+  if (depth > 6) return "[truncated]";
+  if (v == null) return v;
+
+  if (typeof v === "string") return sanitizeString(v);
+  if (typeof v === "number" || typeof v === "boolean") return v;
+
+  if (Array.isArray(v)) {
+    // Ограничиваем размер, чтобы случайно не раздувать логи огромными объектами.
+    const out = v.slice(0, 200).map((x) => sanitizeUnknown(x, depth + 1));
+    if (v.length > 200) out.push("[truncated]");
+    return out;
+  }
+
+  if (typeof v === "object") {
+    const obj = v as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(obj)) {
+      const val = obj[k];
+      // Если ключ явно чувствительный — значение не пишем в логи вообще.
+      if (typeof val === "string" && isSensitiveKey(k)) {
+        if (isAuthorizationKey(k)) {
+          // Сохраним схему (Bearer/Basic), чтобы лог был полезным, но уберём секрет.
+          const m = /^(\s*(?:Bearer|Basic)\s+)(.+)$/i.exec(val);
+          out[k] = m ? `${m[1]}***` : "***";
+        } else {
+          out[k] = "***";
+        }
+        continue;
+      }
+      // Если поле похоже на URL — применяем URL-redact точечно.
+      if (typeof val === "string" && /url$/i.test(k)) {
+        out[k] = sanitizeString(redactUrlForLog(val));
+        continue;
+      }
+      out[k] = sanitizeUnknown(val, depth + 1);
+    }
+    return out;
+  }
+
+  return sanitizeString(String(v));
+}
+
+function isAuthorizationKey(k: string): boolean {
+  return String(k ?? "").toLowerCase() === "authorization";
+}
+
+function isSensitiveKey(k: string): boolean {
+  // Согласовано с `src/log/redact.ts` (SENSITIVE_KEYS) + явный Authorization header.
+  return /^(access_token|refresh_token|id_token|token|code|client_secret|clientsecret|password|pass|api[_-]?key|key|authorization)$/i.test(
+    String(k ?? ""),
+  );
 }

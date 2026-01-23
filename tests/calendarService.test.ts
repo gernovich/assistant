@@ -31,7 +31,7 @@ function makeSettings(): AssistantSettings {
     },
     recording: {
       chunkMinutes: 5,
-      audioBackend: "electron_desktop_capturer",
+      audioBackend: "electron_media_devices",
       linuxNativeAudioProcessing: "normalize",
       autoStartEnabled: false,
       autoStartSeconds: 5,

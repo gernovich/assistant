@@ -92,8 +92,25 @@ export class NotificationScheduler {
     const prefix = isDebug ? "DEBUG уведомление" : "Показано уведомление";
     this.onLog?.(`${prefix}: ${msg}`);
     try {
+      // UX: если встреча началась и включена авто‑запись — сразу открываем диктофон (там будет countdown/auto-REC).
+      // Чтобы не плодить два окна, в этом режиме пропускаем reminder window.
+      if (kind === "start" && this.settings.recording.autoStartEnabled && this.actions?.startRecording) {
+        try {
+          await this.actions.startRecording(ev);
+          this.onLog?.(`Авто запись: открыт диктофон для "${String(ev.summary || "")}"`);
+          return;
+        } catch (e) {
+          this.onLog?.(`Авто запись: ошибка открытия диктофона (${String((e as unknown) ?? "неизвестно")}), показываю обычное уведомление`);
+          // fallback to reminder window below
+        }
+      }
+
       // Единый способ: отдельное окно поверх всех (Electron).
-      showElectronReminderWindow({ ev, kind, minutesBefore: Math.max(0, this.settings.notifications.minutesBefore), actions: this.actions });
+      const ok = showElectronReminderWindow({ ev, kind, minutesBefore: Math.max(0, this.settings.notifications.minutesBefore), actions: this.actions });
+      if (!ok) {
+        this.onLog?.("electron_window: недоступен (нет BrowserWindow), fallback на Notice");
+        new Notice(msg);
+      }
     } catch (e) {
       // Safety: если BrowserWindow недоступен (тесты/необычное окружение) — хотя бы Notice внутри Obsidian.
       this.onLog?.(`electron_window: ошибка (${String((e as unknown) ?? "неизвестно")}), fallback на Notice`);

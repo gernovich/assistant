@@ -7,14 +7,23 @@ import { EventEmitter } from "node:events";
 type Handler = (...args: any[]) => void;
 
 class FakeWebContents extends EventEmitter {
-  executeJavaScript = vi.fn(async () => undefined);
+  id: number;
+  constructor(id: number) {
+    super();
+    this.id = id;
+  }
 }
 
 class FakeBrowserWindow extends EventEmitter {
-  public webContents = new FakeWebContents();
+  public webContents: FakeWebContents;
   public loadedUrl: string | null = null;
   public closed = false;
   public shown = false;
+
+  constructor(id: number) {
+    super();
+    this.webContents = new FakeWebContents(id);
+  }
 
   setAlwaysOnTop = vi.fn();
   setOpacity = vi.fn();
@@ -38,7 +47,8 @@ class FakeBrowserWindow extends EventEmitter {
 const createdWindows: FakeBrowserWindow[] = [];
 // Конструктор (важно: используется как `new BrowserWindow(...)`)
 function BrowserWindowCtor(this: unknown, _opts: unknown) {
-  const w = new FakeBrowserWindow();
+  const id = 700 + createdWindows.length;
+  const w = new FakeBrowserWindow(id);
   createdWindows.push(w);
   return w as any;
 }
@@ -54,6 +64,20 @@ const electronMock = {
 // (globalThis as any).__assistantElectronMock
 Object.defineProperty(globalThis as any, "__assistantElectronMock", { value: electronMock, configurable: true });
 
+// IPC mock for windowBridge.ts: (globalThis as any).__assistantElectronIpcMock
+const ipcHandlers = new Map<string, Handler>();
+const ipcMock = {
+  on: (channel: string, cb: Handler) => {
+    ipcHandlers.set(String(channel), cb);
+  },
+  removeListener: (channel: string, cb: Handler) => {
+    const ch = String(channel);
+    if (ipcHandlers.get(ch) === cb) ipcHandlers.delete(ch);
+  },
+  sendTo: vi.fn(),
+};
+Object.defineProperty(globalThis as any, "__assistantElectronIpcMock", { value: ipcMock, configurable: true });
+
 function cal(id: string) {
   return { id, name: id, type: "ics_url", config: { id, name: id, type: "ics_url", enabled: true } } as any;
 }
@@ -62,6 +86,8 @@ describe("electronWindowReminder", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     createdWindows.length = 0;
+    ipcHandlers.clear();
+    ipcMock.sendTo.mockReset();
   });
 
   it("создаёт окно и грузит data-url с ожидаемыми кнопками", async () => {
@@ -91,9 +117,7 @@ describe("electronWindowReminder", () => {
 
     const decoded = decodeURIComponent(String(w.loadedUrl).split(",").slice(1).join(","));
     expect(decoded).toContain("Ассистент: Напоминание");
-    expect(decoded).toContain("assistant-action:start_recording");
-    expect(decoded).toContain("assistant-action:cancelled");
-    expect(decoded).toContain("assistant-action:close");
+    expect(decoded).toContain("assistant/window/request");
     expect(decoded).toContain("Через 02:00:00");
 
     vi.useRealTimers();
@@ -118,7 +142,7 @@ describe("electronWindowReminder", () => {
     vi.useRealTimers();
   });
 
-  it("по page-title-updated вызывает нужный action и закрывает окно", async () => {
+  it("по Electron IPC request вызывает нужный action и закрывает окно", async () => {
     vi.useFakeTimers();
     const { showElectronReminderWindow } = await import("../src/notifications/electronWindowReminder");
 
@@ -143,10 +167,11 @@ describe("electronWindowReminder", () => {
     const w = createdWindows[0];
     expect(w).toBeTruthy();
 
-    // Эмулируем клик по "Диктофон" -> title update
-    const e: any = { preventDefault: vi.fn() };
-    w.webContents.emit("page-title-updated", e, "assistant-action:start_recording");
-    // выполняется async onAction, ждём микротаски
+    const handler = ipcHandlers.get("assistant/window/request");
+    expect(handler).toBeTypeOf("function");
+
+    // start recording
+    handler!({ senderId: w.webContents.id } as any, { id: "r1", ts: 1, action: { kind: "reminder.startRecording" } });
     await Promise.resolve();
     expect(startRecording).toHaveBeenCalledTimes(1);
     expect(w.close).toHaveBeenCalled();
@@ -159,7 +184,9 @@ describe("electronWindowReminder", () => {
       actions: { createProtocol, startRecording, meetingCancelled },
     });
     const wProto = createdWindows[1];
-    wProto.webContents.emit("page-title-updated", e, "assistant-action:create_protocol");
+    const handler2 = ipcHandlers.get("assistant/window/request");
+    expect(handler2).toBeTypeOf("function");
+    handler2!({ senderId: wProto.webContents.id } as any, { id: "r2", ts: 2, action: { kind: "reminder.createProtocol" } });
     await Promise.resolve();
     expect(createProtocol).toHaveBeenCalledTimes(1);
 
@@ -171,7 +198,9 @@ describe("electronWindowReminder", () => {
       actions: { createProtocol, startRecording, meetingCancelled },
     });
     const w2 = createdWindows[2];
-    w2.webContents.emit("page-title-updated", e, "assistant-action:cancelled");
+    const handler3 = ipcHandlers.get("assistant/window/request");
+    expect(handler3).toBeTypeOf("function");
+    handler3!({ senderId: w2.webContents.id } as any, { id: "r3", ts: 3, action: { kind: "reminder.meetingCancelled" } });
     await Promise.resolve();
     expect(meetingCancelled).toHaveBeenCalledTimes(1);
 
@@ -224,7 +253,7 @@ describe("electronWindowReminder", () => {
     // Переопределяем BrowserWindow на время теста, чтобы методы бросали сразу при создании.
     const prev = (electronMock as any).BrowserWindow;
     (electronMock as any).BrowserWindow = function BrowserWindowThrowing(this: unknown, _opts: unknown) {
-      const w = new FakeBrowserWindow();
+      const w = new FakeBrowserWindow(999);
       w.setAlwaysOnTop.mockImplementation(() => {
         throw new Error("no always-on-top");
       });
@@ -273,8 +302,9 @@ describe("electronWindowReminder", () => {
       throw new Error("cannot close");
     });
 
-    const e: any = { preventDefault: vi.fn() };
-    w.webContents.emit("page-title-updated", e, "assistant-action:start_recording");
+    const handler = ipcHandlers.get("assistant/window/request");
+    expect(handler).toBeTypeOf("function");
+    handler!({ senderId: w.webContents.id } as any, { id: "r1", ts: 1, action: { kind: "reminder.startRecording" } });
     await Promise.resolve();
     expect(startRecording).toHaveBeenCalledTimes(1);
     expect(w.close).toHaveBeenCalled();
@@ -296,14 +326,15 @@ describe("electronWindowReminder", () => {
     vi.useRealTimers();
   });
 
-  it("page-title-updated: игнорирует нерелевантные title", async () => {
+  it("ipc: игнорирует запросы от другого senderId", async () => {
     const { showElectronReminderWindow } = await import("../src/notifications/electronWindowReminder");
     const ev = { calendar: cal("c"), id: "u", summary: "M", start: new Date(Date.now() + 60_000) };
 
     showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: {} });
     const w = createdWindows[0];
-    const e: any = { preventDefault: vi.fn() };
-    w.webContents.emit("page-title-updated", e, "not-an-action");
+    const handler = ipcHandlers.get("assistant/window/request");
+    expect(handler).toBeTypeOf("function");
+    handler!({ senderId: w.webContents.id + 999 } as any, { id: "x", ts: 1, action: { kind: "close" } });
     await Promise.resolve();
     expect(w.close).not.toHaveBeenCalled();
   });
@@ -362,15 +393,15 @@ describe("electronWindowReminder", () => {
     vi.useRealTimers();
   });
 
-  it("page-title-updated: title undefined -> не падаем и игнорируем", async () => {
+  it("ipc: не падает и не закрывает окно на невалидный payload", async () => {
     const { showElectronReminderWindow } = await import("../src/notifications/electronWindowReminder");
     const ev = { calendar: cal("c"), id: "u", summary: "M", start: new Date(Date.now() + 60_000) };
 
     showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: {} });
     const w = createdWindows[0];
-    const e: any = { preventDefault: vi.fn() };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    w.webContents.emit("page-title-updated", e, undefined as any);
+    const handler = ipcHandlers.get("assistant/window/request");
+    expect(handler).toBeTypeOf("function");
+    handler!({ senderId: w.webContents.id } as any, { id: "bad", ts: "nope", action: { kind: "close" } });
     await Promise.resolve();
     expect(w.close).not.toHaveBeenCalled();
   });

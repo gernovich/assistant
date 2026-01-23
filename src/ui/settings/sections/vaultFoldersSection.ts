@@ -15,8 +15,7 @@ export function renderVaultFoldersSection(params: { containerEl: HTMLElement; pl
         .setPlaceholder("Ассистент/Проекты")
         .setValue(plugin.settings.folders.projects)
         .onChange(async (v) => {
-          plugin.settings.folders.projects = v.trim() || "Ассистент/Проекты";
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({ type: "folders.update", patch: { projects: v } });
         }),
     );
 
@@ -28,8 +27,7 @@ export function renderVaultFoldersSection(params: { containerEl: HTMLElement; pl
         .setPlaceholder("Ассистент/Люди")
         .setValue(plugin.settings.folders.people)
         .onChange(async (v) => {
-          plugin.settings.folders.people = v.trim() || "Ассистент/Люди";
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({ type: "folders.update", patch: { people: v } });
         }),
     );
 
@@ -41,8 +39,7 @@ export function renderVaultFoldersSection(params: { containerEl: HTMLElement; pl
         .setPlaceholder("Ассистент/Встречи")
         .setValue(plugin.settings.folders.calendarEvents)
         .onChange(async (v) => {
-          plugin.settings.folders.calendarEvents = v.trim() || "Ассистент/Встречи";
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({ type: "folders.update", patch: { calendarEvents: v } });
         }),
     );
 
@@ -54,8 +51,7 @@ export function renderVaultFoldersSection(params: { containerEl: HTMLElement; pl
         .setPlaceholder("Ассистент/Протоколы")
         .setValue(plugin.settings.folders.protocols)
         .onChange(async (v) => {
-          plugin.settings.folders.protocols = v.trim() || "Ассистент/Протоколы";
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({ type: "folders.update", patch: { protocols: v } });
         }),
     );
 }

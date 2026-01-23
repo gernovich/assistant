@@ -1,5 +1,11 @@
 import type { Event } from "../types";
-import { parseAssistantActionFromTitle } from "../presentation/electronWindow/bridge/titleActionTransport";
+import {
+  installElectronIpcRequestBridge,
+} from "../presentation/electronWindow/bridge/windowBridge";
+import { buildReminderWindowHtml } from "../presentation/electronWindow/reminder/reminderWindowHtml";
+import type { WindowAction } from "../presentation/electronWindow/bridge/windowBridgeContracts";
+import type { WindowRequest } from "../presentation/electronWindow/bridge/windowBridgeContracts";
+import { handleReminderWindowAction } from "../presentation/electronWindow/bridge/windowActionRouter";
 
 type ElectronLike = {
   remote?: { BrowserWindow?: any };
@@ -51,7 +57,7 @@ export function showElectronReminderWindow(params: {
     startRecording?: (ev: Event) => void | Promise<void>;
     meetingCancelled?: (ev: Event) => void | Promise<void>;
   };
-}): void {
+}): boolean {
   const { ev, kind, minutesBefore, actions } = params;
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -65,7 +71,7 @@ export function showElectronReminderWindow(params: {
   }
   const BrowserWindow = electron?.remote?.BrowserWindow ?? electron?.BrowserWindow;
   if (!BrowserWindow) {
-    throw new Error("Electron BrowserWindow недоступен в этом окружении");
+    return false;
   }
 
   const timeoutMs = 25_000;
@@ -90,7 +96,9 @@ export function showElectronReminderWindow(params: {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      preload: require("node:path").join(__dirname, "ipc-preload.cjs"),
     },
   });
 
@@ -118,13 +126,6 @@ export function showElectronReminderWindow(params: {
     // ignore
   }
 
-  const esc = (s: string) =>
-    String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-
   const startIso = ev.start.toISOString();
   const endIso = ev.end ? ev.end.toISOString() : "";
   const summary = String(ev.summary ?? "");
@@ -146,185 +147,45 @@ export function showElectronReminderWindow(params: {
     .filter(Boolean)
     .join("\n");
 
-  const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
-  <style>
-    :root { color-scheme: dark; }
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
-      background: rgba(0,0,0,0);
-    }
-    .card {
-      margin: 14px;
-      padding: 14px 14px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(24,24,24,0.86);
-      color: rgba(255,255,255,0.92);
-    }
-    .title {
-      font-weight: 750;
-      margin-bottom: 32px;
-      color: rgb(128, 128, 128);
-      -webkit-app-region: drag;
-      user-select: none;
-      cursor: move;
-    }
-    .title.start { color: rgba(255, 92, 92, 0.98); }
-    .headline { font-weight: 750; margin: 0 0 32px; }
-    .headline.start { color: rgba(255, 92, 92, 0.98); }
-    .details {
-      white-space: pre-wrap;
-      font-variant-numeric: tabular-nums;
-      opacity: 0.92;
-      line-height: 1.35;
-      margin: 10px 0 12px;
-    }
-    .content { margin: 10px 0 10px; }
-    .status { font-weight: 650; opacity: 0.92; margin: 6px 0 26px; }
-    .status.start { color: rgba(255, 92, 92, 0.98); }
-    .meeting-title { font-size: 26px; font-weight: 800; margin: 0; }
-    .details { margin: 18px 0 12px; text-align: right; }
-    .btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
-    .btn-danger {
-      background: rgba(40,40,40,0.10);
-      border-color: rgba(255, 92, 92, 0.92);
-      color: rgba(255, 92, 92, 0.98);
-    }
-    .btn-icon { opacity: 0.95; margin-right: 6px; }
-    button {
-      cursor: pointer;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(40,40,40,0.85);
-      color: rgba(255,255,255,0.92);
-      padding: 8px 10px;
-      font-weight: 600;
-      -webkit-app-region: no-drag;
-    }
-    button.cta {
-      background: rgba(106, 132, 255, 0.9);
-      border-color: rgba(106, 132, 255, 0.9);
-      color: #0b1020;
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div id="title" class="title">📅 Ассистент: Напоминание</div>
-    <div class="content">
-      <div id="status" class="status">${esc(initialStatusLine)}</div>
-      <div id="meetingTitle" class="meeting-title">${esc(initialTitleLine)}</div>
-      <div id="details" class="details">${esc(detailsText)}</div>
-    </div>
-    <div class="btns">
-      <button onclick="document.title='assistant-action:start_recording'"><span class="btn-icon">🎙</span>Диктофон</button>
-      <button onclick="document.title='assistant-action:cancelled'"><span class="btn-icon">⊖</span>Встреча отменена</button>
-      <button class="btn-danger" onclick="document.title='assistant-action:close'"><span class="btn-icon">✕</span>Закрыть</button>
-    </div>
-  </div>
-  <script>
-    try {
-      const kind = ${JSON.stringify(kind)};
-      const startMs = Date.parse(${JSON.stringify(startIso)});
-      const endIso = ${JSON.stringify(endIso)};
-      const summary = ${JSON.stringify(summary)};
-      const location = ${JSON.stringify(location)};
-      const url = ${JSON.stringify(urlLink)};
-      const minutesBefore = ${Number.isFinite(Number(minutesBefore)) ? Math.max(0, Number(minutesBefore)) : 0};
+  // Host webContentsId (Obsidian renderer), used by window preload to send IPC requests via sendTo(hostId,...)
+  let hostWebContentsId = 0;
+  try {
+    hostWebContentsId = Number((electron as any)?.remote?.getCurrentWebContents?.()?.id ?? (electron as any)?.ipcRenderer?.senderId ?? 0);
+  } catch {
+    hostWebContentsId = 0;
+  }
 
-      function pad2(n){ return String(n).padStart(2,'0'); }
-      function formatCountdownRu(diffMs){
-        const d = Math.max(0, Math.floor(diffMs));
-        const totalSec = Math.floor(d / 1000);
-        const sec = totalSec % 60;
-        const totalMin = Math.floor(totalSec / 60);
-        if(totalMin < 60){
-          return pad2(totalMin) + ":" + pad2(sec);
-        }
-        const min = totalMin % 60;
-        const totalHours = Math.floor(totalMin / 60);
-        if(totalHours < 24){
-          return pad2(totalHours) + ":" + pad2(min) + ":" + pad2(sec);
-        }
-        const hours = totalHours % 24;
-        const days = Math.floor(totalHours / 24);
-        return String(days) + " дней " + pad2(hours) + ":" + pad2(min) + ":" + pad2(sec);
-      }
-      function fmtTime(ms){
-        const d = new Date(ms);
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-      function fmtDateTime(iso){
-        if(!iso) return '';
-        const d = new Date(iso);
-        return d.toLocaleString('ru-RU');
-      }
-
-      const titleEl = document.getElementById('title');
-      const statusEl = document.getElementById('status');
-      const meetingTitleEl = document.getElementById('meetingTitle');
-      const detailsEl = document.getElementById('details');
-
-      function eventLine(){
-        return (summary || "");
-      }
-
-      function setDetails(){
-        if(!detailsEl) return;
-        const parts = [];
-        parts.push("Начало: " + fmtDateTime(${JSON.stringify(startIso)}));
-        if(endIso) parts.push("Конец: " + fmtDateTime(endIso));
-        detailsEl.textContent = parts.join("\\n");
-      }
-
-      function setStartUi(){
-        if(titleEl) titleEl.textContent = "📅 Ассистент: Напоминание";
-        if(statusEl) statusEl.classList.add('start');
-        if(statusEl) statusEl.textContent = "Уже началась";
-        if(meetingTitleEl) meetingTitleEl.textContent = eventLine();
-      }
-
-      function setBeforeUi(){
-        const now = Date.now();
-        const diff = startMs - now;
-        if(diff <= 0){
-          setStartUi();
-          return;
-        }
-        if(statusEl) statusEl.classList.remove('start');
-        if(statusEl) statusEl.textContent = "Через " + formatCountdownRu(diff);
-        if(meetingTitleEl) meetingTitleEl.textContent = eventLine();
-      }
-
-      setDetails();
-      if(kind === 'start') {
-        setStartUi();
-      } else {
-        // "Через X мин" -> живой отсчёт "Через M:SS"
-        setBeforeUi();
-        setInterval(setBeforeUi, 1000);
-      }
-      void minutesBefore;
-    } catch {
-      // Если скрипт упал/заблокирован — остаются сервер-сайд тексты (headline/details).
-    }
-  </script>
-</body>
-</html>`;
+  const html = buildReminderWindowHtml({
+    kind,
+    hostWebContentsId,
+    initialStatusLine,
+    initialTitleLine,
+    detailsText,
+    startIso,
+    endIso,
+    summary,
+    location,
+    urlLink,
+    minutesBefore,
+  });
 
   const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
   void win.loadURL(url);
 
-  const onAction = async (a: string) => {
+  const onWindowAction = (a: WindowAction) => {
     try {
-      if (a === "create_protocol") await actions?.createProtocol?.(ev);
-      if (a === "start_recording") await actions?.startRecording?.(ev);
-      if (a === "cancelled") await actions?.meetingCancelled?.(ev);
+      // Важно: запускаем action, но не держим окно открытым, пока он выполняется.
+      // UX: окно закрывается сразу по клику (как и раньше по факту), а оркестрация продолжает выполняться.
+      void handleReminderWindowAction(a, {
+        close: async () => undefined,
+        startRecording: async () => actions?.startRecording?.(ev),
+        createProtocol: async () => {
+          await actions?.createProtocol?.(ev);
+        },
+        meetingCancelled: async () => {
+          await actions?.meetingCancelled?.(ev);
+        },
+      });
     } finally {
       try {
         win.close();
@@ -334,17 +195,22 @@ export function showElectronReminderWindow(params: {
     }
   };
 
-  win.webContents.on("page-title-updated", (e: unknown, title: string) => {
+  // Transport: Electron IPC sendTo.
+  const unIpc = installElectronIpcRequestBridge({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (e as any)?.preventDefault?.();
-    const parsed = parseAssistantActionFromTitle(String(title ?? ""));
-    if (!parsed.ok) return;
-    const a = parsed.action;
-    if (a.kind === "reminder.startRecording") void onAction("start_recording");
-    else if (a.kind === "reminder.createProtocol") void onAction("create_protocol");
-    else if (a.kind === "reminder.meetingCancelled") void onAction("cancelled");
-    else if (a.kind === "close") void onAction("close");
-    else return;
+    expectedSenderId: Number((win.webContents as any)?.id ?? 0),
+    timeoutMs: 2000,
+    onRequest: async (req: WindowRequest) => {
+      onWindowAction(req.action);
+    },
+  });
+
+  win.on("closed", () => {
+    try {
+      unIpc();
+    } catch {
+      // ignore
+    }
   });
 
   win.once("ready-to-show", () => {
@@ -362,5 +228,7 @@ export function showElectronReminderWindow(params: {
       // ignore
     }
   }, timeoutMs);
+
+  return true;
 }
 

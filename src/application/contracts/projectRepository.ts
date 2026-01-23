@@ -1,6 +1,6 @@
-import type { TFile } from "obsidian";
+import type { VaultFileLike } from "../../shared/vaultFileLike";
 
 export interface ProjectRepository {
-  createAndOpen(params?: { title?: string }): Promise<TFile>;
+  createAndOpen(params?: { title?: string }): Promise<VaultFileLike>;
 }
 

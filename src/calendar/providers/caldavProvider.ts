@@ -5,6 +5,8 @@ import { parseIcs } from "../ics";
 import { ensureObsidianFetchInstalled } from "../../caldav/obsidianFetch";
 import { getCaldavAccountReadiness } from "../../caldav/caldavReadiness";
 import { CALENDAR_EVENTS_HORIZON_DAYS, MS_PER_DAY } from "../constants";
+import { AppError } from "../../shared/appError";
+import { APP_ERROR } from "../../shared/appErrorCodes";
 
 export class CaldavProvider implements CalendarProvider {
   /** Тип источника календаря, который обслуживает провайдер. */
@@ -92,11 +94,13 @@ export class CaldavProvider implements CalendarProvider {
       });
       const first = probe[0];
       if (first && !first.ok) {
-        throw new Error(
-          `CalDAV calendarUrl недоступен: HTTP ${first.status} ${first.statusText}. ` +
-            `Возможно URL устарел/опечатка — переподключите календарь через «Найти календари». ` +
-            `calendarUrl=${cfg.calendarUrl}`,
-        );
+        return await Promise.reject(new AppError({
+          code: APP_ERROR.CALDAV_DISCOVERY,
+          message:
+            `Ассистент: CalDAV calendarUrl недоступен (HTTP ${first.status} ${first.statusText}). ` +
+            "Возможно URL устарел/опечатка — переподключите календарь через «Найти календари».",
+          cause: `calendarUrl=${cfg.calendarUrl}`,
+        }));
       }
     }
 
@@ -126,12 +130,12 @@ export class CaldavProvider implements CalendarProvider {
    */
   async setMyPartstat(cal: CalendarConfig, ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> {
     const cfg = cal.caldav;
-    if (!cfg?.accountId || !cfg.calendarUrl) throw new Error("CalDAV календарь не настроен");
+    if (!cfg?.accountId || !cfg.calendarUrl) return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: CalDAV календарь не настроен" }));
 
     const account = this.settings.caldav.accounts.find((a) => a.id === cfg.accountId);
-    if (!account) throw new Error("CalDAV аккаунт не найден");
+    if (!account) return await Promise.reject(new AppError({ code: APP_ERROR.NOT_FOUND, message: "Ассистент: CalDAV аккаунт не найден" }));
     const readiness = getCaldavAccountReadiness(account);
-    if (!readiness.ok) throw new Error("CalDAV аккаунт не готов (проверьте настройки)");
+    if (!readiness.ok) return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: CalDAV аккаунт не готов (проверьте настройки)" }));
 
     const client = await this.getOrLoginClient(account);
     const calendar: DAVCalendar = {
@@ -151,18 +155,25 @@ export class CaldavProvider implements CalendarProvider {
 
     const desired = partstatToIcs(partstat);
     const myEmails = splitEmails((this.settings.calendar.myEmail || account.username).trim());
-    if (myEmails.length === 0) throw new Error("Невозможно определить мой email для RSVP (проверьте логин/настройки)");
+    if (myEmails.length === 0)
+      return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: невозможно определить мой email для RSVP (проверьте логин/настройки)" }));
 
     const target = findBestCalendarObject(objects, ev, myEmails);
-    if (!target) throw new Error("Не удалось найти CalDAV object для этого события (UID/DTSTART не совпали)");
+    if (!target)
+      return await Promise.reject(new AppError({
+        code: APP_ERROR.NOT_FOUND,
+        message: "Ассистент: не удалось найти CalDAV object для этого события (UID/DTSTART не совпали)",
+      }));
 
     const updated = updateMyAttendeePartstatInIcal(String(target.data ?? ""), myEmails, desired);
     if (updated === String(target.data ?? "")) {
-      throw new Error(
-        "Не удалось обновить PARTSTAT: ATTENDEE для вашего email не найден в VEVENT. " +
-          "Обычно это значит, что вы не участник (ATTENDEE) этой встречи (например, вы организатор или встреча без гостей). " +
-          `Проверенные emails: ${myEmails.join(", ")}`,
-      );
+      return await Promise.reject(new AppError({
+        code: APP_ERROR.VALIDATION,
+        message:
+          "Ассистент: не удалось обновить PARTSTAT — ATTENDEE для вашего email не найден в VEVENT. " +
+          "Обычно это значит, что вы не участник (ATTENDEE) этой встречи.",
+        details: { myEmails },
+      }));
     }
 
     const res = await client.updateCalendarObject({
@@ -170,11 +181,15 @@ export class CaldavProvider implements CalendarProvider {
     });
     if (!res.ok) {
       const txt = await safeReadText(res);
-      throw new Error(`CalDAV: updateCalendarObject не удался: HTTP ${res.status} ${res.statusText}${txt ? ` — ${txt}` : ""}`);
+      return await Promise.reject(new AppError({
+        code: APP_ERROR.CALDAV_WRITEBACK,
+        message: `Ассистент: CalDAV write-back не удался (HTTP ${res.status} ${res.statusText})`,
+        cause: txt ? String(txt) : undefined,
+      }));
     }
   }
 
-  async discoverCalendars(accountId: string): Promise<Array<{ displayName: string; url: string }>> {
+  async discoverCalendars(accountId: string): Promise<Array<{ displayName: string; url: string; color?: string }>> {
     const account = this.settings.caldav.accounts.find((a) => a.id === accountId);
     if (!account) return [];
     const readiness = getCaldavAccountReadiness(account);
@@ -198,15 +213,20 @@ export class CaldavProvider implements CalendarProvider {
         if (first && !first.ok) {
           const raw = String(first.raw ?? "");
           if (first.status === 403 && raw.includes("accessNotConfigured")) {
-            throw new Error(
-              "Google CalDAV: accessNotConfigured. " +
+            return await Promise.reject(new AppError({
+              code: APP_ERROR.CALDAV_DISCOVERY,
+              message:
+                "Ассистент: Google CalDAV accessNotConfigured. " +
                 "Похоже, в Google Cloud проекте для вашего OAuth Client ID не включён CalDAV API (или он ещё не активировался). " +
-                "Откройте Google Cloud Console → APIs & Services → Library → найдите «CalDAV API» → Enable " +
-                "(в том же проекте, где создан OAuth Client ID; в ошибке обычно указан project number). " +
-                "После включения подождите 5–10 минут и повторите discovery.",
-            );
+                "Включите «CalDAV API», подождите 5–10 минут и повторите discovery.",
+              cause: raw,
+            }));
           }
-          throw new Error(`CalDAV: PROPFIND не удался: HTTP ${first.status} ${first.statusText}`);
+          return await Promise.reject(new AppError({
+            code: APP_ERROR.CALDAV_DISCOVERY,
+            message: `Ассистент: CalDAV PROPFIND не удался (HTTP ${first.status} ${first.statusText})`,
+            cause: raw || undefined,
+          }));
         }
       }
     }
@@ -225,6 +245,7 @@ export class CaldavProvider implements CalendarProvider {
     return cals.map((c) => ({
       displayName: String(c.displayName ?? "Календарь"),
       url: String(c.url ?? ""),
+      color: typeof (c as any).calendarColor === "string" ? String((c as any).calendarColor) : undefined,
     }));
   }
 
@@ -248,7 +269,11 @@ export class CaldavProvider implements CalendarProvider {
       } catch (e2) {
         const msg = String((e2 as unknown) ?? "неизвестная ошибка");
         const method = account.authMethod ?? "basic";
-        throw new Error(`CalDAV: вход не удался (${method}, serverUrl=${account.serverUrl}): ${msg}`);
+        return await Promise.reject(new AppError({
+          code: APP_ERROR.CALDAV_AUTH,
+          message: "Ассистент: CalDAV вход не удался (проверьте настройки аккаунта)",
+          cause: `method=${method}, serverUrl=${account.serverUrl}, error=${msg}`,
+        }));
       }
     }
   }
@@ -327,6 +352,11 @@ function findBestCalendarObject(objects: CalendarObject[], ev: Event, myEmails: 
   const uid = String(ev.id ?? "").trim();
   if (!uid) return null;
 
+  // Occurrence: если у события есть recurrenceId — стараемся матчитить именно override по RECURRENCE-ID.
+  // Это важно для write-back по конкретной дате повторяющейся встречи.
+  const wantRecurrenceIdRaw = String(ev.recurrence?.recurrenceId ?? "").trim();
+  const wantRecurrenceMs = wantRecurrenceIdRaw ? parseIcsDateMs(wantRecurrenceIdRaw) : null;
+
   let best: { obj: CalendarObject; score: number } | null = null;
   for (const obj of objects) {
     const text = String(obj.data ?? "");
@@ -343,7 +373,15 @@ function findBestCalendarObject(objects: CalendarObject[], ev: Event, myEmails: 
       // Если совпадения нет, fallback на master (по UID) тоже допустим, но с меньшим приоритетом.
       const sameStart = dtMs === startMs;
       const hasMe = hasAttendeeForAnyEmail(b, myEmails);
-      const score = (sameStart ? 10 : 0) + (hasMe ? 2 : 0) + (text.length > 0 ? 1 : 0);
+      let score = (sameStart ? 10 : 0) + (hasMe ? 2 : 0) + (text.length > 0 ? 1 : 0);
+
+      if (wantRecurrenceMs != null) {
+        const rid = getIcsProp(b, "RECURRENCE-ID");
+        const ridMs = rid ? parseIcsDateMs(rid) : null;
+        if (ridMs != null && ridMs === wantRecurrenceMs) score += 100;
+        else if (ridMs == null) score -= 10; // master пенализируем, если ждём override
+      }
+
       if (!best || score > best.score) best = { obj, score };
     }
   }

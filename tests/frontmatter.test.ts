@@ -84,7 +84,10 @@ describe("domain/policies/frontmatter", () => {
       "",
     ].join("\n");
 
-    const dto = parseMeetingNoteFromMd(md);
+    const r = parseMeetingNoteFromMd(md);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.assistant_type).toBe("calendar_event");
     expect(dto.calendar_id).toBe("cal-1");
     expect(dto.event_id).toBe("uid-1");
@@ -107,13 +110,17 @@ describe("domain/policies/frontmatter", () => {
       "",
       "# Body",
     ].join("\n");
-    const dto = parseMeetingNoteFromMd(md, { fileBasename: "Базовое имя" });
+    const r = parseMeetingNoteFromMd(md, { fileBasename: "Базовое имя" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.summary).toBe("Базовое имя");
   });
 
-  it("parseMeetingNoteFromMd бросает ошибку, если assistant_type не calendar_event", () => {
+  it("parseMeetingNoteFromMd возвращает err, если assistant_type не calendar_event", () => {
     const md = ["---", "assistant_type: protocol", "calendar_id: cal-1", "event_id: uid-1", "start: 2026-01-20T10:00:00.000Z", "---"].join("\n");
-    expect(() => parseMeetingNoteFromMd(md)).toThrow(/assistant_type/i);
+    const r = parseMeetingNoteFromMd(md);
+    expect(r.ok).toBe(false);
   });
 
   it("parseProtocolNoteFromCache читает protocol из metadataCache.frontmatter", () => {
@@ -129,7 +136,10 @@ describe("domain/policies/frontmatter", () => {
       participants: [{ displayName: "Иван", email: "ivan@example.com" }],
       projects: [{ id: "project-1", title: "Проект" }],
     };
-    const dto = parseProtocolNoteFromCache(fm);
+    const r = parseProtocolNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.assistant_type).toBe("protocol");
     expect(dto.protocol_id).toBe("cal-1:uid-1");
     expect(dto.calendar_id).toBe("cal-1");
@@ -155,7 +165,10 @@ describe("domain/policies/frontmatter", () => {
       ],
       projects: [{ project_id: "pr-1", title: "Проект" }, { id: "pr-2", title: "Проект 2" }, 1],
     };
-    const dto = parseProtocolNoteFromCache(fm);
+    const r = parseProtocolNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.files).toEqual([]);
     expect(dto.participants?.[0]).toEqual({ person_id: "p-1", display_name: "Иван", email: "ivan@example.com" });
     expect(dto.participants?.[1]?.person_id).toBe("p-2");
@@ -175,15 +188,19 @@ describe("domain/policies/frontmatter", () => {
       projects: { a: 1 },
       files: "x",
     };
-    const dto = parseProtocolNoteFromCache(fm);
+    const r = parseProtocolNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.participants).toBeUndefined();
     expect(dto.projects).toBeUndefined();
     expect(dto.files).toBeUndefined();
   });
 
-  it("parseProtocolNoteFromCache бросает ошибку при неверном assistant_type", () => {
+  it("parseProtocolNoteFromCache возвращает err при неверном assistant_type", () => {
     const fm: Record<string, unknown> = { assistant_type: "calendar_event" };
-    expect(() => parseProtocolNoteFromCache(fm)).toThrow(/assistant_type/i);
+    const r = parseProtocolNoteFromCache(fm);
+    expect(r.ok).toBe(false);
   });
 
   it("parsePersonNoteFromCache читает person из metadataCache.frontmatter", () => {
@@ -195,7 +212,10 @@ describe("domain/policies/frontmatter", () => {
       mailboxes: ["ivan@example.com", "i.ivanov@corp.com"],
       messengers: [{ kind: "telegram", handle: "@ivan" }],
     };
-    const dto = parsePersonNoteFromCache(fm);
+    const r = parsePersonNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.assistant_type).toBe("person");
     expect(dto.person_id).toBe("person-1");
     expect(dto.display_name).toBe("Иван Иванов");
@@ -204,7 +224,10 @@ describe("domain/policies/frontmatter", () => {
 
   it("parsePersonNoteFromCache возвращает undefined для emails, если это не массив", () => {
     const fm: Record<string, unknown> = { assistant_type: "person", person_id: "p", emails: "x" };
-    const dto = parsePersonNoteFromCache(fm);
+    const r = parsePersonNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.emails).toBeUndefined();
   });
 
@@ -218,7 +241,10 @@ describe("domain/policies/frontmatter", () => {
       tags: ["a", "b"],
       protocols: [{ protocol_id: "cal-1:uid-1", start: "2026-01-20T10:00:00.000Z", summary: "Кратко" }],
     };
-    const dto = parseProjectNoteFromCache(fm);
+    const r = parseProjectNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.assistant_type).toBe("project");
     expect(dto.project_id).toBe("project-1");
     expect(dto.title).toBe("Проект X");
@@ -234,19 +260,24 @@ describe("domain/policies/frontmatter", () => {
       owner: ["nope"],
       tags: [1, 2, 3],
     };
-    const dto = parseProjectNoteFromCache(fm);
+    const r = parseProjectNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.owner).toBeUndefined();
     expect(dto.tags).toEqual([]);
   });
 
-  it("parseProjectNoteFromCache бросает ошибку, если отсутствует title", () => {
+  it("parseProjectNoteFromCache возвращает err, если отсутствует title", () => {
     const fm: Record<string, unknown> = { assistant_type: "project", project_id: "p" };
-    expect(() => parseProjectNoteFromCache(fm)).toThrow(/title/i);
+    const r = parseProjectNoteFromCache(fm);
+    expect(r.ok).toBe(false);
   });
 
-  it("parseProjectNoteFromCache бросает ошибку, если отсутствует project_id", () => {
+  it("parseProjectNoteFromCache возвращает err, если отсутствует project_id", () => {
     const fm: Record<string, unknown> = { assistant_type: "project", project_id: "", title: "Проект" };
-    expect(() => parseProjectNoteFromCache(fm)).toThrow(/project_id/i);
+    const r = parseProjectNoteFromCache(fm);
+    expect(r.ok).toBe(false);
   });
 
   it("parseProjectNoteFromCache: owner может быть частичным объектом (не обязателен display_name/email)", () => {
@@ -256,7 +287,10 @@ describe("domain/policies/frontmatter", () => {
       title: "Проект X",
       owner: { person_id: "person-1" },
     };
-    const dto = parseProjectNoteFromCache(fm);
+    const r = parseProjectNoteFromCache(fm);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    const dto = r.value;
     expect(dto.owner).toEqual({ person_id: "person-1", display_name: undefined, email: undefined });
   });
 });

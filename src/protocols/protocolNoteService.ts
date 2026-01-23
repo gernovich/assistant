@@ -11,6 +11,8 @@ import { parseMeetingNoteFromMd } from "../domain/policies/frontmatterDtos";
 import { makePseudoRandomId } from "../domain/policies/pseudoRandomId";
 import { emptyProtocolBaseName, protocolBaseNameFromEvent } from "../domain/policies/protocolNoteNaming";
 import { renderEmptyProtocolMarkdown, renderProtocolMarkdown } from "../domain/policies/protocolNoteTemplate";
+import { protocolTargetDir } from "../domain/policies/protocolFolderLayout";
+import { makeCalendarStub } from "../domain/policies/calendarStub";
 import type { ProtocolNoteRepository } from "../application/contracts/protocolNoteRepository";
 
 /** Сервис создания/открытия протоколов встреч (md-файлы в vault). */
@@ -36,7 +38,13 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
    * Имя файла человекочитаемое, уникальность обеспечиваем суффиксами ` 2/3/...`.
    */
   async createProtocolFromEvent(ev: Event, eventFilePath?: string): Promise<TFile> {
-    await ensureFolder(this.vault, this.protocolsDir);
+    const targetDir = normalizePath(
+      protocolTargetDir({
+        protocolsDir: this.protocolsDir,
+        meetingFilePath: eventFilePath,
+      }),
+    );
+    await ensureFolder(this.vault, targetDir || this.protocolsDir);
 
     // Человекочитаемое имя файла (без UID). Уникальность через суффиксы " 2/3/...".
     const baseName = protocolBaseNameFromEvent({ summary: ev.summary, start: ev.start });
@@ -59,7 +67,7 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
       escape: yamlEscape,
       makeEventKey,
     });
-    const file = await createUniqueMarkdownFile(this.vault, this.protocolsDir, baseName, content);
+    const file = await createUniqueMarkdownFile(this.vault, targetDir || this.protocolsDir, baseName, content);
     return file;
   }
 
@@ -68,7 +76,12 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
    * Зачем: чтобы у “Протоколы” тоже был простой шаблон/команда, даже без календаря.
    */
   async createEmptyProtocol(): Promise<TFile> {
-    await ensureFolder(this.vault, this.protocolsDir);
+    const targetDir = normalizePath(
+      protocolTargetDir({
+        protocolsDir: this.protocolsDir,
+      }),
+    );
+    await ensureFolder(this.vault, targetDir || this.protocolsDir);
     const now = new Date();
     const baseName = emptyProtocolBaseName(now);
     const uid = makePseudoRandomId({ prefix: "manual", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) });
@@ -90,7 +103,7 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
       },
       escape: yamlEscape,
     });
-    return await createUniqueMarkdownFile(this.vault, this.protocolsDir, baseName, content);
+    return await createUniqueMarkdownFile(this.vault, targetDir || this.protocolsDir, baseName, content);
   }
 
   /**
@@ -99,7 +112,13 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
    */
   async createProtocolFromMeetingFile(meetingFile: TFile): Promise<TFile> {
     const text = await this.vault.read(meetingFile);
-    const m = parseMeetingNoteFromMd(text, { fileBasename: meetingFile.basename });
+    const mr = parseMeetingNoteFromMd(text, { fileBasename: meetingFile.basename });
+    if (!mr.ok) {
+      console.warn("Протокол: не удалось распарсить карточку встречи (frontmatter)", { code: mr.error.code, error: mr.error.message });
+      // Не ломаем UX: всё равно создаём “ручной” пустой протокол.
+      return await this.createEmptyProtocol();
+    }
+    const m = mr.value;
     const calendarId = String(m.calendar_id ?? "manual");
     const uid = String(m.event_id ?? makePseudoRandomId({ prefix: "manual", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) }));
     const summary = String(m.summary ?? meetingFile.basename ?? "Встреча");
@@ -107,7 +126,7 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
     const endIso = String(m.end ?? "");
 
     const ev: Event = {
-      calendar: { id: calendarId, name: "", type: "ics_url", config: { id: calendarId, name: "", type: "ics_url", enabled: true } as any },
+      calendar: makeCalendarStub({ id: calendarId, name: "" }),
       id: uid,
       summary,
       start: startIso ? new Date(startIso) : new Date(),

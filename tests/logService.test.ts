@@ -52,4 +52,29 @@ describe("LogService", () => {
     log.info("y");
     expect(cb).toHaveBeenCalledTimes(2);
   });
+
+  it("редактирует секреты в message и data (и onEntry получает уже redacted)", () => {
+    const onEntry = vi.fn();
+    const log = new LogService(200, onEntry);
+
+    log.error("Fetch failed: url=https://ex.com/x?access_token=abc&x=1 Authorization: Bearer SECRET", {
+      url: "https://ex.com/x?refresh_token=RT&y=1#frag",
+      Authorization: "Bearer TOPSECRET",
+      nested: { client_secret: "CS", password: "p@ss", text: "token=ZZZ" },
+    });
+
+    const e = log.list()[0];
+    expect(e.message).not.toContain("abc");
+    expect(e.message).not.toContain("SECRET");
+    expect(JSON.stringify(e.data)).not.toContain("RT");
+    expect(JSON.stringify(e.data)).not.toContain("TOPSECRET");
+    expect(JSON.stringify(e.data)).not.toContain("CS");
+    expect(JSON.stringify(e.data)).not.toContain("p@ss");
+    expect(JSON.stringify(e.data)).not.toContain("ZZZ");
+
+    // onEntry тоже должен получать уже redacted данные
+    const called = onEntry.mock.calls[0][0];
+    expect(JSON.stringify(called)).not.toContain("abc");
+    expect(JSON.stringify(called)).not.toContain("TOPSECRET");
+  });
 });

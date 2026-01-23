@@ -57,6 +57,12 @@ describe("calendar/store/eventNoteIndexCache", () => {
     expect(loaded.size).toBe(0);
   });
 
+  it("load возвращает пустой индекс, если filePath пустой", async () => {
+    const cache = new EventNoteIndexCache({ filePath: "" });
+    const loaded = await cache.load({ getAbstractFileByPath: () => null } as any, "Ассистент/Встречи");
+    expect(loaded.size).toBe(0);
+  });
+
   it("load не падает на невалидном JSON (возвращает пустой индекс)", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "assistant-event-index-"));
     const cachePath = path.join(tmp, "event-index.json");
@@ -79,6 +85,22 @@ describe("calendar/store/eventNoteIndexCache", () => {
     expect(loaded.size).toBe(0);
   });
 
+  it("load возвращает пустой индекс при битой схеме: eventsDir не строка / savedAtMs не number / byEventKey не object", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "assistant-event-index-"));
+
+    for (const bad of [
+      { version: 1, savedAtMs: Date.now(), eventsDir: 123, byEventKey: {} },
+      { version: 1, savedAtMs: "x", eventsDir: "Ассистент/Встречи", byEventKey: {} },
+      { version: 1, savedAtMs: Date.now(), eventsDir: "Ассистент/Встречи", byEventKey: null },
+    ]) {
+      const cachePath = path.join(tmp, `event-index-${Math.random()}.json`);
+      await fs.writeFile(cachePath, JSON.stringify(bad), "utf8");
+      const cache = new EventNoteIndexCache({ filePath: cachePath });
+      const loaded = await cache.load({ getAbstractFileByPath: () => null } as any, "Ассистент/Встречи");
+      expect(loaded.size).toBe(0);
+    }
+  });
+
   it("save не кидает ошибку и пишет warn, если файл нельзя сохранить", async () => {
     const warns: Array<{ m: string; data?: Record<string, unknown> }> = [];
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "assistant-event-index-"));
@@ -96,5 +118,12 @@ describe("calendar/store/eventNoteIndexCache", () => {
       byEventKey: new Map<string, any>([["k", { path: "Ассистент/Встречи/X.md", extension: "md" }]]) as any,
     });
     expect(warns.some((w) => w.m.includes("не удалось сохранить индекс"))).toBe(true);
+  });
+
+  it("save не падает при пустом filePath (early return)", async () => {
+    const cache = new EventNoteIndexCache({ filePath: "" });
+    await expect(
+      cache.save({ eventsDir: "Ассистент/Встречи", byEventKey: new Map<string, any>([["k", { path: "x.md", extension: "md" }]]) as any }),
+    ).resolves.toBeUndefined();
   });
 });

@@ -12,8 +12,7 @@ export function renderAutoRefreshSection(params: { containerEl: HTMLElement; plu
     .setDesc("Автоматически перечитывать календари по интервалу.")
     .addToggle((t) =>
       t.setValue(plugin.settings.calendar.autoRefreshEnabled).onChange(async (v) => {
-        plugin.settings.calendar.autoRefreshEnabled = v;
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({ type: "calendarMeta.update", patch: { autoRefreshEnabled: v } });
       }),
     );
 
@@ -26,8 +25,10 @@ export function renderAutoRefreshSection(params: { containerEl: HTMLElement; plu
         .setValue(String(plugin.settings.calendar.autoRefreshMinutes))
         .onChange(async (v) => {
           const n = Number(v);
-          plugin.settings.calendar.autoRefreshMinutes = Number.isFinite(n) ? n : 10;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({
+            type: "calendarMeta.update",
+            patch: { autoRefreshMinutes: Number.isFinite(n) ? n : 10 },
+          });
         }),
     );
 
@@ -39,8 +40,7 @@ export function renderAutoRefreshSection(params: { containerEl: HTMLElement; plu
         .setPlaceholder("me@example.com")
         .setValue(plugin.settings.calendar.myEmail)
         .onChange(async (v) => {
-          plugin.settings.calendar.myEmail = v.trim();
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({ type: "calendarMeta.update", patch: { myEmail: v.trim() } });
         }),
     );
 
@@ -53,8 +53,10 @@ export function renderAutoRefreshSection(params: { containerEl: HTMLElement; plu
         .setValue(String(plugin.settings.calendar.persistentCacheMaxEventsPerCalendar))
         .onChange(async (v) => {
           const n = Number(v);
-          plugin.settings.calendar.persistentCacheMaxEventsPerCalendar = Number.isFinite(n) ? Math.floor(n) : 2000;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({
+            type: "calendarMeta.update",
+            patch: { persistentCacheMaxEventsPerCalendar: Number.isFinite(n) ? Math.floor(n) : 2000 },
+          });
         }),
     );
 }

@@ -17,6 +17,10 @@ import { wikiLinkLine } from "../domain/policies/wikiLink";
 import { attendeesMarkdownBlockRu } from "../domain/policies/attendeesMarkdownRu";
 import { buildMeetingFrontmatterData } from "../domain/policies/meetingFrontmatterData";
 import { renderMeetingNoteMarkdown } from "../domain/policies/meetingNoteTemplate";
+import { parseFrontmatterDate } from "../domain/policies/frontmatterDate";
+import { ensureMarkdownFilePath } from "../domain/policies/ensureMarkdownFilePath";
+import { sortProtocolInfosNewestFirst } from "../domain/policies/sortProtocolInfosNewestFirst";
+import { decideMeetingNoteFile } from "../domain/policies/meetingNoteFileDecision";
 import {
   extractProtocolsBody,
   extractWikiLinkTargets,
@@ -138,7 +142,8 @@ export class EventNoteService implements MeetingNoteRepository {
     const targets = extractWikiLinkTargets(body);
     const out: TFile[] = [];
     for (const t of targets) {
-      const path = t.endsWith(".md") ? t : `${t}.md`;
+      const path = ensureMarkdownFilePath(t);
+      if (!path) continue;
       const f = this.vault.getAbstractFileByPath(path);
       if (f && isTFile(f)) out.push(f);
     }
@@ -153,28 +158,14 @@ export class EventNoteService implements MeetingNoteRepository {
       const start = this.getFileFrontmatterDate(f, FM.start);
       out.push({ file: f, start });
     }
-    // Сортируем “последние сверху”; элементы без start — в конце.
-    out.sort((a, b) => {
-      const at = a.start?.getTime();
-      const bt = b.start?.getTime();
-      if (at == null && bt == null) return 0;
-      if (at == null) return 1;
-      if (bt == null) return -1;
-      return bt - at;
-    });
-    return out;
+    return sortProtocolInfosNewestFirst(out);
   }
 
   private getFileFrontmatterDate(file: TFile, key: string): Date | undefined {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter;
     const raw = fm ? (fm as Record<string, unknown>)[key] : undefined;
-    if (raw instanceof Date) return raw;
-    if (typeof raw === "string") {
-      const d = new Date(raw);
-      if (!Number.isNaN(d.getTime())) return d;
-    }
-    return undefined;
+    return parseFrontmatterDate(raw);
   }
 
   /** Пометить встречу как отменённую (в пользовательской секции файла встречи). */
@@ -208,27 +199,53 @@ export class EventNoteService implements MeetingNoteRepository {
     const sid = shortStableId(eventKey, 6);
     const target = this.getEventFilePath(ev);
 
-    // 1) Основной путь: ищем по `(calendar_id, event_id)` (frontmatter) — имя файла не важно.
     const existingByKey = eventKeyIndex.get(eventKey);
-    if (existingByKey) {
-      // Переименовываем в красивое имя при изменении summary (без [sid]).
-      if (existingByKey.path !== target) {
-        const renamed = await this.tryRenameToTarget(existingByKey, target);
-        return renamed;
+
+    const existingBySid = sidIndex.get(sid) ?? this.findEventFileByStableId(sid);
+
+    // Decision: pure policy (без vault I/O)
+    const decision = decideMeetingNoteFile({
+      targetPath: target,
+      existingByEventKeyPath: existingByKey?.path,
+      existingByLegacySidPath: existingBySid?.path,
+    });
+
+    if (decision.kind === "use_eventKey") {
+      if (!existingByKey) {
+        // Invariant violation: индекс говорит "use_eventKey", но файла нет.
+        // Не падаем — деградируем в create_new.
+        const pretty = meetingNoteBaseName({ summary: ev.summary, sanitizeFileName, maxLen: 80 });
+        const content = renderEventFile(ev, includeUserSections);
+        const created = await createUniqueMarkdownFile(this.vault, this.eventsDir, pretty, content);
+        eventKeyIndex.set(eventKey, created);
+        return created;
+      }
+      if (decision.renameTo && existingByKey.path !== decision.renameTo) {
+        return await this.tryRenameToTarget(existingByKey, decision.renameTo);
       }
       return existingByKey;
     }
 
-    // 2) Legacy: ищем по [sid] в имени (для старых файлов).
-    const existingBySid = sidIndex.get(sid) ?? this.findEventFileByStableId(sid);
-    if (existingBySid) {
-      // Переводим на красивое имя без [sid] (если возможно), сохраняя связь через `(calendar_id, event_id)`.
-      const renamed = existingBySid.path !== target ? await this.tryRenameToTarget(existingBySid, target) : existingBySid;
-      eventKeyIndex.set(eventKey, renamed);
-      return renamed;
+    if (decision.kind === "use_legacy_sid") {
+      if (!existingBySid) {
+        // Invariant violation: индекс говорит "use_legacy_sid", но файла нет.
+        // Не падаем — деградируем в create_new.
+        const pretty = meetingNoteBaseName({ summary: ev.summary, sanitizeFileName, maxLen: 80 });
+        const content = renderEventFile(ev, includeUserSections);
+        const created = await createUniqueMarkdownFile(this.vault, this.eventsDir, pretty, content);
+        eventKeyIndex.set(eventKey, created);
+        return created;
+      }
+      const file =
+        decision.renameTo && existingBySid.path !== decision.renameTo
+          ? await this.tryRenameToTarget(existingBySid, decision.renameTo)
+          : existingBySid;
+      // Переходим на DB-идентичность `(calendar_id,event_id)` и кешируем.
+      eventKeyIndex.set(eventKey, file);
+      return file;
     }
 
-    // 3) Создаём новый файл с красивым именем (с авто-суффиксами при коллизиях).
+    // create_new: создаём новый файл с красивым именем (с авто-суффиксами при коллизиях).
     const pretty = meetingNoteBaseName({ summary: ev.summary, sanitizeFileName, maxLen: 80 });
     const content = renderEventFile(ev, includeUserSections);
     const created = await createUniqueMarkdownFile(this.vault, this.eventsDir, pretty, content);

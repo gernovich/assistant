@@ -1,7 +1,7 @@
-import type { TFile } from "obsidian";
+import type { VaultFileLike } from "../../shared/vaultFileLike";
 
 export interface PersonRepository {
-  createAndOpen(params?: { displayName?: string }): Promise<TFile>;
-  ensureByEmail(params: { email: string; displayName?: string }): Promise<TFile>;
+  createAndOpen(params?: { displayName?: string }): Promise<VaultFileLike>;
+  ensureByEmail(params: { email: string; displayName?: string }): Promise<VaultFileLike>;
 }
 

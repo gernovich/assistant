@@ -12,8 +12,7 @@ export function renderNotificationsSection(params: { containerEl: HTMLElement; p
     .setDesc("Показывать напоминания о встречах календаря.")
     .addToggle((t) =>
       t.setValue(plugin.settings.notifications.enabled).onChange(async (v) => {
-        plugin.settings.notifications.enabled = v;
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({ type: "notifications.update", patch: { enabled: v } });
       }),
     );
 
@@ -26,8 +25,10 @@ export function renderNotificationsSection(params: { containerEl: HTMLElement; p
         .setValue(String(plugin.settings.notifications.minutesBefore))
         .onChange(async (v) => {
           const n = Number(v);
-          plugin.settings.notifications.minutesBefore = Number.isFinite(n) ? n : 5;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({
+            type: "notifications.update",
+            patch: { minutesBefore: Number.isFinite(n) ? n : 5 },
+          });
         }),
     );
 
@@ -36,8 +37,7 @@ export function renderNotificationsSection(params: { containerEl: HTMLElement; p
     .setDesc("Показывать уведомление, когда встреча началась.")
     .addToggle((t) =>
       t.setValue(plugin.settings.notifications.atStart).onChange(async (v) => {
-        plugin.settings.notifications.atStart = v;
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({ type: "notifications.update", patch: { atStart: v } });
       }),
     );
 }

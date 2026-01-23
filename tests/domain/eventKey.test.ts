@@ -6,9 +6,9 @@ describe("domain/identity/eventKey", () => {
     expect(String(makeEventKey("cal", "uid"))).toBe("cal:uid");
   });
 
-  it("makeEventKey валидирует непустые части", () => {
-    expect(() => makeEventKey("", "x")).toThrow();
-    expect(() => makeEventKey("c", "")).toThrow();
+  it("makeEventKey не бросает исключения и возвращает стабильную строку", () => {
+    expect(String(makeEventKey("", "x"))).toBe(":x");
+    expect(String(makeEventKey("c", ""))).toBe("c:");
   });
 
   it("parseEventKey принимает строку с ':' и непустыми частями", () => {

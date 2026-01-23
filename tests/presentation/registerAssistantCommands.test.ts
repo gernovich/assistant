@@ -10,7 +10,7 @@ describe("registerAssistantCommands", () => {
       },
     } as any;
 
-    const actions = {
+    const controller = {
       openAgenda: vi.fn(),
       openRecordingDialog: vi.fn(),
       openLog: vi.fn(),
@@ -28,9 +28,9 @@ describe("registerAssistantCommands", () => {
       eventStatusNeedsAction: vi.fn(),
       applyStatusFromMeetingNote: vi.fn(),
       createProtocolFromActiveEvent: vi.fn(),
-    };
+    } as any;
 
-    registerAssistantCommands(plugin, actions);
+    registerAssistantCommands(plugin, controller);
 
     const ids = added.map((x) => x.id);
     expect(ids).toContain("open-agenda");

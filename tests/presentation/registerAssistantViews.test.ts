@@ -14,21 +14,8 @@ describe("registerAssistantViews", () => {
 
     registerAssistantViews(
       plugin,
-      { settings: {} as any, calendarService: {} as any, logService: {} as any },
-      {
-        openLog: () => {},
-        openAgenda: () => {},
-        openEvent: () => {},
-        setMyPartstat: async () => {},
-        getProtocolMenuState: async () => ({ hasCurrent: false, hasLatest: false, currentIsLatest: false }),
-        openCurrentProtocol: async () => {},
-        openLatestProtocol: async () => {},
-        createProtocol: async () => {},
-        openRecorder: async () => {},
-        debugShowReminder: () => {},
-        openTodayLog: () => {},
-        clearTodayLogFile: () => {},
-      },
+      { settings: {} as any },
+      { createAgendaController: () => ({} as any), createLogController: () => ({} as any) },
     );
 
     expect(types).toContain(AGENDA_VIEW_TYPE);

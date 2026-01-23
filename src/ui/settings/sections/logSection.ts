@@ -13,7 +13,7 @@ export function renderLogSection(params: { containerEl: HTMLElement; plugin: Ass
       .setDesc("Показать live-лог плагина (удобно для отладки).")
       .addButton((b) =>
         b.setButtonText("Открыть").onClick(async () => {
-          await plugin.activateLogView();
+          await plugin.settingsOps.openLogPanel();
         }),
       );
 
@@ -22,7 +22,7 @@ export function renderLogSection(params: { containerEl: HTMLElement; plugin: Ass
       .setDesc("Открыть файл лога за сегодня (в системной папке плагина, вне vault).")
       .addButton((b) =>
         b.setButtonText("Открыть файл").onClick(async () => {
-          await plugin.logFileWriter.openTodayLog();
+          await plugin.settingsOps.openTodayLogFile();
         }),
       );
   } else {
@@ -43,8 +43,7 @@ export function renderLogSection(params: { containerEl: HTMLElement; plugin: Ass
         .setValue(String(plugin.settings.log.maxEntries))
         .onChange(async (v) => {
           const n = Number(v);
-          plugin.settings.log.maxEntries = Number.isFinite(n) ? n : 2048;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({ type: "log.update", patch: { maxEntries: Number.isFinite(n) ? n : 2048 } });
         }),
     );
 
@@ -57,8 +56,7 @@ export function renderLogSection(params: { containerEl: HTMLElement; plugin: Ass
         .setValue(String(plugin.settings.log.retentionDays))
         .onChange(async (v) => {
           const n = Number(v);
-          plugin.settings.log.retentionDays = Number.isFinite(n) ? Math.floor(n) : 7;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({ type: "log.update", patch: { retentionDays: Number.isFinite(n) ? Math.floor(n) : 7 } });
         }),
     );
 }

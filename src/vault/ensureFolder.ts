@@ -1,7 +1,11 @@
-import type { Vault } from "obsidian";
 import { normalizePath } from "obsidian";
 
-export async function ensureFolder(vault: Vault, folderPath: string) {
+export type VaultLike = {
+  getAbstractFileByPath: (path: string) => unknown;
+  createFolder: (path: string) => Promise<unknown>;
+};
+
+export async function ensureFolder(vault: VaultLike, folderPath: string) {
   const parts = normalizePath(folderPath).split("/").filter(Boolean);
   let cur = "";
   for (const p of parts) {

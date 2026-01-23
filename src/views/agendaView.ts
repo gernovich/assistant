@@ -1,9 +1,9 @@
 import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type { AssistantSettings, Event } from "../types";
-import type { CalendarService } from "../calendar/calendarService";
 import { makeEventKey } from "../ids/stableIds";
 import { rsvpStatusBadgeRu } from "../domain/policies/rsvpStatusBadgeRu";
 import { attendeesTooltipRu } from "../domain/policies/attendeesSummaryRu";
+import type { AgendaController } from "../application/agenda/agendaController";
 
 /** Тип Obsidian view для “Повестки”. */
 export const AGENDA_VIEW_TYPE = "assistant-agenda";
@@ -17,20 +17,7 @@ const HOUR_HEIGHT_PX = 48;
  */
 export class AgendaView extends ItemView {
   private settings: AssistantSettings;
-  private calendarService: CalendarService;
-  private openLog?: () => void;
-  private openEvent?: (ev: Event) => void;
-  private setMyPartstat?: (ev: Event, partstat: NonNullable<Event["status"]>) => Promise<void> | void;
-  private getProtocolMenuState?: (ev: Event) => Promise<{
-    hasCurrent: boolean;
-    hasLatest: boolean;
-    currentIsLatest: boolean;
-  }>;
-  private openCurrentProtocol?: (ev: Event) => void | Promise<void>;
-  private openLatestProtocol?: (ev: Event) => void | Promise<void>;
-  private createProtocol?: (ev: Event) => unknown | Promise<unknown>;
-  private openRecorder?: (ev: Event) => void | Promise<void>;
-  private debugShowReminder?: (ev: Event) => void;
+  private controller: AgendaController;
   private unsubscribe?: () => void;
   private tickTimer?: number;
   private dayOffset = 0;
@@ -40,33 +27,11 @@ export class AgendaView extends ItemView {
   constructor(
     leaf: WorkspaceLeaf,
     settings: AssistantSettings,
-    calendarService: CalendarService,
-    openLog?: () => void,
-    openEvent?: (ev: Event) => void,
-    setMyPartstat?: (ev: Event, partstat: NonNullable<Event["status"]>) => Promise<void> | void,
-    getProtocolMenuState?: (ev: Event) => Promise<{
-      hasCurrent: boolean;
-      hasLatest: boolean;
-      currentIsLatest: boolean;
-    }>,
-    openCurrentProtocol?: (ev: Event) => void | Promise<void>,
-    openLatestProtocol?: (ev: Event) => void | Promise<void>,
-    createProtocol?: (ev: Event) => unknown | Promise<unknown>,
-    openRecorder?: (ev: Event) => void | Promise<void>,
-    debugShowReminder?: (ev: Event) => void,
+    controller: AgendaController,
   ) {
     super(leaf);
     this.settings = settings;
-    this.calendarService = calendarService;
-    this.openLog = openLog;
-    this.openEvent = openEvent;
-    this.setMyPartstat = setMyPartstat;
-    this.getProtocolMenuState = getProtocolMenuState;
-    this.openCurrentProtocol = openCurrentProtocol;
-    this.openLatestProtocol = openLatestProtocol;
-    this.createProtocol = createProtocol;
-    this.openRecorder = openRecorder;
-    this.debugShowReminder = debugShowReminder;
+    this.controller = controller;
   }
 
   /** Obsidian: тип view. */
@@ -87,6 +52,7 @@ export class AgendaView extends ItemView {
   /** Применить новые настройки (например после saveSettingsAndApply). */
   setSettings(settings: AssistantSettings) {
     this.settings = settings;
+    this.controller.setSettings(settings);
     this.render();
   }
 
@@ -97,7 +63,7 @@ export class AgendaView extends ItemView {
 
   /** Obsidian: lifecycle — при открытии подписываемся на обновления и рендерим. */
   async onOpen() {
-    const action = this.addAction("list", "Открыть лог", () => this.openLog?.());
+    const action = this.addAction("list", "Открыть лог", () => this.controller.openLog());
     // Некоторые сборки Obsidian могут перезатирать иконки действий после onOpen().
     // Поэтому принудительно ставим иконку сейчас и ещё раз на следующем кадре.
     const force = () => {
@@ -109,7 +75,7 @@ export class AgendaView extends ItemView {
     };
     force();
     requestAnimationFrame(force);
-    this.unsubscribe = this.calendarService.onChange(() => this.render());
+    this.unsubscribe = this.controller.onChange(() => this.render());
     this.tickTimer = window.setInterval(() => this.renderClockOnly(), 30_000);
     this.render();
   }
@@ -155,7 +121,7 @@ export class AgendaView extends ItemView {
     header.createDiv({ text: formatNow(), cls: "assistant-agenda__now", attr: { "data-assistant-now": "1" } });
 
     // Баннер “данные устарели”: если часть календарей не обновилась — показываем предупреждение, но продолжаем отображать кэш.
-    const status = this.calendarService.getRefreshResult().perCalendar;
+    const status = this.controller.getRefreshResult().perCalendar;
     {
       const entries = Object.entries(status);
       const stale = entries.filter(([, s]) => s.status === "stale");
@@ -176,7 +142,7 @@ export class AgendaView extends ItemView {
       }
     }
 
-    const events = this.calendarService.getDayEvents(this.dayOffset, this.settings.agenda.maxEvents);
+    const events = this.controller.getDayEvents(this.dayOffset);
 
     const allDay = events.filter((e) => e.allDay);
     const timed = events.filter((e) => !e.allDay);
@@ -193,8 +159,11 @@ export class AgendaView extends ItemView {
         const resp = partstatLabel(ev.status);
         if (resp) pill.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(ev.status)}` });
         pill.onclick = () => {
-          if (this.openEvent) this.openEvent(ev);
-          else new Notice(`${formatWhen(ev)} — ${ev.summary}`);
+          try {
+            this.controller.openEvent(ev);
+          } catch {
+            new Notice(`${formatWhen(ev)} — ${ev.summary}`);
+          }
         };
         pill.oncontextmenu = (e) => {
           e.preventDefault();
@@ -246,8 +215,11 @@ export class AgendaView extends ItemView {
       if (resp) title.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(b.event.status)}` });
 
       node.onclick = () => {
-        if (this.openEvent) this.openEvent(b.event);
-        else new Notice(`${b.timeLabel} — ${b.event.summary}`);
+        try {
+          this.controller.openEvent(b.event);
+        } catch {
+          new Notice(`${b.timeLabel} — ${b.event.summary}`);
+        }
       };
 
       node.oncontextmenu = (e) => {
@@ -268,56 +240,55 @@ export class AgendaView extends ItemView {
       it.setTitle("Перейти")
         .setIcon("link")
         .onClick(() => {
-          if (this.openEvent) this.openEvent(ev);
-          else new Notice(`${formatWhen(ev)} — ${ev.summary}`);
+          try {
+            this.controller.openEvent(ev);
+          } catch {
+            new Notice(`${formatWhen(ev)} — ${ev.summary}`);
+          }
         });
     });
 
-    if (this.openRecorder) {
-      menu.addItem((it) => {
-        it.setTitle("Диктофон")
-          .setIcon("microphone")
-          .onClick(() => void this.openRecorder?.(ev));
-      });
-    }
+    menu.addItem((it) => {
+      it.setTitle("Диктофон")
+        .setIcon("microphone")
+        .onClick(() => void this.controller.openRecorder(ev));
+    });
 
-    if (this.setMyPartstat) {
-      const ps = this.getMyPartstat(ev);
-      menu.addSeparator();
-      menu.addItem((it) => {
-        it.setTitle(ps === "accepted" ? "✓ Принято" : "Принято")
-          .setIcon("check")
-          .onClick(() => void this.applyMyPartstat(ev, "accepted"));
-      });
-      menu.addItem((it) => {
-        it.setTitle(ps === "declined" ? "✓ Отклонено" : "Отклонено")
-          .setIcon("x")
-          .onClick(() => void this.applyMyPartstat(ev, "declined"));
-      });
-      menu.addItem((it) => {
-        it.setTitle(ps === "tentative" ? "✓ Возможно" : "Возможно")
-          .setIcon("help-circle")
-          .onClick(() => void this.applyMyPartstat(ev, "tentative"));
-      });
-      menu.addItem((it) => {
-        it.setTitle(ps === "needs_action" ? "✓ Нет ответа" : "Нет ответа")
-          .setIcon("minus-circle")
-          .onClick(() => void this.applyMyPartstat(ev, "needs_action"));
-      });
-    }
+    const ps = this.getMyPartstat(ev);
+    menu.addSeparator();
+    menu.addItem((it) => {
+      it.setTitle(ps === "accepted" ? "✓ Принято" : "Принято")
+        .setIcon("check")
+        .onClick(() => void this.applyMyPartstat(ev, "accepted"));
+    });
+    menu.addItem((it) => {
+      it.setTitle(ps === "declined" ? "✓ Отклонено" : "Отклонено")
+        .setIcon("x")
+        .onClick(() => void this.applyMyPartstat(ev, "declined"));
+    });
+    menu.addItem((it) => {
+      it.setTitle(ps === "tentative" ? "✓ Возможно" : "Возможно")
+        .setIcon("help-circle")
+        .onClick(() => void this.applyMyPartstat(ev, "tentative"));
+    });
+    menu.addItem((it) => {
+      it.setTitle(ps === "needs_action" ? "✓ Нет ответа" : "Нет ответа")
+        .setIcon("minus-circle")
+        .onClick(() => void this.applyMyPartstat(ev, "needs_action"));
+    });
 
-    if (this.getProtocolMenuState) {
-      const state = await this.getProtocolMenuState(ev);
+    {
+      const state = await this.controller.getProtocolMenuState(ev);
 
-      const canOpenLatest = state.hasLatest && this.openLatestProtocol;
-      const canCreate = Boolean(this.createProtocol);
+      const canOpenLatest = state.hasLatest;
+      const canCreate = true;
       if (canOpenLatest || canCreate) menu.addSeparator();
 
       if (canOpenLatest) {
         menu.addItem((it) => {
           it.setTitle("Открыть последний протокол")
             .setIcon("file-text")
-            .onClick(() => void this.openLatestProtocol?.(ev));
+            .onClick(() => void this.controller.openLatestProtocol(ev));
         });
       }
 
@@ -325,24 +296,17 @@ export class AgendaView extends ItemView {
         menu.addItem((it) => {
           it.setTitle("Создать новый протокол")
             .setIcon("file-plus")
-            .onClick(() => this.createProtocol?.(ev));
+            .onClick(() => this.controller.createProtocol(ev));
         });
       }
-    } else if (this.createProtocol) {
-      menu.addSeparator();
-      menu.addItem((it) => {
-        it.setTitle("Создать новый протокол")
-          .setIcon("file-plus")
-          .onClick(() => this.createProtocol?.(ev));
-      });
     }
 
-    if (this.settings.debug?.enabled && this.debugShowReminder) {
+    if (this.settings.debug?.enabled) {
       menu.addSeparator();
       menu.addItem((it) => {
         it.setTitle("Показать напоминание")
           .setIcon("bell")
-          .onClick(() => this.debugShowReminder?.(ev));
+          .onClick(() => this.controller.debugShowReminder(ev));
       });
     }
 
@@ -362,10 +326,11 @@ export class AgendaView extends ItemView {
     this.optimisticPartstatByEventKey.set(key, partstat);
     this.render();
     try {
-      await this.setMyPartstat?.(ev, partstat);
+      await this.controller.setMyPartstat(ev, partstat);
     } finally {
       // Дальше дождёмся refresh календаря с актуальным PARTSTAT; тут просто снимаем оверрайд на следующем рендере.
       this.optimisticPartstatByEventKey.delete(key);
+      this.render();
     }
   }
 

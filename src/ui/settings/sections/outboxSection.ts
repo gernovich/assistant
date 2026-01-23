@@ -21,9 +21,9 @@ export function renderOutboxSection(params: {
 
   const countEl = containerEl.createDiv({ cls: "assistant-settings__notice-desc" });
   countEl.setText("Загрузка очереди…");
-  void plugin.outboxService
-    .list()
-    .then((items) => countEl.setText(`В очереди: ${items.length}`))
+  void plugin.settingsOps
+    .getOutboxCount()
+    .then((n: number) => countEl.setText(`В очереди: ${n}`))
     .catch(() => countEl.setText("В очереди: ?"));
 
   new Setting(containerEl)
@@ -31,7 +31,7 @@ export function renderOutboxSection(params: {
     .setDesc("Попробовать применить отложенные действия. Ошибки будут в логе.")
     .addButton((b) =>
       b.setButtonText("Применить").onClick(async () => {
-        await plugin.applyOutbox();
+        await plugin.settingsOps.applyOutbox();
         params.rerenderPreservingScroll();
       }),
     );
@@ -41,7 +41,7 @@ export function renderOutboxSection(params: {
     .setDesc("Удалить все отложенные действия без применения.")
     .addButton((b) =>
       b.setButtonText("Очистить").onClick(async () => {
-        await plugin.outboxService.clear();
+        await plugin.settingsOps.clearOutbox();
         params.rerenderPreservingScroll();
       }),
     );

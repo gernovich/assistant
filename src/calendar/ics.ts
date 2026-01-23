@@ -142,7 +142,8 @@ function parseContentLine(line: string): ContentLine | null {
   const value = line.slice(idx + 1);
 
   const parts = left.split(";");
-  const name = (parts[0] ?? "").toUpperCase();
+  // `split(";")` всегда возвращает хотя бы один элемент, поэтому `parts[0]` не бывает `undefined`.
+  const name = parts[0].toUpperCase();
   if (!name) return null;
   const params: Record<string, string> = {};
   for (let i = 1; i < parts.length; i++) {
@@ -227,8 +228,8 @@ function toBaseEvent(calendar: Calendar, ve: ParsedVEvent, myEmail?: string): Ev
   const dtEndRaw = fields.DTEND?.trim();
   const end = dtEndRaw ? (parseIcsDate(dtEndRaw) ?? undefined) : undefined;
 
-  const dtStartParams = ve.singleParams.DTSTART ?? {};
-  const dtEndParams = ve.singleParams.DTEND ?? {};
+  const dtStartParams = ve.singleParams.DTSTART;
+  const dtEndParams = ve.singleParams.DTEND;
   const allDay = isAllDay(dtStartRaw, dtStartParams);
 
   const timeZone = detectTimeZone(dtStartRaw, dtStartParams, dtEndParams);
@@ -239,6 +240,7 @@ function toBaseEvent(calendar: Calendar, ve: ParsedVEvent, myEmail?: string): Ev
   const recurrence = buildRecurrence(ve);
   const reminders = buildReminders(ve, myEmail);
   const color = parseEventColor(fields, ve.singleParams);
+  const calendarColor = typeof (calendar.config as any)?.color === "string" ? String((calendar.config as any).color).trim() : "";
 
   return {
     calendar,
@@ -254,7 +256,7 @@ function toBaseEvent(calendar: Calendar, ve: ParsedVEvent, myEmail?: string): Ev
     status,
     recurrence,
     reminders,
-    color,
+    color: color ?? (calendarColor ? { value: calendarColor } : undefined),
     organizer,
     attendees,
   };
@@ -316,7 +318,8 @@ function parseOrganizer(org?: { value: string; params: Record<string, string> })
   if (!email) return undefined;
   const cnRaw = String(org.params?.CN ?? "").trim();
   const displayName = cnRaw ? cnRaw : undefined;
-  const p: Person = { displayName, emails: email ? [email] : undefined, mailboxes: email ? [email] : undefined };
+  // email уже проверен выше, поэтому ветвление здесь не нужно.
+  const p: Person = { displayName, emails: [email], mailboxes: [email] };
   return p;
 }
 
@@ -352,7 +355,11 @@ function parseIcsDate(v: string): Date | null {
   return isUtc ? new Date(Date.UTC(y, mo, d, hh, mm, ss, 0)) : new Date(y, mo, d, hh, mm, ss, 0);
 }
 
-function detectTimeZone(dtStartRaw: string, dtStartParams: Record<string, string>, dtEndParams: Record<string, string>): string | undefined {
+function detectTimeZone(
+  dtStartRaw: string,
+  dtStartParams?: Record<string, string>,
+  dtEndParams?: Record<string, string>,
+): string | undefined {
   const tzid = String(dtStartParams?.TZID ?? dtEndParams?.TZID ?? "").trim();
   if (tzid) return tzid;
   // DTSTART/DTEND с суффиксом Z -> UTC
@@ -391,7 +398,8 @@ function buildReminders(ve: ParsedVEvent, myEmail?: string): Event["reminders"] 
 }
 
 function parseTriggerMinutesBefore(trigger: string): number | undefined {
-  const t = String(trigger ?? "").trim();
+  // `trigger` приходит строкой из VALARM; дополнительное `?? ""` лишь добавляет мёртвую ветку.
+  const t = String(trigger).trim();
   // Пример: -PT5M, -PT15M, -PT1H
   const m = t.match(/^-(?:P)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
   if (!m) return undefined;
@@ -427,7 +435,7 @@ function parseExdates(exdates: string[]): number[] {
 
 function parseRrule(rrule: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const chunk of (rrule ?? "").split(";")) {
+  for (const chunk of rrule.split(";")) {
     const idx = chunk.indexOf("=");
     if (idx <= 0) continue;
     const k = chunk.slice(0, idx).toUpperCase().trim();

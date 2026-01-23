@@ -1,13 +1,15 @@
 /**
  * Контракты взаимодействия между окнами Electron (BrowserWindow) и кодом плагина.
  *
- * Важно: текущий транспорт исторически сделан через `document.title` + `page-title-updated`.
- * Этот файл фиксирует типизированный контракт и не зависит от транспорта.
+ * Важно: этот файл фиксирует типизированный контракт и не зависит от транспорта.
+ * Транспорт: Electron IPC (renderer<->renderer) через `ipcRenderer.sendTo`.
  */
 
 export type IpcChannel =
   | "assistant/window/ready"
   | "assistant/window/action"
+  | "assistant/window/request"
+  | "assistant/window/response"
   | "assistant/recording/stats"
   | "assistant/recording/viz";
 
@@ -40,6 +42,20 @@ export type RecordingStartPayload = {
 };
 
 export type WindowActionEvent = IpcEnvelope<"assistant/window/action", WindowAction>;
+
+// Request/response (окно -> приложение -> окно)
+export type WindowRequest = {
+  id: string;
+  ts: number;
+  action: WindowAction;
+};
+
+export type WindowResponse =
+  | { id: string; ok: true }
+  | { id: string; ok: false; error: { code: string; message: string; cause?: string } };
+
+export type WindowRequestEvent = IpcEnvelope<"assistant/window/request", WindowRequest>;
+export type WindowResponseEvent = IpcEnvelope<"assistant/window/response", WindowResponse>;
 
 // Push (приложение -> окно)
 export type RecordingStatsDto = {

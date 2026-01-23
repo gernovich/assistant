@@ -16,8 +16,7 @@ export function renderDebugSection(params: {
     .setDesc("Показывает дополнительные элементы: кнопки/панель лога, debug-опции в UI.")
     .addToggle((t) =>
       t.setValue(plugin.settings.debug.enabled).onChange(async (v) => {
-        plugin.settings.debug.enabled = v;
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({ type: "debug.update", enabled: v });
         params.rerenderPreservingScroll();
       }),
     );

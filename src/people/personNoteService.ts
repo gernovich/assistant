@@ -10,6 +10,10 @@ import { normalizeEmail } from "../domain/policies/normalizeEmail";
 import { makePseudoRandomId } from "../domain/policies/pseudoRandomId";
 import { renderPersonCardMarkdown } from "../domain/policies/personNoteTemplate";
 import type { PersonRepository } from "../application/contracts/personRepository";
+import { PersonIndex } from "./personIndex";
+import { personCardBaseName } from "../domain/policies/personCardNaming";
+import { parseJsonStringArray } from "../domain/policies/frontmatterJsonArrays";
+import { parseFrontmatterMap, splitFrontmatter } from "../domain/policies/frontmatter";
 
 /**
  * Сервис карточек людей (md-файлы в vault).
@@ -21,12 +25,14 @@ export class PersonNoteService implements PersonRepository {
   private app: App;
   private vault: Vault;
   private peopleDir: string;
+  private personIndex: PersonIndex;
 
   /** @param peopleDir Папка людей в vault. */
   constructor(app: App, peopleDir: string) {
     this.app = app;
     this.vault = app.vault;
     this.peopleDir = normalizePath(peopleDir);
+    this.personIndex = new PersonIndex({ vault: app.vault as any, metadataCache: app.metadataCache as any });
   }
 
   /** Обновить папку людей (например после изменения настроек). */
@@ -37,7 +43,7 @@ export class PersonNoteService implements PersonRepository {
   /** Создать новую карточку человека (шаблон) и открыть её. */
   async createAndOpen(params?: { displayName?: string }): Promise<TFile> {
     await ensureFolder(this.vault, this.peopleDir);
-    const name = sanitizeFileName(params?.displayName ?? "Новый человек");
+    const name = sanitizeFileName(personCardBaseName({ displayName: params?.displayName }));
     const file = await createUniqueMarkdownFile(
       this.vault,
       this.peopleDir,
@@ -78,13 +84,18 @@ export class PersonNoteService implements PersonRepository {
    */
   async ensureByEmail(params: { email: string; displayName?: string }): Promise<TFile> {
     const email = normalizeEmail(params.email);
-    if (!email) throw new Error("Некорректный email");
+    if (!email) return await Promise.reject("Некорректный email");
 
     await ensureFolder(this.vault, this.peopleDir);
-    const existing = this.findByEmail(email);
-    if (existing) return existing;
+    const existing = this.personIndex.findByEmail({ peopleRoot: this.peopleDir, email });
+    if (existing && (existing as any).path) return existing as any;
 
-    const baseName = sanitizeFileName(params.displayName?.trim() || email.split("@")[0] || email);
+    // Fallback: если metadataCache ещё не прогрелся, PersonIndex может не увидеть emails.
+    // Тогда делаем “медленный” async scan: читаем frontmatter из файлов и ищем email там.
+    const viaRead = await this.findExistingByEmailFallback({ email });
+    if (viaRead) return viaRead;
+
+    const baseName = sanitizeFileName(personCardBaseName({ displayName: params.displayName, email }));
     const file = await createUniqueMarkdownFile(
       this.vault,
       this.peopleDir,
@@ -118,18 +129,27 @@ export class PersonNoteService implements PersonRepository {
     return file;
   }
 
-  private findByEmail(email: string): TFile | null {
-    const dirPrefix = normalizePath(this.peopleDir) + "/";
-    const files = this.vault.getFiles();
+  private async findExistingByEmailFallback(params: { email: string }): Promise<TFile | null> {
+    const email = normalizeEmail(params.email);
+    if (!email) return null;
+
+    const prefix = this.peopleDir ? `${this.peopleDir.replace(/\/+$/g, "")}/` : "";
+    const files = this.vault.getMarkdownFiles() as any[];
     for (const f of files) {
-      if (!f.path.startsWith(dirPrefix)) continue;
-      const cache = this.app.metadataCache.getFileCache(f);
-      const fm = cache?.frontmatter as Record<string, unknown> | undefined;
-      const emails = Array.isArray(fm?.[FM.emails])
-        ? (fm?.[FM.emails] as unknown[]).filter((x) => typeof x === "string")
-        : [];
-      const anyMatch = emails.some((x) => normalizeEmail(String(x)) === email);
-      if (anyMatch) return f;
+      if (!f || typeof f.path !== "string") continue;
+      if (prefix && !String(f.path).startsWith(prefix)) continue;
+      try {
+        const md = await this.vault.read(f);
+        const { frontmatter } = splitFrontmatter(md);
+        if (!frontmatter) continue;
+        const map = parseFrontmatterMap(frontmatter);
+        const raw = String(map[FM.emails] ?? "").trim();
+        const emails = raw ? parseJsonStringArray(raw) : [];
+        const anyMatch = emails.some((x) => normalizeEmail(String(x)) === email);
+        if (anyMatch) return f as TFile;
+      } catch {
+        // ignore read/parse errors for index fallback
+      }
     }
     return null;
   }

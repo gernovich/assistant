@@ -10,15 +10,18 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
   new Setting(containerEl)
     .setName("Механизм записи звука")
     .setDesc(
-      "Выбирает, как именно пишем звук.\n\n- Electron Desktop Capturer: запись микрофона через MediaRecorder (Chromium/Electron).\n- Linux Native: запись микрофона + системного звука (monitor) через `ffmpeg` (PulseAudio/PipeWire). Требуется `ffmpeg` и рабочий monitor-источник.",
+      "Выбирает, как именно пишем звук.\n\n- Electron Media Devices: запись микрофона через `navigator.mediaDevices.getUserMedia` + MediaRecorder (Chromium/Electron).\n- Linux Native: запись микрофона + системного звука (monitor) через `ffmpeg` (PulseAudio/PipeWire). Требуется `ffmpeg` и рабочий monitor-источник.",
     )
     .addDropdown((d) => {
-      d.addOption("electron_desktop_capturer", "Electron Desktop Capturer");
+      d.addOption("electron_media_devices", "Electron Media Devices");
       d.addOption("linux_native", "Linux Native");
-      d.setValue(plugin.settings.recording.audioBackend);
+      // backward compat: старое значение показываем как новое
+      d.setValue(plugin.settings.recording.audioBackend === ("electron_desktop_capturer" as any) ? "electron_media_devices" : plugin.settings.recording.audioBackend);
       d.onChange(async (v) => {
-        plugin.settings.recording.audioBackend = (v === "linux_native" ? "linux_native" : "electron_desktop_capturer") as any;
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({
+          type: "recording.update",
+          patch: { audioBackend: (v === "linux_native" ? "linux_native" : "electron_media_devices") as any },
+        });
         renderLinuxDepsBox();
         renderLinuxProcessingBox();
       });
@@ -39,7 +42,7 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
       .setDesc("Проверяет наличие утилит в системе (например `ffmpeg`, `pw-record`, `parec`).")
       .addButton((b) =>
         b.setButtonText("Проверить").onClick(async () => {
-          await plugin.checkLinuxNativeRecordingDependencies();
+          await plugin.settingsOps.checkLinuxNativeRecordingDependencies();
         }),
       );
   }
@@ -62,8 +65,10 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
         d.addOption("voice", "Голос");
         d.setValue(plugin.settings.recording.linuxNativeAudioProcessing ?? "normalize");
         d.onChange(async (v) => {
-          plugin.settings.recording.linuxNativeAudioProcessing = (v === "voice" ? "voice" : v === "none" ? "none" : "normalize") as any;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({
+            type: "recording.update",
+            patch: { linuxNativeAudioProcessing: (v === "voice" ? "voice" : v === "none" ? "none" : "normalize") as any },
+          });
         });
       });
   }
@@ -78,8 +83,10 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
         .setValue(String(plugin.settings.recording.chunkMinutes))
         .onChange(async (v) => {
           const n = Number(String(v ?? "").trim());
-          plugin.settings.recording.chunkMinutes = Number.isFinite(n) && n > 0 ? Math.floor(n) : 5;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({
+            type: "recording.update",
+            patch: { chunkMinutes: Number.isFinite(n) && n > 0 ? Math.floor(n) : 5 },
+          });
         }),
     );
 
@@ -88,8 +95,7 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
     .setDesc("Если встреча уже началась, диалог записи покажет обратный отсчёт и сам нажмёт REC.")
     .addToggle((t) =>
       t.setValue(plugin.settings.recording.autoStartEnabled).onChange(async (v) => {
-        plugin.settings.recording.autoStartEnabled = v;
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({ type: "recording.update", patch: { autoStartEnabled: v } });
       }),
     );
 
@@ -102,8 +108,10 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
         .setValue(String(plugin.settings.recording.autoStartSeconds))
         .onChange(async (v) => {
           const n = Number(String(v ?? "").trim());
-          plugin.settings.recording.autoStartSeconds = Number.isFinite(n) && n > 0 ? Math.floor(n) : 5;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({
+            type: "recording.update",
+            patch: { autoStartSeconds: Number.isFinite(n) && n > 0 ? Math.floor(n) : 5 },
+          });
         }),
     );
 }

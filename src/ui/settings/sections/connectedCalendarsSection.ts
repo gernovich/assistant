@@ -1,7 +1,7 @@
 import { Setting } from "obsidian";
 import type AssistantPlugin from "../../../../main";
 import { createSettingsNotice } from "../helpers";
-import { makeDefaultCalendar, renderCalendarBlock } from "./calendarBlocks";
+import { renderCalendarBlock } from "./calendarBlocks";
 
 /** Отрисовать секцию настроек: Подключенные календари. */
 export function renderConnectedCalendarsSection(params: {
@@ -33,8 +33,7 @@ export function renderConnectedCalendarsSection(params: {
     .setDesc("Добавляет новый календарь. По умолчанию: ICS URL.")
     .addButton((b) =>
       b.setButtonText("Добавить").onClick(async () => {
-        plugin.settings.calendars.push(makeDefaultCalendar());
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({ type: "calendar.add" });
         params.rerenderPreservingScroll();
       }),
     );

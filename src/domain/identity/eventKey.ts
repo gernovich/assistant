@@ -6,12 +6,10 @@
 export type EventKey = string & { readonly __brand: "EventKey" };
 
 export function makeEventKey(calendarId: string, eventId: string): EventKey {
-  // Инвариант: обе части должны быть непустыми после trim.
+  // Важно: не бросаем исключения — ключ должен быть стабильной строкой.
+  // Валидность проверяется отдельно (например в parseEventKey).
   const c = String(calendarId ?? "").trim();
   const e = String(eventId ?? "").trim();
-  if (!c || !e) {
-    throw new Error("EventKey: calendarId/eventId должны быть непустыми");
-  }
   return `${c}:${e}` as EventKey;
 }
 

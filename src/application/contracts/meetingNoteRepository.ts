@@ -1,4 +1,5 @@
 import type { Event } from "../../types";
+import type { VaultFileLike } from "../../shared/vaultFileLike";
 
 /**
  * Порт доступа к заметкам встреч (vault).
@@ -13,5 +14,10 @@ export interface MeetingNoteRepository {
   warmUpIndex(): Promise<void>;
   syncEvents(events: Event[]): Promise<void>;
   openEvent(ev: Event): Promise<void>;
+
+  // Протоколы, связанные со встречей (через секции/ссылки в md).
+  ensureEventFile(ev: Event): Promise<VaultFileLike>;
+  linkProtocol(ev: Event, protocolFile: VaultFileLike): Promise<void>;
+  listProtocolInfos(ev: Event): Promise<Array<{ file: VaultFileLike; start?: Date }>>;
 }
 

@@ -2,6 +2,10 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: AppErrorDto
 
 export type ErrorCode =
   | "E_VALIDATION"
+  | "E_NOT_FOUND"
+  | "E_READ_ONLY"
+  | "E_OUTBOX"
+  | "E_SETTINGS"
   | "E_NETWORK"
   | "E_CALDAV_AUTH"
   | "E_CALDAV_DISCOVERY"

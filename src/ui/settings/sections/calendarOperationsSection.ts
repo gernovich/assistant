@@ -12,7 +12,7 @@ export function renderCalendarOperationsSection(params: { containerEl: HTMLEleme
     .setDesc("Скачать встречи заново.")
     .addButton((b) =>
       b.setButtonText("Обновить").onClick(async () => {
-        await plugin.refreshCalendars();
+        await plugin.settingsOps.refreshCalendars();
       }),
     );
 }

@@ -1,13 +1,11 @@
 import { Setting } from "obsidian";
 import type AssistantPlugin from "../../../../main";
-import type { CalendarConfig } from "../../../types";
 import { getCaldavAccountReadiness } from "../../../caldav/caldavReadiness";
 import {
   addPasswordSettingWithEye,
   createSettingsNotice,
   GOOGLE_CALDAV_SERVER_URL,
   isGoogleCaldavUrl,
-  newId,
   noticeAddDescLine,
   noticeAddLinks,
   noticeAddList,
@@ -45,16 +43,15 @@ export function renderCaldavAccountsSection(params: {
 
     new Setting(accBlock).setName("Включён").addToggle((t) =>
       t.setValue(acc.enabled).onChange(async (v) => {
-        acc.enabled = v;
-        await plugin.saveSettingsAndApply();
+        await plugin.caldavAccounts.updateAccount(acc.id, { enabled: v });
       }),
     );
 
     new Setting(accBlock).setName("Имя").addText((t) =>
       t.setValue(acc.name).onChange(async (v) => {
-        acc.name = v.trim() || "CalDAV";
-        await plugin.saveSettingsAndApply();
-        accHeader.setText(acc.name);
+        const name = v.trim() || "CalDAV";
+        await plugin.caldavAccounts.updateAccount(acc.id, { name });
+        accHeader.setText(name);
       }),
     );
 
@@ -66,12 +63,7 @@ export function renderCaldavAccountsSection(params: {
         dd.addOption("google_oauth", "Google OAuth (через браузер)");
         dd.setValue(acc.authMethod ?? "basic");
         dd.onChange(async (v) => {
-          acc.authMethod = v as "basic" | "google_oauth";
-          acc.oauth = acc.oauth ?? { clientId: "", clientSecret: "", refreshToken: "" };
-          if (acc.authMethod === "google_oauth" && !acc.serverUrl.trim()) {
-            acc.serverUrl = GOOGLE_CALDAV_SERVER_URL;
-          }
-          await plugin.saveSettingsAndApply();
+          await plugin.caldavAccounts.updateAccount(acc.id, { authMethod: v as "basic" | "google_oauth" });
           params.rerenderPreservingScroll();
         });
       });
@@ -133,8 +125,7 @@ export function renderCaldavAccountsSection(params: {
       // Дальше discovery сам найдёт principal/homeUrl и calendars (/.../events/).
       const root = GOOGLE_CALDAV_SERVER_URL;
       if (root !== acc.serverUrl) {
-        acc.serverUrl = root;
-        void plugin.saveSettingsAndApply();
+        void plugin.caldavAccounts.updateAccount(acc.id, { authMethod: "google_oauth", serverUrl: root });
       }
       accBlock.createDiv({
         text: `URL сервера (Google, фиксированный): ${root}`,
@@ -149,8 +140,7 @@ export function renderCaldavAccountsSection(params: {
             .setPlaceholder("https://...")
             .setValue(acc.serverUrl)
             .onChange(async (v) => {
-              acc.serverUrl = v.trim();
-              await plugin.saveSettingsAndApply();
+              await plugin.caldavAccounts.updateAccount(acc.id, { serverUrl: v.trim() });
             }),
         );
     }
@@ -160,8 +150,7 @@ export function renderCaldavAccountsSection(params: {
         .setPlaceholder("me@example.com")
         .setValue(acc.username)
         .onChange(async (v) => {
-          acc.username = v.trim();
-          await plugin.saveSettingsAndApply();
+          await plugin.caldavAccounts.updateAccount(acc.id, { username: v.trim() });
         }),
     );
 
@@ -171,8 +160,7 @@ export function renderCaldavAccountsSection(params: {
         name: "Пароль / пароль приложения",
         value: acc.password,
         onChange: async (v) => {
-          acc.password = v;
-          await plugin.saveSettingsAndApply();
+          await plugin.caldavAccounts.updateAccount(acc.id, { password: v });
         },
         tooltip: "Показать/скрыть пароль",
       });
@@ -201,9 +189,7 @@ export function renderCaldavAccountsSection(params: {
             .setPlaceholder("...apps.googleusercontent.com")
             .setValue(oauth.clientId)
             .onChange(async (v) => {
-              oauth.clientId = v.trim();
-              acc.oauth = oauth;
-              await plugin.saveSettingsAndApply();
+              await plugin.caldavAccounts.updateAccount(acc.id, { oauth: { clientId: v.trim() } });
             }),
         );
 
@@ -213,9 +199,7 @@ export function renderCaldavAccountsSection(params: {
         desc: "Client Secret из Google Cloud (для Desktop app выдаётся).",
         value: oauth.clientSecret,
         onChange: async (v) => {
-          oauth.clientSecret = v.trim();
-          acc.oauth = oauth;
-          await plugin.saveSettingsAndApply();
+          await plugin.caldavAccounts.updateAccount(acc.id, { oauth: { clientSecret: v.trim() } });
         },
         tooltip: "Показать/скрыть secret",
       });
@@ -230,7 +214,7 @@ export function renderCaldavAccountsSection(params: {
         .setDesc("Откроет браузер, получит refresh token и сохранит локально. Нужен доступ к 127.0.0.1.")
         .addButton((b) =>
           b.setButtonText("Авторизоваться").onClick(async () => {
-            await plugin.authorizeGoogleCaldav(acc.id);
+            await plugin.caldavAccounts.authorizeGoogle(acc.id);
             params.rerenderPreservingScroll();
           }),
         )
@@ -239,9 +223,7 @@ export function renderCaldavAccountsSection(params: {
             .setButtonText("Сбросить токен")
             .setWarning()
             .onClick(async () => {
-              oauth.refreshToken = "";
-              acc.oauth = oauth;
-              await plugin.saveSettingsAndApply();
+              await plugin.caldavAccounts.updateAccount(acc.id, { resetRefreshToken: true });
               params.rerenderPreservingScroll();
             }),
         );
@@ -254,14 +236,12 @@ export function renderCaldavAccountsSection(params: {
         b.setButtonText("Найти").onClick(async () => {
           const nowReady = getCaldavAccountReadiness(acc);
           if (!nowReady.ok) {
-            plugin.logService.warn("CalDAV: аккаунт не готов для discovery", { account: acc.name, reasons: nowReady.reasons });
             showNotice(`Ассистент: CalDAV аккаунт не готов: ${nowReady.reasons[0] ?? "проверьте настройки"}`);
             return;
           }
           try {
-            const found = await plugin.discoverCaldavCalendars(acc.id);
+            const found = await plugin.caldavAccounts.discover(acc.id);
             discoveredCaldavCalendars[acc.id] = found.filter((c) => c.url);
-            plugin.logService.info("CalDAV: найдено календарей", { count: found.length, account: acc.name });
             showNotice(
               `Ассистент: найдено календарей: ${found.length}. ` +
                 `Прокрутите ниже к «Найденные календари» и нажмите «Добавить» напротив нужного.`,
@@ -270,7 +250,6 @@ export function renderCaldavAccountsSection(params: {
           } catch (e) {
             const raw = String((e as unknown) ?? "неизвестная ошибка");
             const reason = raw.length > 160 ? `${raw.slice(0, 160)}…` : raw;
-            plugin.logService.error("CalDAV: discovery ошибка", { error: raw });
             showNotice(`Ассистент: CalDAV discovery не удался: ${reason}. Подробности в логе.`);
           }
         }),
@@ -307,17 +286,12 @@ export function renderCaldavAccountsSection(params: {
               .setDisabled(isAdded)
               .onClick(async () => {
                 if (isAdded) return;
-                plugin.settings.calendars.push({
-                  id: newId(),
+                await plugin.caldavAccounts.addCalendarFromDiscovery({
                   name: c.displayName || "Календарь",
-                  type: "caldav",
-                  enabled: true,
-                  caldav: {
-                    accountId: acc.id,
-                    calendarUrl: c.url,
-                  },
-                } as CalendarConfig);
-                await plugin.saveSettingsAndApply();
+                  accountId: acc.id,
+                  calendarUrl: c.url,
+                  color: c.color,
+                });
                 params.rerenderPreservingScroll();
               }),
           );
@@ -332,13 +306,8 @@ export function renderCaldavAccountsSection(params: {
           .setButtonText("Удалить")
           .setWarning()
           .onClick(async () => {
-            plugin.settings.caldav.accounts = plugin.settings.caldav.accounts.filter((a) => a.id !== acc.id);
-            // не удаляем календари автоматически (чтобы не терять конфиг), но выключим
-            for (const cal of plugin.settings.calendars) {
-              if (cal.type === "caldav" && cal.caldav?.accountId === acc.id) cal.enabled = false;
-            }
-            delete discoveredCaldavCalendars[acc.id];
-            await plugin.saveSettingsAndApply();
+          await plugin.caldavAccounts.removeAccount(acc.id);
+          delete discoveredCaldavCalendars[acc.id];
             params.rerenderPreservingScroll();
           }),
       );
@@ -349,16 +318,7 @@ export function renderCaldavAccountsSection(params: {
     .setDesc("Добавляет новый CalDAV аккаунт (можно выбрать Basic или Google OAuth).")
     .addButton((b) =>
       b.setButtonText("Добавить").onClick(async () => {
-        plugin.settings.caldav.accounts.push({
-          id: newId(),
-          name: "CalDAV",
-          enabled: true,
-          serverUrl: "",
-          username: "",
-          password: "",
-          authMethod: "basic",
-        });
-        await plugin.saveSettingsAndApply();
+        await plugin.caldavAccounts.addAccount();
         params.rerenderPreservingScroll();
       }),
     );

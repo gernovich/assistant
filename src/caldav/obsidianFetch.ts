@@ -29,7 +29,7 @@ export function ensureObsidianFetchInstalled(): void {
     } catch (e) {
       const msg = String((e as unknown) ?? "неизвестная ошибка");
       const method = (init?.method ?? "GET").toUpperCase();
-      throw new Error(`Obsidian requestUrl: ошибка запроса: ${msg} (method=${method}, url=${redactUrlForLog(url)})`);
+      return await Promise.reject(`Obsidian requestUrl: ошибка запроса: ${msg} (method=${method}, url=${redactUrlForLog(url)})`);
     }
   };
 }

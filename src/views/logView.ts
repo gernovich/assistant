@@ -1,31 +1,22 @@
 import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import type { LogEntry } from "../log/logService";
-import type { LogService } from "../log/logService";
+import type { LogController } from "../presentation/controllers/logController";
 
 /** Тип Obsidian view для панели лога ассистента. */
 export const LOG_VIEW_TYPE = "assistant-log";
 
 /** View “Лог” — отображает in-memory лог и даёт быстрые действия (открыть файл/очистить). */
 export class LogView extends ItemView {
-  private log: LogService;
-  private openTodayFile?: () => void;
-  private clearTodayFile?: () => void;
-  private openAgenda?: () => void;
+  private controller: LogController;
   private unsubscribe?: () => void;
 
   /**
    * @param leaf Leaf, в котором живёт view.
-   * @param log Лог-сервис (источник записей).
-   * @param openTodayFile Открыть файл лога за сегодня (в системной папке плагина).
-   * @param clearTodayFile Очистить файл лога за сегодня.
-   * @param openAgenda Открыть повестку.
+   * @param controller Контроллер (порт) для LogView.
    */
-  constructor(leaf: WorkspaceLeaf, log: LogService, openTodayFile?: () => void, clearTodayFile?: () => void, openAgenda?: () => void) {
+  constructor(leaf: WorkspaceLeaf, controller: LogController) {
     super(leaf);
-    this.log = log;
-    this.openTodayFile = openTodayFile;
-    this.clearTodayFile = clearTodayFile;
-    this.openAgenda = openAgenda;
+    this.controller = controller;
   }
 
   /** Obsidian: тип view. */
@@ -45,7 +36,7 @@ export class LogView extends ItemView {
 
   /** Obsidian: lifecycle — при открытии view подписываемся на лог и рендерим. */
   async onOpen() {
-    const action = this.addAction("calendar", "Открыть повестку", () => this.openAgenda?.());
+    const action = this.addAction("calendar", "Открыть повестку", () => void this.controller.openAgenda());
     const force = () => {
       try {
         setIcon(action, "calendar");
@@ -55,7 +46,7 @@ export class LogView extends ItemView {
     };
     force();
     requestAnimationFrame(force);
-    this.unsubscribe = this.log.onChange(() => this.render());
+    this.unsubscribe = this.controller.onChange(() => this.render());
     this.render();
   }
 
@@ -74,21 +65,13 @@ export class LogView extends ItemView {
 
     const actions = header.createDiv({ cls: "assistant-log__actions" });
     const openBtn = actions.createEl("button", { text: "Открыть файл" });
-    openBtn.onclick = () => this.openTodayFile?.();
+    openBtn.onclick = () => void this.controller.openTodayFile();
 
     const clearBtn = actions.createEl("button", { text: "Очистить лог" });
-    clearBtn.onclick = async () => {
-      // UX: одна кнопка очищает и панель, и файл (чтобы "лог как есть" был консистентным).
-      this.log.clear();
-      try {
-        await this.clearTodayFile?.();
-      } catch {
-        // ignore
-      }
-    };
+    clearBtn.onclick = () => void this.controller.clearAll();
 
     const list = el.createDiv({ cls: "assistant-log__list" });
-    const items = this.log.list();
+    const items = this.controller.list();
     if (items.length === 0) {
       list.createDiv({ text: "Пока пусто.", cls: "assistant-log__empty" });
       return;

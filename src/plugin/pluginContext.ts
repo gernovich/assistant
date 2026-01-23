@@ -1,7 +1,6 @@
 import type { App } from "obsidian";
 import type { AssistantSettings, Event } from "../types";
 import { CalendarService } from "../calendar/calendarService";
-import { createDefaultCalendarProviderRegistry } from "../calendar/providers/calendarProviderRegistry";
 import { EventNoteService } from "../calendar/eventNoteService";
 import { EventNoteIndexCache } from "../calendar/store/eventNoteIndexCache";
 import { CalendarEventCache } from "../calendar/store/calendarEventCache";
@@ -15,6 +14,9 @@ import { ProtocolNoteService } from "../protocols/protocolNoteService";
 import { RecordingService } from "../recording/recordingService";
 import { SyncService } from "../sync/syncService";
 import { BaseWorkspaceService } from "../base/baseWorkspaceService";
+import type { DependencyContainer } from "tsyringe";
+import { createAssistantContainer } from "./di/assistantContainer";
+import type { MutableRef } from "../shared/mutableRef";
 
 export type PluginContextPaths = {
   logsDirPath: string;
@@ -38,6 +40,9 @@ export type PluginContextActions = {
  * - упростить дальнейшее выделение Application/Infrastructure границ
  */
 export type PluginContext = {
+  /** Tsyringe DI container (child container), как единая точка wiring для runtime. */
+  container: DependencyContainer;
+
   logFileWriter: LogFileWriter;
   logService: LogService;
 
@@ -64,17 +69,35 @@ export function createPluginContext(params: {
   actions: PluginContextActions;
   version?: string;
 }): PluginContext {
-  const { app, settings, paths, actions } = params;
+  const { app, paths, actions } = params;
+
+  const settingsRef: MutableRef<AssistantSettings> = {
+    get: () => params.settings,
+    set: (next) => {
+      params.settings = next;
+    },
+  };
+
+  const container = createAssistantContainer({
+    app,
+    settingsRef,
+    paths,
+    actions,
+    version: params.version,
+  });
 
   const logFileWriter = new LogFileWriter({
     app,
     logsDirPath: paths.logsDirPath,
-    retentionDays: settings.log.retentionDays,
+    retentionDays: settingsRef.get().log.retentionDays,
   });
 
-  const logService = new LogService(settings.log.maxEntries, (entry) => {
+  const logService = new LogService(settingsRef.get().log.maxEntries, (entry) => {
     logFileWriter.enqueue(entry);
   });
+
+  // Важно: некоторые зависимости (RecordingUseCase/Facade/Service) резолвятся из container и ожидают logService.
+  container.register<LogService>("assistant.logService", { useValue: logService });
 
   // Маркер, чтобы по логу было видно, что плагин реально перезагрузился после install:obsidian.
   logService.info("Ассистент: инициализация плагина", {
@@ -82,45 +105,22 @@ export function createPluginContext(params: {
     ts: new Date().toISOString(),
   });
 
-  const calendarService = new CalendarService(settings, createDefaultCalendarProviderRegistry(settings));
+  const calendarService = container.resolve(CalendarService);
+  const eventNoteIndexCache = container.resolve(EventNoteIndexCache);
+  const eventNoteService = container.resolve(EventNoteService);
+  const protocolNoteService = container.resolve(ProtocolNoteService);
+  const personNoteService = container.resolve(PersonNoteService);
+  const projectNoteService = container.resolve(ProjectNoteService);
+  const baseWorkspaceService = container.resolve(BaseWorkspaceService);
+  const calendarEventCache = container.resolve(CalendarEventCache);
+  const outboxService = container.resolve(OutboxService);
+  const notificationScheduler = container.resolve(NotificationScheduler);
 
-  const eventNoteIndexCache = new EventNoteIndexCache({
-    filePath: paths.eventNoteIndexCacheFilePath,
-    logService: () => logService,
-  });
-
-  const eventNoteService = new EventNoteService(app, settings.folders.calendarEvents, eventNoteIndexCache);
-  const protocolNoteService = new ProtocolNoteService(app, settings.folders.protocols);
-  const personNoteService = new PersonNoteService(app, settings.folders.people);
-  const projectNoteService = new ProjectNoteService(app, settings.folders.projects);
-
-  const baseWorkspaceService = new BaseWorkspaceService(app, {
-    meetingsDir: settings.folders.calendarEvents,
-    protocolsDir: settings.folders.protocols,
-    peopleDir: settings.folders.people,
-    projectsDir: settings.folders.projects,
-  });
-
-  const calendarEventCache = new CalendarEventCache({
-    filePath: paths.calendarCacheFilePath,
-    logService: () => logService,
-  });
-
-  const outboxService = new OutboxService({
-    filePath: paths.outboxFilePath,
-    logService: () => logService,
-  });
-
-  const notificationScheduler = new NotificationScheduler(settings, (msg) => logService.info(msg), {
-    createProtocol: (ev) => actions.createProtocol(ev) as Promise<any>,
-    startRecording: (ev) => actions.startRecording(ev) as Promise<any>,
-    meetingCancelled: (ev) => actions.meetingCancelled(ev) as Promise<any>,
-  });
-
-  const recordingService = new RecordingService(app, settings, logService);
-  const syncService = new SyncService(calendarService, eventNoteService, notificationScheduler, logService, personNoteService);
+  const recordingService = container.resolve(RecordingService);
+  const syncService = container.resolve(SyncService);
 
   async function applySettings(next: AssistantSettings): Promise<void> {
+    settingsRef.set(next);
     logService.setMaxEntries(next.log.maxEntries);
     await logFileWriter.setRetentionDays(next.log.retentionDays);
 
@@ -142,6 +142,7 @@ export function createPluginContext(params: {
   }
 
   return {
+    container,
     logFileWriter,
     logService,
     calendarService,

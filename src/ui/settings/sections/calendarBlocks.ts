@@ -1,7 +1,7 @@
 import { Setting } from "obsidian";
 import type AssistantPlugin from "../../../../main";
 import type { CalendarConfig } from "../../../types";
-import { createSettingsNotice, newId } from "../helpers";
+import { createSettingsNotice } from "../helpers";
 
 /**
  * Отрисовать один блок календаря (ICS/CalDAV).
@@ -19,16 +19,15 @@ export function renderCalendarBlock(params: {
 
   new Setting(containerEl).setName("Включён").addToggle((t) =>
     t.setValue(cal.enabled).onChange(async (v) => {
-      cal.enabled = v;
-      await plugin.saveSettingsAndApply();
+      await plugin.applySettingsCommand({ type: "calendar.update", calendarId: cal.id, patch: { enabled: v } });
     }),
   );
 
   new Setting(containerEl).setName("Имя").addText((t) =>
     t.setValue(cal.name).onChange(async (v) => {
-      cal.name = v.trim() || "Календарь";
-      await plugin.saveSettingsAndApply();
-      calHeader.setText(cal.name);
+      const name = v.trim() || "Календарь";
+      await plugin.applySettingsCommand({ type: "calendar.update", calendarId: cal.id, patch: { name } });
+      calHeader.setText(name);
     }),
   );
 
@@ -39,15 +38,7 @@ export function renderCalendarBlock(params: {
     dd.onChange(async (v) => {
       const next = v as CalendarConfig["type"];
       if (cal.type === next) return;
-      cal.type = next;
-      if (next === "ics_url") {
-        cal.url = cal.url ?? "";
-        cal.caldav = undefined;
-      } else if (next === "caldav") {
-        cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
-        cal.url = undefined;
-      }
-      await plugin.saveSettingsAndApply();
+      await plugin.applySettingsCommand({ type: "calendar.update", calendarId: cal.id, patch: { type: next } });
       params.rerenderPreservingScroll();
     });
   });
@@ -67,8 +58,7 @@ export function renderCalendarBlock(params: {
           .setPlaceholder("https://.../calendar.ics")
           .setValue(cal.url ?? "")
           .onChange(async (v) => {
-            cal.url = v.trim();
-            await plugin.saveSettingsAndApply();
+            await plugin.applySettingsCommand({ type: "calendar.update", calendarId: cal.id, patch: { url: v.trim() } });
           }),
       );
   }
@@ -85,9 +75,11 @@ export function renderCalendarBlock(params: {
         for (const a of accounts) dd.addOption(a.id, a.name);
         dd.setValue(cal.caldav?.accountId ?? "");
         dd.onChange(async (v) => {
-          cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
-          cal.caldav.accountId = v;
-          await plugin.saveSettingsAndApply();
+          await plugin.applySettingsCommand({
+            type: "calendar.update",
+            calendarId: cal.id,
+            patch: { caldav: { accountId: v } },
+          });
           params.rerenderPreservingScroll();
         });
       });
@@ -127,7 +119,7 @@ export function renderCalendarBlock(params: {
           .setDesc("Рекомендуется для Google. Нажмите авторизацию, чтобы получить refresh‑токен.")
           .addButton((b) =>
             b.setButtonText("Авторизоваться").onClick(async () => {
-              await plugin.authorizeGoogleCaldav(selectedAcc.id);
+              await plugin.caldavAccounts.authorizeGoogle(selectedAcc.id);
               params.rerenderPreservingScroll();
             }),
           );
@@ -147,9 +139,11 @@ export function renderCalendarBlock(params: {
           .setPlaceholder("https://.../")
           .setValue(cal.caldav?.calendarUrl ?? "")
           .onChange(async (v) => {
-            cal.caldav = cal.caldav ?? { accountId: "", calendarUrl: "" };
-            cal.caldav.calendarUrl = v.trim();
-            await plugin.saveSettingsAndApply();
+            await plugin.applySettingsCommand({
+              type: "calendar.update",
+              calendarId: cal.id,
+              patch: { caldav: { calendarUrl: v.trim() } },
+            });
           }),
       );
 
@@ -162,7 +156,7 @@ export function renderCalendarBlock(params: {
     .setDesc("Принудительно обновить только этот календарь.")
     .addButton((b) =>
       b.setButtonText("Обновить").onClick(async () => {
-        await plugin.refreshCalendar(cal.id);
+        await plugin.settingsOps.refreshCalendar(cal.id);
       }),
     );
 
@@ -171,20 +165,8 @@ export function renderCalendarBlock(params: {
       .setButtonText("Удалить")
       .setWarning()
       .onClick(async () => {
-        plugin.settings.calendars = plugin.settings.calendars.filter((c) => c.id !== cal.id);
-        await plugin.saveSettingsAndApply();
+        await plugin.applySettingsCommand({ type: "calendar.remove", calendarId: cal.id });
         params.rerenderPreservingScroll();
       }),
   );
-}
-
-/** Создать новый календарь по умолчанию (ICS URL). */
-export function makeDefaultCalendar(): CalendarConfig {
-  return {
-    id: newId(),
-    name: "Календарь",
-    type: "ics_url",
-    enabled: true,
-    url: "",
-  };
 }

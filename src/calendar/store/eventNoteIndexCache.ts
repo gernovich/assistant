@@ -45,7 +45,7 @@ export class EventNoteIndexCache {
     if (normalizePath(snap.eventsDir) !== normalizePath(eventsDir)) return out;
 
     const dirPrefix = normalizePath(eventsDir) + "/";
-    for (const [eventKey, filePath] of Object.entries(snap.byEventKey ?? {})) {
+    for (const [eventKey, filePath] of Object.entries(snap.byEventKey)) {
       if (!eventKey || !filePath) continue;
       const af = vault.getAbstractFileByPath(filePath);
       if (!af || !isTFile(af)) continue;
@@ -91,7 +91,7 @@ export class EventNoteIndexCache {
       await fs.mkdir(path.dirname(this.filePath), { recursive: true });
       await fs.writeFile(this.filePath, JSON.stringify(snap), "utf8");
     } catch (e) {
-      const msg = redactSecretsInStringForLog(String((e as unknown) ?? "неизвестная ошибка"));
+      const msg = redactSecretsInStringForLog(String(e));
       this.getLogService?.().warn("EventNoteIndexCache: не удалось сохранить индекс", { error: msg });
     }
   }

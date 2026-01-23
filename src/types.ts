@@ -60,6 +60,8 @@ export interface CalendarConfig {
   type: CalendarSourceType;
   /** Включён ли календарь в refresh/sync. */
   enabled: boolean;
+  /** Цвет календаря (в основном для CalDAV discovery; используется как fallback для `Event.color`, если у события нет COLOR). */
+  color?: string;
   /** URL ICS, если `type = "ics_url"`. */
   url?: string;
   /** Настройки CalDAV, если `type = "caldav"`. */
@@ -165,13 +167,15 @@ export interface AssistantSettings {
     /**
      * Механизм записи звука.
      *
-     * - `electron_desktop_capturer` (MVP, сейчас): пишем через `MediaRecorder` + (попытка) `desktopCapturer` для системного звука.
-     *   Плюсы: не требует внешних бинарников. Минусы: модель безопасности Chromium (может быть системный выбор окна/экрана).
+     * - `electron_media_devices` (MVP, сейчас): пишем микрофон через `navigator.mediaDevices.getUserMedia` + `MediaRecorder`.
+     *   Плюсы: не требует внешних бинарников. Минусы: ограничения Chromium/Electron.
      *
-     * - `linux_native` (план): запись через системные утилиты (например `ffmpeg`, PipeWire/Pulse) без участия Chromium.
+     * - `linux_native`: запись через системные утилиты (например `ffmpeg`, PipeWire/Pulse) без участия Chromium.
      *   Плюсы: больше контроля над источниками и миксом. Минусы: нужны зависимости в системе.
+     *
+     * Совместимость: старое значение `electron_desktop_capturer` при чтении настроек маппится в `electron_media_devices`.
      */
-    audioBackend: "electron_desktop_capturer" | "linux_native";
+    audioBackend: "electron_media_devices" | "linux_native";
     /**
      * Пост-обработка аудио для Linux Native (ffmpeg filtergraph).
      *

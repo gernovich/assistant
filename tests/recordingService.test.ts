@@ -1,5 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { RecordingService } from "../src/recording/recordingService";
+import { RecordingVizHub } from "../src/recording/recordingVizHub";
+import { RecordingUseCase } from "../src/application/recording/recordingUseCase";
+import { createUseCaseRecordingBackends } from "../src/recording/backends/useCaseBackends";
+import { ProtocolAttachmentService } from "../src/recording/protocolAttachmentService";
+import { nextChunkInMsPolicy, shouldRotateChunkPolicy } from "../src/domain/policies/recordingChunkTiming";
+import { pickMediaRecorderMimeType } from "../src/domain/policies/mediaRecorderMimeType";
+import { ensureFolder } from "../src/vault/ensureFolder";
+import { RecordingFacade } from "../src/application/recording/recordingFacade";
 
 function makeFakeVault() {
   const folders = new Set<string>();
@@ -128,7 +136,7 @@ describe("RecordingService flushes chunks on pause/stop", () => {
     const app = { vault } as any;
     installMediaMocks();
 
-    const svc = new RecordingService(app, { recording: { chunkMinutes: 5 } } as any);
+    const svc = makeRecordingService(app, { recording: { chunkMinutes: 5 } } as any);
     await svc.start({ eventKey: "cal:ev" });
     await svc.pause();
 
@@ -143,7 +151,7 @@ describe("RecordingService flushes chunks on pause/stop", () => {
     const app = { vault } as any;
     installMediaMocks();
 
-    const svc = new RecordingService(app, { recording: { chunkMinutes: 5 } } as any);
+    const svc = makeRecordingService(app, { recording: { chunkMinutes: 5 } } as any);
     await svc.start({ eventKey: "cal:ev" });
     await svc.pause(); // завершили 1-й файл
     svc.resume(); // начали новую запись (новый файл)
@@ -163,7 +171,7 @@ describe("RecordingService flushes chunks on pause/stop", () => {
       ["---", "assistant_type: protocol", "protocol_id: x", "files: []", "---", "", "## P"].join("\n"),
     );
 
-    const svc = new RecordingService(app, { recording: { chunkMinutes: 5 } } as any);
+    const svc = makeRecordingService(app, { recording: { chunkMinutes: 5 } } as any);
     await svc.start({ eventKey: "cal:ev", protocolFilePath: protocolPath });
     await svc.pause(); // создаст минимум 1 бинарник и обновит протокол
 
@@ -176,7 +184,7 @@ describe("RecordingService flushes chunks on pause/stop", () => {
     const app = { vault } as any;
     installMediaMocks();
 
-    const svc = new RecordingService(app, { recording: { chunkMinutes: 5 } } as any);
+    const svc = makeRecordingService(app, { recording: { chunkMinutes: 5 } } as any);
     await svc.start({ eventKey: "cal:ev" });
     await svc.stop();
 
@@ -184,3 +192,39 @@ describe("RecordingService flushes chunks on pause/stop", () => {
   });
 });
 
+function makeRecordingService(app: any, settings: any): RecordingService {
+  const vizHub = new RecordingVizHub();
+  const protocolAttachmentService = new ProtocolAttachmentService(app);
+
+  function pickMimeTypePref(): string {
+    return pickMediaRecorderMimeType({
+      isSupported: (t) => typeof MediaRecorder !== "undefined" && Boolean((MediaRecorder as any).isTypeSupported?.(t)),
+    });
+  }
+
+  const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+  const recordingUseCase = new RecordingUseCase({
+    nowMs: () => Date.now(),
+    setInterval: (cb, ms) => window.setInterval(cb, ms),
+    clearInterval: (id) => window.clearInterval(id),
+    shouldRotateChunk: shouldRotateChunkPolicy,
+    nextChunkInMs: nextChunkInMsPolicy,
+    ensureRecordingsDir: async (dir) => {
+      await ensureFolder(app.vault as any, dir);
+    },
+    appendRecordingFileToProtocol: async (protocolFilePath, recordingFilePath) => {
+      if (!protocolFilePath) return;
+      await protocolAttachmentService.appendRecordingFile(protocolFilePath, recordingFilePath);
+    },
+    backends: createUseCaseRecordingBackends({
+      app,
+      getSettings: () => settings,
+      getOnViz: () => vizHub.get(),
+      log,
+    }),
+  });
+
+  const facade = new RecordingFacade({ useCase: recordingUseCase, pickMimeTypePref, log }, settings);
+  return new RecordingService({ facade, viz: vizHub });
+}

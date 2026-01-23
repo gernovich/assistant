@@ -50,7 +50,7 @@ export async function runGoogleLoopbackOAuth(params: {
       });
       const refreshToken = String(tokens.refresh_token ?? "");
       if (!refreshToken) {
-        throw new Error(
+        return await Promise.reject(
           "Google OAuth: refresh_token не получен. " +
             "Обычно помогает: удалить доступ приложения в Google Account → Security → Third-party access, и авторизоваться заново.",
         );
@@ -107,7 +107,7 @@ async function exchangeGoogleCodeForTokens(params: {
       const json = JSON.parse(raw) as { error?: string; error_description?: string };
       if (res.status === 401 && json?.error === "invalid_client") {
         const desc = json?.error_description ? ` (${json.error_description})` : "";
-        throw new Error(
+        return await Promise.reject(
           "Google OAuth: обмен кода на токены не удался: invalid_client" +
             desc +
             ". Проверьте clientId/clientSecret. " +
@@ -117,14 +117,14 @@ async function exchangeGoogleCodeForTokens(params: {
     } catch {
       // ignore JSON parse errors
     }
-    throw new Error(`Google OAuth: обмен кода на токены не удался: HTTP ${res.status}: ${reason}`);
+    return await Promise.reject(`Google OAuth: обмен кода на токены не удался: HTTP ${res.status}: ${reason}`);
   }
 
   try {
     // requestUrl иногда уже парсит json, но нам важно единообразие/детерминизм.
     return JSON.parse(res.text ?? "{}") as Record<string, unknown>;
   } catch (e) {
-    throw new Error(`Google OAuth: обмен кода на токены вернул некорректный JSON: ${(res.text ?? "").slice(0, 200)}`);
+    return await Promise.reject(`Google OAuth: обмен кода на токены вернул некорректный JSON: ${(res.text ?? "").slice(0, 200)}`);
   }
 }
 
@@ -187,14 +187,14 @@ async function startLoopbackServer(params: {
         lastError = error;
         res.writeHead(302, { location: "/error", "cache-control": "no-store" });
         res.end();
-        reject(new Error(`Google OAuth: ошибка: ${error}`));
+        reject(`Google OAuth: ошибка: ${error}`);
         return;
       }
       if (!code || !state || state !== params.state) {
         lastError = "Некорректный callback (state/code)";
         res.writeHead(302, { location: "/error", "cache-control": "no-store" });
         res.end();
-        reject(new Error("Google OAuth: некорректный callback state/code"));
+        reject("Google OAuth: некорректный callback state/code");
         return;
       }
 
@@ -303,7 +303,7 @@ function renderOAuthResultPage(params: { kind: "success" } | { kind: "error"; de
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = window.setTimeout(() => reject(new Error("OAuth timeout")), ms);
+    const t = window.setTimeout(() => reject("OAuth timeout"), ms);
     p.then(
       (v) => {
         window.clearTimeout(t);

@@ -3,6 +3,8 @@ import { CalendarEventStore } from "./store/calendarEventStore";
 import type { RefreshResult } from "./store/calendarEventStore";
 import { MS_PER_HOUR, NOTIFICATIONS_HORIZON_HOURS } from "./constants";
 import type { CalendarProviderRegistry } from "./providers/calendarProviderRegistry";
+import { AppError, toAppErrorDto } from "../shared/appError";
+import { APP_ERROR } from "../shared/appErrorCodes";
 
 type Listener = () => void;
 
@@ -86,11 +88,19 @@ export class CalendarService {
    */
   async setMyPartstat(ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> {
     const cal = this.settings.calendars.find((c) => c.id === ev.calendar.id);
-    if (!cal) throw new Error("Календарь не найден");
-    if (!cal.enabled) throw new Error("Календарь отключён");
-    if (cal.type !== "caldav") throw new Error("Этот календарь read-only (ICS URL не поддерживает запись)");
-    if (!this.providers.rsvpWriter?.setMyPartstat) throw new Error("Write-back недоступен (нет CalDAV провайдера)");
-    await this.providers.rsvpWriter.setMyPartstat(cal, ev, partstat);
+    if (!cal) return await Promise.reject(new AppError({ code: APP_ERROR.NOT_FOUND, message: "Ассистент: календарь не найден" }));
+    if (!cal.enabled) return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: календарь отключён" }));
+    if (cal.type !== "caldav")
+      return await Promise.reject(new AppError({ code: APP_ERROR.READ_ONLY, message: "Ассистент: этот календарь read-only (ICS URL не поддерживает запись)" }));
+    if (!this.providers.rsvpWriter?.setMyPartstat)
+      return await Promise.reject(new AppError({ code: APP_ERROR.INTERNAL, message: "Ассистент: write-back недоступен (нет CalDAV провайдера)" }));
+    try {
+      await this.providers.rsvpWriter.setMyPartstat(cal, ev, partstat);
+    } catch (e) {
+      // Нормализуем диагностику write-back для UI/use-cases
+      const dto = toAppErrorDto(e, { code: APP_ERROR.CALDAV_WRITEBACK, message: "Ассистент: не удалось изменить статус в календаре" });
+      return await Promise.reject(new AppError(dto));
+    }
     await this.refreshOneAndMerge(cal.id);
   }
 

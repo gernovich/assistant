@@ -9,16 +9,22 @@
     "install:obsidian": "node scripts/install-obsidian.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "mkdir -p coverage/.tmp && vitest run --coverage",
     "format": "node scripts/format.mjs --write",
     "format:check": "node scripts/format.mjs --check",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "version": "node version-bump.mjs && git add resources/manifest.json versions.json"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
     "@vitest/coverage-v8": "^2.1.9",
     "esbuild": "^0.20.2",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
     "jsdom": "^24.0.0",
     "obsidian": "^1.5.12",
     "prettier": "^3.3.3",
@@ -27,6 +33,9 @@
   },
   "dependencies": {
     "fix-webm-duration": "^1.0.6",
-    "tsdav": "^2.1.6"
+    "reflect-metadata": "^0.2.2",
+    "tsdav": "^2.1.6",
+    "tsyringe": "^4.10.0",
+    "zod": "^3.25.0"
   }
 }
