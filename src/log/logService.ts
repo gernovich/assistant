@@ -17,6 +17,10 @@ type Listener = () => void;
 
 import { redactSecretsInStringForLog, redactUrlForLog } from "./redact";
 
+const MAX_STRING_CHARS = 4000;
+const MAX_ARRAY_ITEMS = 200;
+const MAX_OBJECT_KEYS = 200;
+
 /**
  * In-memory лог сервиса.
  *
@@ -52,6 +56,26 @@ export class LogService {
   /** Получить копию текущих записей. */
   list(): LogEntry[] {
     return this.entries.slice();
+  }
+
+  /**
+   * Создать “логгер в скоупе” (для единообразия сообщений и контекста).
+   *
+   * Пример:
+   *   const log = base.scoped("Календарь", { opId });
+   *   log.info("refresh: старт", { enabled: 2 });
+   */
+  scoped(scope: string, fixed?: Record<string, unknown>) {
+    const prefix = String(scope ?? "").trim();
+    const merge = (data?: Record<string, unknown>) => {
+      if (!fixed && !data) return undefined;
+      return { ...(fixed ?? {}), ...(data ?? {}) };
+    };
+    return {
+      info: (message: string, data?: Record<string, unknown>) => this.info(prefix ? `${prefix}: ${message}` : message, merge(data)),
+      warn: (message: string, data?: Record<string, unknown>) => this.warn(prefix ? `${prefix}: ${message}` : message, merge(data)),
+      error: (message: string, data?: Record<string, unknown>) => this.error(prefix ? `${prefix}: ${message}` : message, merge(data)),
+    };
   }
 
   /** Записать info. */
@@ -106,7 +130,9 @@ function sanitizeString(s: string): string {
   // Если это URL — сначала применим URL-aware редактирование, затем общий редакт строк.
   const maybeUrl = raw.startsWith("http://") || raw.startsWith("https://");
   const step1 = maybeUrl ? redactUrlForLog(raw) : raw;
-  return redactSecretsInStringForLog(step1);
+  const out = redactSecretsInStringForLog(step1);
+  if (out.length > MAX_STRING_CHARS) return out.slice(0, MAX_STRING_CHARS) + "...[truncated]";
+  return out;
 }
 
 function sanitizeUnknown(v: unknown, depth: number): unknown {
@@ -116,17 +142,29 @@ function sanitizeUnknown(v: unknown, depth: number): unknown {
   if (typeof v === "string") return sanitizeString(v);
   if (typeof v === "number" || typeof v === "boolean") return v;
 
+  // Важно: Error — ключевой тип для диагностики. Достаём stack/cause, но санитизируем строки.
+  if (v instanceof Error) {
+    const anyErr = v as any;
+    return {
+      name: sanitizeString(v.name ?? "Error"),
+      message: sanitizeString(v.message ?? ""),
+      stack: v.stack ? sanitizeString(v.stack) : undefined,
+      cause: anyErr?.cause != null ? sanitizeUnknown(anyErr.cause, depth + 1) : undefined,
+    };
+  }
+
   if (Array.isArray(v)) {
     // Ограничиваем размер, чтобы случайно не раздувать логи огромными объектами.
-    const out = v.slice(0, 200).map((x) => sanitizeUnknown(x, depth + 1));
-    if (v.length > 200) out.push("[truncated]");
+    const out = v.slice(0, MAX_ARRAY_ITEMS).map((x) => sanitizeUnknown(x, depth + 1));
+    if (v.length > MAX_ARRAY_ITEMS) out.push("[truncated]");
     return out;
   }
 
   if (typeof v === "object") {
     const obj = v as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const k of Object.keys(obj)) {
+    const keys = Object.keys(obj);
+    for (const k of keys.slice(0, MAX_OBJECT_KEYS)) {
       const val = obj[k];
       // Если ключ явно чувствительный — значение не пишем в логи вообще.
       if (typeof val === "string" && isSensitiveKey(k)) {
@@ -146,6 +184,7 @@ function sanitizeUnknown(v: unknown, depth: number): unknown {
       }
       out[k] = sanitizeUnknown(val, depth + 1);
     }
+    if (keys.length > MAX_OBJECT_KEYS) out["[truncated]"] = `${keys.length - MAX_OBJECT_KEYS} keys`;
     return out;
   }
 

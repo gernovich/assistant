@@ -34,4 +34,3 @@ export class ProtocolIndex {
     return this.entityIndex;
   }
 }
-

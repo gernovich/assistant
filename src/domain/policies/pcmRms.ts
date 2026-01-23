@@ -15,4 +15,3 @@ export function rms01FromS16leMonoFrame(frame: Buffer, samples: number): number 
   }
   return Math.sqrt(sumSq / n);
 }
-

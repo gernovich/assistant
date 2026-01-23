@@ -20,4 +20,3 @@ export function recordingChunkFileName(params: { prefix: string; iso: string; ex
   const ts = isoTimestampForFileName(params.iso);
   return `${prefix}-${ts}.${ext}`;
 }
-

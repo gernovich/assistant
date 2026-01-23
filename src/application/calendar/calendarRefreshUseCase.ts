@@ -10,7 +10,9 @@ type Logger = {
 export type CalendarRefreshUseCaseDeps = {
   getSettings: () => AssistantSettings;
   refreshCalendarsAndSync: (settings: AssistantSettings) => Promise<void>;
-  refreshOneAndMerge: (calendarId: string) => Promise<{ errors: Array<{ calendarId: string; name: string; error: string }> }>;
+  refreshOneAndMerge: (
+    calendarId: string,
+  ) => Promise<{ errors: Array<{ calendarId: string; name: string; error: string; cause?: unknown }> }>;
   syncFromCurrentEvents: (settings: AssistantSettings) => Promise<void>;
   notice: (message: string) => void;
   log: Logger;
@@ -36,11 +38,13 @@ export class CalendarRefreshUseCase {
     const r = await this.refreshAllResult();
     if (!r.ok) {
       this.deps.notice(r.error.message);
-      this.deps.log.error("Обновление календарей: ошибка", { code: r.error.code, cause: r.error.cause });
+      this.deps.log.error("Календарь: refreshAll: ошибка", { code: r.error.code, error: r.error.cause });
     }
   }
 
-  async refreshOneResult(calendarId: string): Promise<Result<{ errors: Array<{ calendarId: string; name: string; error: string }> }>> {
+  async refreshOneResult(
+    calendarId: string,
+  ): Promise<Result<{ errors: Array<{ calendarId: string; name: string; error: string; cause?: unknown }> }>> {
     try {
       const settings = this.deps.getSettings();
       const { errors } = await this.deps.refreshOneAndMerge(calendarId);
@@ -60,14 +64,13 @@ export class CalendarRefreshUseCase {
     const r = await this.refreshOneResult(calendarId);
     if (!r.ok) {
       this.deps.notice(r.error.message);
-      this.deps.log.error("Календарь: обновление (один): ошибка", { code: r.error.code, cause: r.error.cause, calendarId });
+      this.deps.log.error("Календарь: refreshOne: ошибка", { code: r.error.code, error: r.error.cause, calendarId });
       return;
     }
 
     for (const e of r.value.errors) {
-      this.deps.log.warn("Календарь: обновление (один): ошибка", { calendarId: e.calendarId, name: e.name, error: e.error });
+      this.deps.log.warn("Календарь: refreshOne: ошибка", { calendarId: e.calendarId, name: e.name, error: e.error, cause: e.cause });
     }
-    if (r.value.errors.length === 0) this.deps.log.info("Календарь: обновление (один): ok", { calendarId });
+    if (r.value.errors.length === 0) this.deps.log.info("Календарь: refreshOne: ok", { calendarId });
   }
 }
-

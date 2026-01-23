@@ -12,4 +12,3 @@ export function rsvpStatusBadgeRu(status: RsvpStatus | undefined): string {
   if (status === "needs_action") return " • нет ответа";
   return "";
 }
-

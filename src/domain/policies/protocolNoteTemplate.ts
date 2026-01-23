@@ -151,4 +151,3 @@ export function renderEmptyProtocolMarkdown(params: {
     "",
   ].join("\n");
 }
-

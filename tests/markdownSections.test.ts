@@ -160,15 +160,9 @@ describe("domain/policies/assistantMarkdownSections", () => {
   });
 
   it("mergePreservingAssistantSections не падает, если в regenerated нет маркеров", () => {
-    const existing = [
-      "---",
-      "assistant_type: calendar_event",
-      "custom_field: accepted",
-      "---",
-      "",
-      "<!-- ASSISTANT:NOTES -->",
-      "- x",
-    ].join("\n");
+    const existing = ["---", "assistant_type: calendar_event", "custom_field: accepted", "---", "", "<!-- ASSISTANT:NOTES -->", "- x"].join(
+      "\n",
+    );
     const regenerated = ["---", "assistant_type: calendar_event", "---", "", "body"].join("\n");
     const out = mergePreservingAssistantSections(existing, regenerated, { keepFrontmatterKeys: ["custom_field"] });
     expect(out).toContain("custom_field: accepted");

@@ -3,7 +3,10 @@
  *
  * Чистая функция: возвращает строки фильтров, без выполнения команд.
  */
-export function linuxNativeFilterGraphPolicy(processing: "none" | "normalize" | "voice", wantVizPcm: boolean): {
+export function linuxNativeFilterGraphPolicy(
+  processing: "none" | "normalize" | "voice",
+  wantVizPcm: boolean,
+): {
   withMonitor: string;
   micOnly: string;
   withMonitorViz?: string;
@@ -92,4 +95,3 @@ export function linuxNativeFilterGraphPolicy(processing: "none" | "normalize" | 
     micOnlyViz: `[0:a]${prep},${postNormalize}[a];[a]asplit=2[out][v];[v]${vizPcm}[viz]`,
   };
 }
-

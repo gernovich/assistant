@@ -55,4 +55,3 @@ describe("ProtocolIndex", () => {
     expect(out[0]?.label).toBe("a");
   });
 });
-

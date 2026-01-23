@@ -18,12 +18,7 @@ export type ReminderWindowHtmlParams = {
  * Сгенерировать HTML для окна напоминания (data: URL).
  */
 export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
-  const esc = (s: string) =>
-    String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+  const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   const minutesBefore = Number.isFinite(Number(p.minutesBefore)) ? Math.max(0, Number(p.minutesBefore)) : 0;
   const hostId = Number.isFinite(Number(p.hostWebContentsId)) ? Math.floor(Number(p.hostWebContentsId)) : 0;
@@ -244,4 +239,3 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
 </body>
 </html>`;
 }
-

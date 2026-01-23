@@ -17,4 +17,3 @@ export function makeCalendarStub(params: { id: CalendarId; name?: string; type?:
       : { id, name, type: "ics_url", enabled: true, url: "" };
   return { id, name, type, config };
 }
-

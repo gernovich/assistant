@@ -48,9 +48,7 @@ export class CalendarEventStore {
    *
    * Важно: это “сырой” снимок событий (с Date внутри) — сериализацией занимается отдельный слой (CalendarEventCache).
    */
-  exportLastGoodSnapshot(params?: {
-    enabledCalendarIds?: CalendarId[];
-  }): Record<CalendarId, { fetchedAt: number; events: Event[] }> {
+  exportLastGoodSnapshot(params?: { enabledCalendarIds?: CalendarId[] }): Record<CalendarId, { fetchedAt: number; events: Event[] }> {
     const enabled = params?.enabledCalendarIds ? new Set(params.enabledCalendarIds) : null;
     const out: Record<CalendarId, { fetchedAt: number; events: Event[] }> = {};
     for (const [calendarId, v] of this.lastGoodByCalendarId.entries()) {
@@ -65,10 +63,7 @@ export class CalendarEventStore {
    *
    * Семантика: данные из кэша считаем “stale”, пока не будет успешного refresh.
    */
-  seedFromCache(params: {
-    enabledCalendarIds: CalendarId[];
-    lastGood: Record<CalendarId, { fetchedAt: number; events: Event[] }>;
-  }): void {
+  seedFromCache(params: { enabledCalendarIds: CalendarId[]; lastGood: Record<CalendarId, { fetchedAt: number; events: Event[] }> }): void {
     this.lastGoodByCalendarId.clear();
     this.perCalendar = {};
 
@@ -175,8 +170,7 @@ export class CalendarEventStore {
   applyBatch(params: {
     enabledCalendarIds: CalendarId[];
     results: Array<
-      | { calendarId: CalendarId; ok: true; fetchedAt: number; events: Event[] }
-      | { calendarId: CalendarId; ok: false; error: string }
+      { calendarId: CalendarId; ok: true; fetchedAt: number; events: Event[] } | { calendarId: CalendarId; ok: false; error: string }
     >;
   }) {
     const enabledSet = new Set(params.enabledCalendarIds);

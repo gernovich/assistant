@@ -7,4 +7,3 @@ export function trimForLogPolicy(value: unknown, maxChars = 1200): string {
   if (text.length <= max) return text;
   return text.slice(0, max) + "…(truncated)";
 }
-

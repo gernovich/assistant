@@ -9,6 +9,7 @@ import type { AgendaController } from "../application/agenda/agendaController";
 export const AGENDA_VIEW_TYPE = "assistant-agenda";
 const RU = "ru-RU";
 const HOUR_HEIGHT_PX = 48;
+const MS_PER_DAY = 24 * 60 * 60_000;
 
 /**
  * View “Повестка” — дневная сетка встреч + контекстные действия.
@@ -24,11 +25,7 @@ export class AgendaView extends ItemView {
   /** Оптимистичное значение status, чтобы UI обновлялся сразу после клика. */
   private optimisticPartstatByEventKey = new Map<string, Event["status"]>();
 
-  constructor(
-    leaf: WorkspaceLeaf,
-    settings: AssistantSettings,
-    controller: AgendaController,
-  ) {
+  constructor(leaf: WorkspaceLeaf, settings: AssistantSettings, controller: AgendaController) {
     super(leaf);
     this.settings = settings;
     this.controller = controller;
@@ -193,8 +190,22 @@ export class AgendaView extends ItemView {
     }
 
     if (timed.length === 0) {
-      const empty = timeline.createDiv({ cls: "assistant-agenda__empty-overlay" });
-      empty.textContent = "Нет встреч на этот день.";
+      const emptyContainer = timeline.createDiv({ cls: "assistant-agenda__empty-container" });
+      const empty = emptyContainer.createDiv({ cls: "assistant-agenda__empty-overlay" });
+      empty.textContent = allDay.length > 0 ? "Нет встреч с временем на этот день." : "Нет встреч на этот день.";
+
+      const next = this.controller.getNextEventAfterNow();
+      if (next) {
+        const nextBox = emptyContainer.createDiv({ cls: "assistant-agenda__empty-next" });
+        const nextWhen = `${next.start.toLocaleString(RU, { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
+        nextBox.createDiv({ text: `Ближайшая: ${nextWhen} — ${next.summary || "(без названия)"}` });
+
+        const jump = nextBox.createEl("button", { text: "Перейти к ближайшей", cls: "assistant-agenda__empty-jump" });
+        jump.onclick = () => {
+          this.dayOffset = diffDaysLocalDay(new Date(), next.start);
+          this.render();
+        };
+      }
       return;
     }
 
@@ -344,6 +355,12 @@ export class AgendaView extends ItemView {
     if (att) parts.push(att);
     return parts.join("\n");
   }
+}
+
+function diffDaysLocalDay(a: Date, b: Date): number {
+  const da = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+  const db = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((db - da) / MS_PER_DAY);
 }
 
 function formatNow(): string {

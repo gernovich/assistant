@@ -6,4 +6,3 @@ describe("domain/policies/escHtml", () => {
     expect(escHtml(`<a&"b">`)).toBe("&lt;a&amp;&quot;b&quot;&gt;");
   });
 });
-

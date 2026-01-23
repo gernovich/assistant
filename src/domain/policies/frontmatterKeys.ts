@@ -66,4 +66,3 @@ export const FM = {
 export function isAssistantEntityType(x: unknown): x is AssistantEntityType {
   return x === "calendar_event" || x === "protocol" || x === "person" || x === "project";
 }
-

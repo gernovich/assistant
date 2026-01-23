@@ -10,4 +10,3 @@ describe("domain/policies/logText", () => {
     expect(trimForLogPolicy("abcd", 3)).toBe("abc…(truncated)");
   });
 });
-

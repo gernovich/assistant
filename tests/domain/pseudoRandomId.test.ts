@@ -6,4 +6,3 @@ describe("domain/policies/pseudoRandomId", () => {
     expect(makePseudoRandomId({ prefix: "p", nowMs: 1000, randomHex: "abc" })).toBe("p-rs-abc");
   });
 });
-

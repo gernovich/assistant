@@ -52,4 +52,3 @@ describe("domain/policies/meetingNoteTemplate", () => {
     expect(md).toContain("<!-- ASSISTANT:PROTOCOLS -->");
   });
 });
-

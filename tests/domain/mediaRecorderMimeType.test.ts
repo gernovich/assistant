@@ -18,4 +18,3 @@ describe("domain/policies/mediaRecorderMimeType", () => {
     expect(picked).toBe("");
   });
 });
-

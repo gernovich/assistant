@@ -99,4 +99,3 @@ export class AuthorizeGoogleCaldavUseCase {
     this.deps.notice("Ассистент: Google OAuth OK");
   }
 }
-

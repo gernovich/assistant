@@ -11,4 +11,3 @@ export function sanitizeFileName(name: string): string {
     .trim();
   return cleaned || "Без названия";
 }
-

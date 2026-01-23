@@ -10,4 +10,3 @@ describe("domain/policies/normalizeEmail", () => {
     expect(normalizeEmail("mailto:User@Example.com")).toBe("user@example.com");
   });
 });
-

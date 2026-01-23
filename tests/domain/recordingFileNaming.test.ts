@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isoTimestampForFileName, recordingChunkFileName, recordingFilePrefixFromEventKey } from "../../src/domain/policies/recordingFileNaming";
+import {
+  isoTimestampForFileName,
+  recordingChunkFileName,
+  recordingFilePrefixFromEventKey,
+} from "../../src/domain/policies/recordingFileNaming";
 
 describe("domain/policies/recordingFileNaming", () => {
   it("recordingFilePrefixFromEventKey sanitizes", () => {
@@ -14,4 +18,3 @@ describe("domain/policies/recordingFileNaming", () => {
     expect(recordingChunkFileName({ prefix: "p", iso: "2026-01-01T00:00:00.000Z", ext: "ogg" })).toBe("p-2026-01-01T00-00-00-000Z.ogg");
   });
 });
-

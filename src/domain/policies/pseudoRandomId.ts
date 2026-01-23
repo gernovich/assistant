@@ -10,4 +10,3 @@ export function makePseudoRandomId(params: { prefix: string; nowMs: number; rand
   const randomHex = String(params.randomHex ?? "").trim();
   return `${prefix}-${nowMs.toString(36)}-${randomHex || "0"}`;
 }
-

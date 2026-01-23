@@ -42,4 +42,3 @@ export class ManualMeetingUseCase {
     await this.deps.meetings.openEvent(ev);
   }
 }
-

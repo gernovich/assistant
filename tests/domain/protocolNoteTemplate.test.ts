@@ -26,4 +26,3 @@ describe("domain/policies/protocolNoteTemplate", () => {
     expect(md).toContain("## Протокол");
   });
 });
-

@@ -73,4 +73,3 @@ export function renderPersonCardMarkdown(params: {
     "",
   ].join("\n");
 }
-

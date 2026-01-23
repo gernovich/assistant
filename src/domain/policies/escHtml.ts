@@ -8,4 +8,3 @@ export function escHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
-

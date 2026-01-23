@@ -41,4 +41,3 @@ export function createDefaultCalendarProviderRegistry(settings: AssistantSetting
     rsvpWriter: caldav as unknown as CalendarRsvpWriter,
   };
 }
-

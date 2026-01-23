@@ -88,4 +88,3 @@ describe("AgendaController", () => {
     expect(actions.debugShowReminder).toHaveBeenCalledWith(ev);
   });
 });
-

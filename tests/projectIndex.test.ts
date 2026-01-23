@@ -37,4 +37,3 @@ describe("ProjectIndex", () => {
     expect(out.map((x) => x.path)).toEqual(["Ассистент/Проекты/b.md", "Ассистент/Проекты/c.md", "Ассистент/Проекты/a.md"]);
   });
 });
-

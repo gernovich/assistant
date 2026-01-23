@@ -99,6 +99,17 @@ export function createPluginContext(params: {
   // Важно: некоторые зависимости (RecordingUseCase/Facade/Service) резолвятся из container и ожидают logService.
   container.register<LogService>("assistant.logService", { useValue: logService });
 
+  // SyncService зависит от assistant.logService, поэтому регистрируем его только после logService.
+  // Также: это должен быть один инстанс на весь runtime (иначе refresh/applySettings расходятся).
+  const syncService = new SyncService(
+    container.resolve(CalendarService),
+    container.resolve(EventNoteService),
+    container.resolve(NotificationScheduler),
+    logService,
+    container.resolve(PersonNoteService),
+  );
+  container.register(SyncService, { useValue: syncService });
+
   // Маркер, чтобы по логу было видно, что плагин реально перезагрузился после install:obsidian.
   logService.info("Ассистент: инициализация плагина", {
     version: params.version ?? "",
@@ -117,7 +128,6 @@ export function createPluginContext(params: {
   const notificationScheduler = container.resolve(NotificationScheduler);
 
   const recordingService = container.resolve(RecordingService);
-  const syncService = container.resolve(SyncService);
 
   async function applySettings(next: AssistantSettings): Promise<void> {
     settingsRef.set(next);
@@ -160,4 +170,3 @@ export function createPluginContext(params: {
     applySettings,
   };
 }
-

@@ -30,31 +30,32 @@ export class SyncService {
 
   /** Полный цикл: refresh календарей → sync заметок → планирование уведомлений. */
   async refreshCalendarsAndSync(settings: AssistantSettings) {
-    this.log.info("Обновление календарей: старт", {
-      enabledCalendars: settings.calendars.filter((c) => c.enabled).length,
+    const opId = Math.random().toString(16).slice(2);
+    const t0 = Date.now();
+    const enabledCalendars = settings.calendars.filter((c) => c.enabled);
+    const log = this.log.scoped("Sync", { opId });
+    log.info("refreshCalendarsAndSync: старт", {
+      enabledCalendars: enabledCalendars.length,
+      enabledCalendarIds: enabledCalendars.map((c) => c.id),
     });
 
     const { errors } = await this.calendarService.refreshAll();
     const rr = this.calendarService.getRefreshResult();
     const events = rr.events;
 
-    for (const e of errors) {
-      this.log.warn("Календарь: ошибка обновления", { calendarId: e.calendarId, name: e.name, error: e.error });
-    }
-
     // Offline-first UX: если календарь не обновился, но у нас есть lastGood — продолжаем показывать кэш.
     // В логе должно быть явно видно, что данные устарели.
     const status = rr.perCalendar;
     const calNameById = new Map(settings.calendars.map((c) => [c.id, c.name]));
+    const staleCalendars: Array<{ calendarId: string; name: string; lastOkAt?: string; error?: string; cause?: unknown }> = [];
     for (const [calendarId, s] of Object.entries(status)) {
       if (s.status !== "stale") continue;
-      const name = calNameById.get(calendarId) ?? "";
-      const lastOk = s.fetchedAt ? new Date(s.fetchedAt).toISOString() : "";
-      this.log.warn("Календарь: обновление не удалось, использую кэш", {
+      staleCalendars.push({
         calendarId,
-        name,
-        lastOkAt: lastOk,
-        error: s.error ?? "",
+        name: calNameById.get(calendarId) ?? "",
+        lastOkAt: s.fetchedAt ? new Date(s.fetchedAt).toISOString() : undefined,
+        error: s.error ?? undefined,
+        cause: errors.find((x) => x.calendarId === calendarId)?.cause,
       });
     }
 
@@ -78,10 +79,46 @@ export class SyncService {
     // Встречи могут быть повторяющимися (RRULE) => в списке могут быть несколько occurrences с одним uid.
     // Для заметок в vault мы держим 1 файл на id (UID), поэтому синкаем только ближайшую upcoming встречу по (calendar.id, id).
     const uniqueForNotes = pickEarliestPerKey(eventsForNotes);
-    await this.eventNoteService.syncEvents(uniqueForNotes);
-    await this.ensurePeopleCardsFromEvents(uniqueForNotes);
-    this.notificationScheduler.schedule(events);
-    this.log.info("Обновление календарей: ok", { events: events.length });
+    try {
+      await this.eventNoteService.syncEvents(uniqueForNotes);
+    } catch (e) {
+      log.error("syncEvents: ошибка", { error: e, eventsForNotes: uniqueForNotes.length });
+      throw e;
+    }
+
+    try {
+      await this.ensurePeopleCardsFromEvents(uniqueForNotes);
+    } catch (e) {
+      // Не валим весь цикл: карточки людей — вспомогательная функция.
+      log.warn("ensurePeopleCardsFromEvents: ошибка (пропускаю)", { error: e });
+    }
+
+    try {
+      this.notificationScheduler.schedule(events);
+    } catch (e) {
+      log.warn("scheduleNotifications: ошибка (пропускаю)", { error: e });
+    }
+
+    const durationMs = Date.now() - t0;
+    if (staleCalendars.length > 0) {
+      log.warn("refreshCalendarsAndSync: завершено со stale календарями", {
+        durationMs,
+        events: events.length,
+        stale: staleCalendars,
+      });
+    } else if (errors.length > 0) {
+      log.warn("refreshCalendarsAndSync: завершено с ошибками", {
+        durationMs,
+        events: events.length,
+        errors: errors.map((e) => ({ calendarId: e.calendarId, name: e.name, error: e.error, cause: e.cause })),
+      });
+    } else {
+      log.info("refreshCalendarsAndSync: ok", {
+        durationMs,
+        events: events.length,
+        notesSynced: uniqueForNotes.length,
+      });
+    }
   }
 
   /** Синхронизация на основе уже загруженных текущих событий (без network refresh). */

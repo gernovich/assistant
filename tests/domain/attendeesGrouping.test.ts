@@ -30,4 +30,3 @@ describe("domain/policies/attendeesGrouping", () => {
     expect(g.accepted).toEqual([]);
   });
 });
-

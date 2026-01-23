@@ -17,6 +17,8 @@ export interface CalendarRefreshError {
   calendarId: string;
   name: string;
   error: string;
+  /** Сырой error для диагностики (stack/cause), в UI не показывается. */
+  cause?: unknown;
 }
 
 /**
@@ -28,7 +30,10 @@ export class CalendarService {
   private store = new CalendarEventStore();
   private listeners = new Set<Listener>();
 
-  constructor(settings: AssistantSettings, private providers: CalendarProviderRegistry) {
+  constructor(
+    settings: AssistantSettings,
+    private providers: CalendarProviderRegistry,
+  ) {
     this.settings = settings;
   }
 
@@ -91,9 +96,13 @@ export class CalendarService {
     if (!cal) return await Promise.reject(new AppError({ code: APP_ERROR.NOT_FOUND, message: "Ассистент: календарь не найден" }));
     if (!cal.enabled) return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: календарь отключён" }));
     if (cal.type !== "caldav")
-      return await Promise.reject(new AppError({ code: APP_ERROR.READ_ONLY, message: "Ассистент: этот календарь read-only (ICS URL не поддерживает запись)" }));
+      return await Promise.reject(
+        new AppError({ code: APP_ERROR.READ_ONLY, message: "Ассистент: этот календарь read-only (ICS URL не поддерживает запись)" }),
+      );
     if (!this.providers.rsvpWriter?.setMyPartstat)
-      return await Promise.reject(new AppError({ code: APP_ERROR.INTERNAL, message: "Ассистент: write-back недоступен (нет CalDAV провайдера)" }));
+      return await Promise.reject(
+        new AppError({ code: APP_ERROR.INTERNAL, message: "Ассистент: write-back недоступен (нет CalDAV провайдера)" }),
+      );
     try {
       await this.providers.rsvpWriter.setMyPartstat(cal, ev, partstat);
     } catch (e) {
@@ -153,7 +162,7 @@ export class CalendarService {
     } catch (e) {
       return {
         events: this.getEvents(),
-        errors: [{ calendarId: cal.id, name: cal.name, error: String((e as unknown) ?? "неизвестная ошибка") }],
+        errors: [{ calendarId: cal.id, name: cal.name, error: String((e as unknown) ?? "неизвестная ошибка"), cause: e }],
       };
     }
   }
@@ -183,12 +192,14 @@ export class CalendarService {
       if (r.status === "fulfilled") {
         batchResults.push({ calendarId: cal.id, ok: true, fetchedAt, events: r.value });
       } else {
-        const err = String((r.reason as unknown) ?? "неизвестная ошибка");
+        const reason = (r as PromiseRejectedResult).reason as unknown;
+        const err = String((reason as unknown) ?? "неизвестная ошибка");
         batchResults.push({ calendarId: cal.id, ok: false, error: err });
         errors.push({
           calendarId: cal.id,
           name: cal.name,
           error: err,
+          cause: reason,
         });
       }
     }

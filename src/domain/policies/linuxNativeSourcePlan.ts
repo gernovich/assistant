@@ -5,7 +5,10 @@
  */
 export type LinuxNativeSourceAttempt = { mic: string; monitor: string | null };
 
-export function buildLinuxNativeSourceAttemptPlan(params: { micCandidates: string[]; monitorCandidates: string[] }): LinuxNativeSourceAttempt[] {
+export function buildLinuxNativeSourceAttemptPlan(params: {
+  micCandidates: string[];
+  monitorCandidates: string[];
+}): LinuxNativeSourceAttempt[] {
   const micCandidates = Array.isArray(params.micCandidates) ? params.micCandidates : [];
   const monitorCandidates = Array.isArray(params.monitorCandidates) ? params.monitorCandidates : [];
   const attempts: LinuxNativeSourceAttempt[] = [];
@@ -20,4 +23,3 @@ export function buildLinuxNativeSourceAttemptPlan(params: { micCandidates: strin
   }
   return attempts;
 }
-

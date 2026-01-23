@@ -7,4 +7,3 @@ describe("extractEmailsFromTextPolicy", () => {
     expect(extractEmailsFromTextPolicy(text)).toEqual(["me@example.com", "other@test.io"]);
   });
 });
-

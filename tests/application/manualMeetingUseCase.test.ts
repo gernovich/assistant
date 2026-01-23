@@ -20,4 +20,3 @@ describe("ManualMeetingUseCase", () => {
     expect(String(ev.id)).toContain("manual-");
   });
 });
-

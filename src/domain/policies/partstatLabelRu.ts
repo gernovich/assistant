@@ -15,4 +15,3 @@ export function partstatLabelRu(partstat: string | undefined | null): PartstatLa
   if (ps === "TENTATIVE") return "возможно";
   return "не указал";
 }
-

@@ -14,4 +14,3 @@ describe("domain/policies/attendeesMarkdownRu", () => {
     expect(s).toBe("- Alice <a@x.com> — придёт\n- b@x.com — не придёт");
   });
 });
-

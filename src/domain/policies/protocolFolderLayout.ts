@@ -7,10 +7,7 @@
  *
  * Без миграций: это влияет только на создание новых файлов.
  */
-export function protocolTargetDir(params: {
-  protocolsDir: string;
-  meetingFilePath?: string;
-}): string {
+export function protocolTargetDir(params: { protocolsDir: string; meetingFilePath?: string }): string {
   const root = trimTrailingSlashes(String(params.protocolsDir || ""));
   if (!root) return "";
 
@@ -37,4 +34,3 @@ function joinVaultPath(a: string, b: string): string {
 function trimTrailingSlashes(p: string): string {
   return String(p || "").replace(/\/+$/g, "");
 }
-

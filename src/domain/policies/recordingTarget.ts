@@ -46,4 +46,3 @@ export function pickDefaultRecordingTargetPolicy(
   if (!picked) return { selectedEventKey: undefined, createNewProtocol: true };
   return { selectedEventKey: makeEventKey(picked.calendar.id, picked.id), createNewProtocol: false };
 }
-

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { parseFrontmatterMap, splitFrontmatter, stringifyFrontmatterMap, upsertFrontmatter } from "../src/domain/policies/frontmatter";
-import { parseMeetingNoteFromMd, parsePersonNoteFromCache, parseProjectNoteFromCache, parseProtocolNoteFromCache } from "../src/domain/policies/frontmatterDtos";
+import {
+  parseMeetingNoteFromMd,
+  parsePersonNoteFromCache,
+  parseProjectNoteFromCache,
+  parseProtocolNoteFromCache,
+} from "../src/domain/policies/frontmatterDtos";
 import { isAssistantEntityType } from "../src/domain/policies/frontmatterKeys";
 
 describe("domain/policies/frontmatter", () => {
@@ -118,7 +123,9 @@ describe("domain/policies/frontmatter", () => {
   });
 
   it("parseMeetingNoteFromMd возвращает err, если assistant_type не calendar_event", () => {
-    const md = ["---", "assistant_type: protocol", "calendar_id: cal-1", "event_id: uid-1", "start: 2026-01-20T10:00:00.000Z", "---"].join("\n");
+    const md = ["---", "assistant_type: protocol", "calendar_id: cal-1", "event_id: uid-1", "start: 2026-01-20T10:00:00.000Z", "---"].join(
+      "\n",
+    );
     const r = parseMeetingNoteFromMd(md);
     expect(r.ok).toBe(false);
   });

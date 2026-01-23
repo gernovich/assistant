@@ -124,4 +124,3 @@ describe("RecordingDialogUseCase", () => {
     expect(dlgOpen).toHaveBeenCalledTimes(2);
   });
 });
-

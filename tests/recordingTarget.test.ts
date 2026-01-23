@@ -44,4 +44,3 @@ describe("recordingTarget (compat wrapper)", () => {
     expect(r.selectedEventKey).toBeUndefined();
   });
 });
-

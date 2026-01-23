@@ -10,4 +10,3 @@ export function parseMomentaryLufsFromEbur128Line(line: string): number | null {
   const v = Number(m[1]);
   return Number.isFinite(v) ? v : null;
 }
-

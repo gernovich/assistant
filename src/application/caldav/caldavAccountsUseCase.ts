@@ -43,4 +43,3 @@ export class CaldavAccountsUseCase {
     await this.deps.addCaldavCalendarFromDiscovery(params);
   }
 }
-

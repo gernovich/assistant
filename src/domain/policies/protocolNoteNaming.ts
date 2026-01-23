@@ -12,4 +12,3 @@ export function protocolBaseNameFromEvent(params: { summary: string; start: Date
 export function emptyProtocolBaseName(now: Date): string {
   return `Протокол ${formatRuDayMonth(now)}`;
 }
-

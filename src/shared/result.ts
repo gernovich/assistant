@@ -46,4 +46,3 @@ export function isOk<T>(r: Result<T>): r is { ok: true; value: T } {
 export function isErr<T>(r: Result<T>): r is { ok: false; error: AppErrorDto } {
   return !r.ok;
 }
-

@@ -9,4 +9,3 @@ export function extractEmailsFromTextPolicy(text: string): string[] {
   const raw = String(text ?? "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
   return Array.from(new Set(raw.map((x) => normalizeEmail(x)).filter(Boolean)));
 }
-

@@ -13,4 +13,3 @@ export function pickDesktopCapturerSourceId(sources: DesktopCapturerSourceLike[]
   const id = String((pick as any)?.id ?? "").trim();
   return id || null;
 }
-

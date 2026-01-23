@@ -52,4 +52,3 @@ export class DiscoverCaldavCalendarsUseCase {
     return r.value;
   }
 }
-

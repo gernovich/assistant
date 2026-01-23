@@ -10,4 +10,3 @@ export function ensureMarkdownFilePath(pathOrTarget: string): string {
   if (!s) return "";
   return s.endsWith(".md") ? s : `${s}.md`;
 }
-

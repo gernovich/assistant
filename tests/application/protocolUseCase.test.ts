@@ -144,4 +144,3 @@ describe("ProtocolUseCase", () => {
     expect(info).toHaveBeenCalledTimes(1);
   });
 });
-

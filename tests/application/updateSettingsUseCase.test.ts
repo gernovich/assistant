@@ -37,4 +37,3 @@ describe("UpdateSettingsUseCase", () => {
     ).resolves.toBeUndefined();
   });
 });
-

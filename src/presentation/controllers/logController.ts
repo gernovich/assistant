@@ -49,4 +49,3 @@ export class DefaultLogController implements LogController {
     return this.deps.openAgenda();
   }
 }
-

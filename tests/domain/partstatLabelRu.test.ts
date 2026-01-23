@@ -15,4 +15,3 @@ describe("domain/policies/partstatLabelRu", () => {
     expect(partstatLabelRu("")).toBe("не указал");
   });
 });
-

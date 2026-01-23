@@ -9,4 +9,3 @@ export type VaultFileLike = {
   path: string;
   basename: string;
 };
-

@@ -36,4 +36,3 @@ describe("windowActionRouter", () => {
     expect(h.stop).toHaveBeenCalledTimes(0);
   });
 });
-

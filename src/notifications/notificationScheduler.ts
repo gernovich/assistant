@@ -106,7 +106,12 @@ export class NotificationScheduler {
       }
 
       // Единый способ: отдельное окно поверх всех (Electron).
-      const ok = showElectronReminderWindow({ ev, kind, minutesBefore: Math.max(0, this.settings.notifications.minutesBefore), actions: this.actions });
+      const ok = showElectronReminderWindow({
+        ev,
+        kind,
+        minutesBefore: Math.max(0, this.settings.notifications.minutesBefore),
+        actions: this.actions,
+      });
       if (!ok) {
         this.onLog?.("electron_window: недоступен (нет BrowserWindow), fallback на Notice");
         new Notice(msg);

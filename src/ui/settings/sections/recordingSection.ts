@@ -16,7 +16,11 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
       d.addOption("electron_media_devices", "Electron Media Devices");
       d.addOption("linux_native", "Linux Native");
       // backward compat: старое значение показываем как новое
-      d.setValue(plugin.settings.recording.audioBackend === ("electron_desktop_capturer" as any) ? "electron_media_devices" : plugin.settings.recording.audioBackend);
+      d.setValue(
+        plugin.settings.recording.audioBackend === ("electron_desktop_capturer" as any)
+          ? "electron_media_devices"
+          : plugin.settings.recording.audioBackend,
+      );
       d.onChange(async (v) => {
         await plugin.applySettingsCommand({
           type: "recording.update",
@@ -115,4 +119,3 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
         }),
     );
 }
-

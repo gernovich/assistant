@@ -13,4 +13,3 @@ export function wikiLinkLine(params: { targetPath: string; label: string }): str
   const label = String(params.label ?? "");
   return `- [[${target}|${label}]]`;
 }
-

@@ -13,4 +13,3 @@ export function parseFrontmatterDate(raw: unknown): Date | undefined {
   }
   return undefined;
 }
-

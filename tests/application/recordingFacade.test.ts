@@ -64,4 +64,3 @@ describe("RecordingFacade Result boundary", () => {
     if (!s.ok) expect(s.error.code).toBe("E_RECORDING_BACKEND");
   });
 });
-

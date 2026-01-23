@@ -102,4 +102,3 @@ function basenameFromPath(p: string): string {
   const last = s.split("/").pop() || "";
   return last.endsWith(".md") ? last.slice(0, -3) : last;
 }
-

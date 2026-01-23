@@ -15,4 +15,3 @@ export function nextChunkInMsPolicy(params: { nowMs: number; lastChunkAtMs: numb
   const every = Math.max(0, Number(params.chunkEveryMs) || 0);
   return Math.max(0, every - Math.max(0, now - last));
 }
-

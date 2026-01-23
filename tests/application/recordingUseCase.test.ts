@@ -110,4 +110,3 @@ describe("RecordingUseCase", () => {
     expect(uc.getStats().status).toBe("idle");
   });
 });
-

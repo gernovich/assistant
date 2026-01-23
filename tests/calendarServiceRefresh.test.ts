@@ -41,8 +41,10 @@ describe("calendar/calendarService refresh flows (fake providers)", () => {
     const provider: CalendarProvider = {
       type: "ics_url",
       async refresh(cal) {
-        if (cal.id === "c1") return [makeEvent({ calendarId: "c1", calendarName: "Cal 1", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
-        if (cal.id === "c2") return [makeEvent({ calendarId: "c2", calendarName: "Cal 2", type: "ics_url", id: "b", start: "2026-01-01T09:00:00.000Z" })];
+        if (cal.id === "c1")
+          return [makeEvent({ calendarId: "c1", calendarName: "Cal 1", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
+        if (cal.id === "c2")
+          return [makeEvent({ calendarId: "c2", calendarName: "Cal 2", type: "ics_url", id: "b", start: "2026-01-01T09:00:00.000Z" })];
         return [];
       },
     };
@@ -138,7 +140,8 @@ describe("calendar/calendarService refresh flows (fake providers)", () => {
     const provider: CalendarProvider = {
       type: "ics_url",
       async refresh(cal) {
-        if (cal.id === "c1") return [makeEvent({ calendarId: "c1", calendarName: "Cal 1", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
+        if (cal.id === "c1")
+          return [makeEvent({ calendarId: "c1", calendarName: "Cal 1", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
         throw new Error("should not be called");
       },
     };
@@ -180,7 +183,8 @@ describe("calendar/calendarService refresh flows (fake providers)", () => {
     const provider: CalendarProvider = {
       type: "ics_url",
       async refresh(cal) {
-        if (cal.id === "c1") return [makeEvent({ calendarId: "c1", calendarName: "Cal 1", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
+        if (cal.id === "c1")
+          return [makeEvent({ calendarId: "c1", calendarName: "Cal 1", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
         throw new Error("should not be called");
       },
     };
@@ -191,7 +195,10 @@ describe("calendar/calendarService refresh flows (fake providers)", () => {
     svc.seedFromCache({
       enabledCalendarIds: ["c1", "off"],
       lastGood: {
-        off: { fetchedAt: 10, events: [makeEvent({ calendarId: "off", calendarName: "Off", type: "ics_url", id: "old", start: "2026-01-01T09:00:00.000Z" })] },
+        off: {
+          fetchedAt: 10,
+          events: [makeEvent({ calendarId: "off", calendarName: "Off", type: "ics_url", id: "old", start: "2026-01-01T09:00:00.000Z" })],
+        },
       },
     });
     expect(svc.getRefreshResult().perCalendar.off?.status).toBe("stale");
@@ -212,7 +219,8 @@ describe("calendar/calendarService refresh flows (fake providers)", () => {
     const provider: CalendarProvider = {
       type: "ics_url",
       async refresh(cal) {
-        if (cal.id === "c1") return [makeEvent({ calendarId: "c1", calendarName: "ICS", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
+        if (cal.id === "c1")
+          return [makeEvent({ calendarId: "c1", calendarName: "ICS", type: "ics_url", id: "a", start: "2026-01-01T10:00:00.000Z" })];
         return [];
       },
     };
@@ -252,4 +260,3 @@ describe("calendar/calendarService refresh flows (fake providers)", () => {
     expect(rr.events).toEqual([]);
   });
 });
-

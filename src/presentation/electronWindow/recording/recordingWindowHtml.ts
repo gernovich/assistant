@@ -768,4 +768,3 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
 </body>
 </html>`;
 }
-

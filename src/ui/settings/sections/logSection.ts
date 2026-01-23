@@ -7,31 +7,6 @@ export function renderLogSection(params: { containerEl: HTMLElement; plugin: Ass
 
   containerEl.createEl("h3", { text: "Лог" });
 
-  if (plugin.settings.debug.enabled) {
-    new Setting(containerEl)
-      .setName("Открыть панель лога")
-      .setDesc("Показать live-лог плагина (удобно для отладки).")
-      .addButton((b) =>
-        b.setButtonText("Открыть").onClick(async () => {
-          await plugin.settingsOps.openLogPanel();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Открыть сегодняшний лог-файл")
-      .setDesc("Открыть файл лога за сегодня (в системной папке плагина, вне vault).")
-      .addButton((b) =>
-        b.setButtonText("Открыть файл").onClick(async () => {
-          await plugin.settingsOps.openTodayLogFile();
-        }),
-      );
-  } else {
-    containerEl.createDiv({
-      text: "Кнопки логов скрыты (включите «Отладка» выше).",
-      cls: "setting-item-description",
-    });
-  }
-
   // Лог в файлы пишется вне vault (в .obsidian/plugins/assistant/logs), поэтому настройки папки/включения не нужны.
 
   new Setting(containerEl)

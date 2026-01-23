@@ -12,4 +12,3 @@ export function personCardBaseName(params: { displayName?: string; email?: strin
   }
   return email || "Новый человек";
 }
-

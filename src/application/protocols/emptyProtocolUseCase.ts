@@ -24,4 +24,3 @@ export class EmptyProtocolUseCase {
     await this.createAndOpenResult();
   }
 }
-

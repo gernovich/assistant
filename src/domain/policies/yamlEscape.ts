@@ -7,4 +7,3 @@ export function yamlEscape(v: string): string {
   const s = (v ?? "").replace(/\r?\n/g, " ").trim();
   return JSON.stringify(s);
 }
-

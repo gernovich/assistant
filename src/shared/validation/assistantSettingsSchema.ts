@@ -87,9 +87,9 @@ export const RawAssistantSettingsSchema = z
 
     protocols: z
       .object({
-          // Настройки нет (политика протоколов фиксирована), но допускаем её в raw для обратной совместимости:
-          // старые `data.json` могут содержать `protocols.subfoldersByMeeting`.
-          subfoldersByMeeting: zBool.optional(),
+        // Настройки нет (политика протоколов фиксирована), но допускаем её в raw для обратной совместимости:
+        // старые `data.json` могут содержать `protocols.subfoldersByMeeting`.
+        subfoldersByMeeting: zBool.optional(),
       })
       .optional(),
 
@@ -127,4 +127,3 @@ export const RawAssistantSettingsSchema = z
   .strict();
 
 export type RawAssistantSettings = z.infer<typeof RawAssistantSettingsSchema>;
-

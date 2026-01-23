@@ -335,7 +335,11 @@ export class RecordingDialog {
 
     win.on("closed", () => {
       stopStatsTimer();
-      try { unIpc(); } catch { /* ignore */ }
+      try {
+        unIpc();
+      } catch {
+        /* ignore */
+      }
       try {
         const st = this.params.recordingController.getStats();
         if (st.status !== "idle") void this.params.recordingController.stopResult();
@@ -346,4 +350,3 @@ export class RecordingDialog {
     });
   }
 }
-

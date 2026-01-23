@@ -132,4 +132,3 @@ export class RecordingFacade {
     await this.deps.useCase.stop();
   }
 }
-

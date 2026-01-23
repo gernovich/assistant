@@ -100,7 +100,11 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
       atStart: obj.notifications?.atStart ?? DEFAULT_SETTINGS.notifications.atStart,
     },
     recording: {
-      chunkMinutes: normalizeNumber(obj.recording?.chunkMinutes, { defaultValue: DEFAULT_SETTINGS.recording.chunkMinutes, min: 1, max: 180 }),
+      chunkMinutes: normalizeNumber(obj.recording?.chunkMinutes, {
+        defaultValue: DEFAULT_SETTINGS.recording.chunkMinutes,
+        min: 1,
+        max: 180,
+      }),
       audioBackend:
         obj.recording?.audioBackend === "linux_native"
           ? "linux_native"
@@ -117,8 +121,11 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
           : DEFAULT_SETTINGS.recording.linuxNativeAudioProcessing,
       autoStartEnabled:
         typeof obj.recording?.autoStartEnabled === "boolean" ? obj.recording.autoStartEnabled : DEFAULT_SETTINGS.recording.autoStartEnabled,
-      autoStartSeconds:
-        normalizeNumber(obj.recording?.autoStartSeconds, { defaultValue: DEFAULT_SETTINGS.recording.autoStartSeconds, min: 1, max: 60 }),
+      autoStartSeconds: normalizeNumber(obj.recording?.autoStartSeconds, {
+        defaultValue: DEFAULT_SETTINGS.recording.autoStartSeconds,
+        min: 1,
+        max: 60,
+      }),
     },
     agenda: {
       maxEvents: normalizeNumber(obj.agenda?.maxEvents, { defaultValue: DEFAULT_SETTINGS.agenda.maxEvents, min: 1, max: 500 }),
@@ -130,10 +137,7 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
   };
 }
 
-function normalizeNumber(
-  v: unknown,
-  params: { defaultValue: number; min?: number; max?: number },
-): number {
+function normalizeNumber(v: unknown, params: { defaultValue: number; min?: number; max?: number }): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   if (!Number.isFinite(n)) return params.defaultValue;
   const min = typeof params.min === "number" ? params.min : -Infinity;

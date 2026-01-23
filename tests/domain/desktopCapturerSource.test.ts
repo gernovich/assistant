@@ -3,7 +3,10 @@ import { pickDesktopCapturerSourceId } from "../../src/domain/policies/desktopCa
 
 describe("domain/policies/desktopCapturerSource", () => {
   it("prefers browser window by name", () => {
-    const id = pickDesktopCapturerSourceId([{ id: "1", name: "Screen 1" }, { id: "2", name: "Chrome" }]);
+    const id = pickDesktopCapturerSourceId([
+      { id: "1", name: "Screen 1" },
+      { id: "2", name: "Chrome" },
+    ]);
     expect(id).toBe("2");
   });
 
@@ -12,4 +15,3 @@ describe("domain/policies/desktopCapturerSource", () => {
     expect(id).toBe("1");
   });
 });
-

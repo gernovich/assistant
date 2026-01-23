@@ -8,7 +8,6 @@ import type { PluginPort } from "../obsidianPorts";
  * Все действия прокидываются через `CommandsController`.
  */
 export function registerAssistantCommands(plugin: PluginPort, c: CommandsController): void {
-
   plugin.addCommand({ id: "open-agenda", name: "Открыть повестку", callback: () => c.openAgenda() });
 
   plugin.addCommand({ id: "recording-open-dialog", name: "Диктофон", callback: () => c.openRecordingDialog() });
@@ -39,10 +38,26 @@ export function registerAssistantCommands(plugin: PluginPort, c: CommandsControl
 
   plugin.addCommand({ id: "apply-outbox", name: "Применить офлайн-очередь", callback: () => c.applyOutbox() });
 
-  plugin.addCommand({ id: "event-status-accepted", name: "Принято (в календаре, из заметки встречи)", callback: () => c.eventStatusAccepted() });
-  plugin.addCommand({ id: "event-status-declined", name: "Отклонено (в календаре, из заметки встречи)", callback: () => c.eventStatusDeclined() });
-  plugin.addCommand({ id: "event-status-tentative", name: "Возможно (в календаре, из заметки встречи)", callback: () => c.eventStatusTentative() });
-  plugin.addCommand({ id: "event-status-needs-action", name: "Нет ответа (в календаре, из заметки встречи)", callback: () => c.eventStatusNeedsAction() });
+  plugin.addCommand({
+    id: "event-status-accepted",
+    name: "Принято (в календаре, из заметки встречи)",
+    callback: () => c.eventStatusAccepted(),
+  });
+  plugin.addCommand({
+    id: "event-status-declined",
+    name: "Отклонено (в календаре, из заметки встречи)",
+    callback: () => c.eventStatusDeclined(),
+  });
+  plugin.addCommand({
+    id: "event-status-tentative",
+    name: "Возможно (в календаре, из заметки встречи)",
+    callback: () => c.eventStatusTentative(),
+  });
+  plugin.addCommand({
+    id: "event-status-needs-action",
+    name: "Нет ответа (в календаре, из заметки встречи)",
+    callback: () => c.eventStatusNeedsAction(),
+  });
 
   plugin.addCommand({
     id: "meeting-apply-status-from-note",
@@ -56,4 +71,3 @@ export function registerAssistantCommands(plugin: PluginPort, c: CommandsControl
     callback: () => c.createProtocolFromActiveEvent(),
   });
 }
-

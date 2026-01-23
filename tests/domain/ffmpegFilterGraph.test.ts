@@ -15,4 +15,3 @@ describe("domain/policies/ffmpegFilterGraph", () => {
     expect(g.micOnlyViz).toContain("[viz]");
   });
 });
-

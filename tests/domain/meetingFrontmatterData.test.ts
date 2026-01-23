@@ -37,4 +37,3 @@ describe("domain/policies/meetingFrontmatterData", () => {
     expect(fm.eventColor).toBe("#fff");
   });
 });
-

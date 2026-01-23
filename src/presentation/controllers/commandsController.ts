@@ -23,4 +23,3 @@ export interface CommandsController {
   applyStatusFromMeetingNote(): void;
   createProtocolFromActiveEvent(): void;
 }
-

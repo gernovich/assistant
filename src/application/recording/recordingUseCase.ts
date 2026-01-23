@@ -114,10 +114,13 @@ export class RecordingUseCase {
   updateProcessingStats(stats: { filesRecognized?: number; foundProjects?: number; foundFacts?: number; foundPeople?: number }): void {
     const s = this.session;
     if (!s) return;
-    if (typeof stats.filesRecognized === "number" && Number.isFinite(stats.filesRecognized)) s.filesRecognized = Math.max(0, Math.floor(stats.filesRecognized));
-    if (typeof stats.foundProjects === "number" && Number.isFinite(stats.foundProjects)) s.foundProjects = Math.max(0, Math.floor(stats.foundProjects));
+    if (typeof stats.filesRecognized === "number" && Number.isFinite(stats.filesRecognized))
+      s.filesRecognized = Math.max(0, Math.floor(stats.filesRecognized));
+    if (typeof stats.foundProjects === "number" && Number.isFinite(stats.foundProjects))
+      s.foundProjects = Math.max(0, Math.floor(stats.foundProjects));
     if (typeof stats.foundFacts === "number" && Number.isFinite(stats.foundFacts)) s.foundFacts = Math.max(0, Math.floor(stats.foundFacts));
-    if (typeof stats.foundPeople === "number" && Number.isFinite(stats.foundPeople)) s.foundPeople = Math.max(0, Math.floor(stats.foundPeople));
+    if (typeof stats.foundPeople === "number" && Number.isFinite(stats.foundPeople))
+      s.foundPeople = Math.max(0, Math.floor(stats.foundPeople));
     this.onStats?.(this.getStats());
   }
 
@@ -301,4 +304,3 @@ export class RecordingUseCase {
     if (firstErr) return await Promise.reject(firstErr);
   }
 }
-

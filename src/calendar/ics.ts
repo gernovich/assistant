@@ -104,11 +104,7 @@ export function parseIcs(
   for (const ev of out) {
     const key = `${ev.calendar.id}:${ev.id}:${ev.start.getTime()}`;
     const score =
-      (ev.attendees?.length ? 4 : 0) +
-      (ev.status ? 2 : 0) +
-      (ev.location ? 1 : 0) +
-      (ev.url ? 1 : 0) +
-      (ev.description ? 1 : 0);
+      (ev.attendees?.length ? 4 : 0) + (ev.status ? 2 : 0) + (ev.location ? 1 : 0) + (ev.url ? 1 : 0) + (ev.description ? 1 : 0);
     const prev = byKey.get(key);
     if (!prev || score >= prev.score) byKey.set(key, { ev, score });
   }
@@ -411,7 +407,10 @@ function parseTriggerMinutesBefore(trigger: string): number | undefined {
   return totalMin > 0 ? totalMin : undefined;
 }
 
-function parseEventColor(fields: Partial<Record<string, string>>, params: Partial<Record<string, Record<string, string>>>): EventColor | undefined {
+function parseEventColor(
+  fields: Partial<Record<string, string>>,
+  params: Partial<Record<string, Record<string, string>>>,
+): EventColor | undefined {
   // RFC 7986: COLOR:#RRGGBB
   const c = String(fields.COLOR ?? "").trim();
   if (!c) return undefined;
@@ -445,13 +444,7 @@ function parseRrule(rrule: string): Record<string, string> {
   return out;
 }
 
-function expandRrule(
-  base: Event,
-  rrule: string,
-  exdateMs: number[],
-  horizonEnd: Date,
-  blockedStartMs?: Set<number>,
-): Event[] {
+function expandRrule(base: Event, rrule: string, exdateMs: number[], horizonEnd: Date, blockedStartMs?: Set<number>): Event[] {
   const rule = parseRrule(rrule);
   const freq = String(rule["FREQ"] ?? "").toUpperCase();
   const interval = Math.max(1, Number(rule["INTERVAL"] ?? 1) || 1);

@@ -49,6 +49,16 @@ export class AgendaController {
     return this.calendarService.getDayEvents(dayOffset, this.settings.agenda.maxEvents);
   }
 
+  /** Найти ближайшее предстоящее событие (для UX, когда на выбранный день пусто). */
+  getNextEventAfterNow(nowMs: number = Date.now()): Event | null {
+    const all = this.calendarService.getEvents();
+    for (const ev of all) {
+      const t = ev.start?.getTime?.() ?? NaN;
+      if (Number.isFinite(t) && t >= nowMs) return ev;
+    }
+    return null;
+  }
+
   openLog(): void {
     this.actions.openLog();
   }
@@ -85,4 +95,3 @@ export class AgendaController {
     this.actions.debugShowReminder(ev);
   }
 }
-

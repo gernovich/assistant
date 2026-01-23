@@ -27,11 +27,7 @@ export class ApplySettingsCommandUseCase {
   }
 }
 
-function applySettingsCommandMutate(
-  s: AssistantSettings,
-  cmd: SettingsCommand,
-  idCtx: { nowMs: number; randomHex: string },
-): void {
+function applySettingsCommandMutate(s: AssistantSettings, cmd: SettingsCommand, idCtx: { nowMs: number; randomHex: string }): void {
   switch (cmd.type) {
     case "caldav.account.add": {
       const id = makePseudoRandomId({ prefix: "caldav", nowMs: idCtx.nowMs, randomHex: idCtx.randomHex });
@@ -182,21 +178,30 @@ function applySettingsCommandMutate(
     case "recording.update": {
       const p = cmd.patch ?? {};
       if (p.audioBackend === "linux_native" || p.audioBackend === "electron_media_devices") s.recording.audioBackend = p.audioBackend;
-      if (p.linuxNativeAudioProcessing === "none" || p.linuxNativeAudioProcessing === "normalize" || p.linuxNativeAudioProcessing === "voice")
+      if (
+        p.linuxNativeAudioProcessing === "none" ||
+        p.linuxNativeAudioProcessing === "normalize" ||
+        p.linuxNativeAudioProcessing === "voice"
+      )
         s.recording.linuxNativeAudioProcessing = p.linuxNativeAudioProcessing;
       if (typeof p.chunkMinutes === "number") s.recording.chunkMinutes = sanitizePositiveOrDefault(p.chunkMinutes, 5, { max: 180 });
       if (typeof p.autoStartEnabled === "boolean") s.recording.autoStartEnabled = p.autoStartEnabled;
-      if (typeof p.autoStartSeconds === "number") s.recording.autoStartSeconds = sanitizePositiveOrDefault(p.autoStartSeconds, 5, { max: 60 });
+      if (typeof p.autoStartSeconds === "number")
+        s.recording.autoStartSeconds = sanitizePositiveOrDefault(p.autoStartSeconds, 5, { max: 60 });
       return;
     }
 
     case "calendarMeta.update": {
       const p = cmd.patch ?? {};
       if (typeof p.autoRefreshEnabled === "boolean") s.calendar.autoRefreshEnabled = p.autoRefreshEnabled;
-      if (typeof p.autoRefreshMinutes === "number") s.calendar.autoRefreshMinutes = sanitizeNumber(p.autoRefreshMinutes, 10, { min: 1, max: 24 * 60 });
+      if (typeof p.autoRefreshMinutes === "number")
+        s.calendar.autoRefreshMinutes = sanitizeNumber(p.autoRefreshMinutes, 10, { min: 1, max: 24 * 60 });
       if (typeof p.myEmail === "string") s.calendar.myEmail = String(p.myEmail ?? "").trim();
       if (typeof p.persistentCacheMaxEventsPerCalendar === "number")
-        s.calendar.persistentCacheMaxEventsPerCalendar = sanitizeNumber(p.persistentCacheMaxEventsPerCalendar, 2000, { min: 1, max: 100000 });
+        s.calendar.persistentCacheMaxEventsPerCalendar = sanitizeNumber(p.persistentCacheMaxEventsPerCalendar, 2000, {
+          min: 1,
+          max: 100000,
+        });
       return;
     }
 
@@ -236,4 +241,3 @@ function sanitizePositiveOrDefault(v: number, defaultValue: number, bounds?: { m
   const max = typeof bounds?.max === "number" ? bounds.max : Infinity;
   return Math.min(max, floored);
 }
-

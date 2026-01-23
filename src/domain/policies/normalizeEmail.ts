@@ -10,4 +10,3 @@ export function normalizeEmail(v: string): string {
   const m = s.match(/^mailto:(.+)$/i);
   return (m ? m[1] : s).trim().toLowerCase();
 }
-

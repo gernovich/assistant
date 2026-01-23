@@ -17,4 +17,3 @@ describe("parseFrontmatterDate", () => {
     expect(parseFrontmatterDate(undefined)).toBeUndefined();
   });
 });
-

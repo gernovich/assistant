@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { amp01FromLufsPolicy, amp01FromRmsPolicy, amp01FromTimeDomainRmsPolicy, smoothAmp01Policy } from "../../src/domain/policies/recordingVizAmp";
+import {
+  amp01FromLufsPolicy,
+  amp01FromRmsPolicy,
+  amp01FromTimeDomainRmsPolicy,
+  smoothAmp01Policy,
+} from "../../src/domain/policies/recordingVizAmp";
 
 describe("domain/policies/recordingVizAmp", () => {
   it("amp01FromLufsPolicy maps -70..-20 into 0..1", () => {
@@ -21,4 +26,3 @@ describe("domain/policies/recordingVizAmp", () => {
     expect(amp01FromTimeDomainRmsPolicy(0.5, 2.2)).toBe(1);
   });
 });
-

@@ -65,7 +65,11 @@ export class CaldavProvider implements CalendarProvider {
 
     const client = await this.getOrLoginClient(account);
 
+    // Для "Повестки" важно видеть встречи "сегодня" даже если refresh был после того, как они уже начались/закончились.
+    // Поэтому берём диапазон не от `now`, а от начала локального дня (с небольшим запасом на границу суток).
     const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setTime(start.getTime() - MS_PER_DAY);
     const end = new Date(Date.now() + CALENDAR_EVENTS_HORIZON_DAYS * MS_PER_DAY);
 
     const calendar: DAVCalendar = {
@@ -94,13 +98,15 @@ export class CaldavProvider implements CalendarProvider {
       });
       const first = probe[0];
       if (first && !first.ok) {
-        return await Promise.reject(new AppError({
-          code: APP_ERROR.CALDAV_DISCOVERY,
-          message:
-            `Ассистент: CalDAV calendarUrl недоступен (HTTP ${first.status} ${first.statusText}). ` +
-            "Возможно URL устарел/опечатка — переподключите календарь через «Найти календари».",
-          cause: `calendarUrl=${cfg.calendarUrl}`,
-        }));
+        return await Promise.reject(
+          new AppError({
+            code: APP_ERROR.CALDAV_DISCOVERY,
+            message:
+              `Ассистент: CalDAV calendarUrl недоступен (HTTP ${first.status} ${first.statusText}). ` +
+              "Возможно URL устарел/опечатка — переподключите календарь через «Найти календари».",
+            cause: `calendarUrl=${cfg.calendarUrl}`,
+          }),
+        );
       }
     }
 
@@ -130,12 +136,16 @@ export class CaldavProvider implements CalendarProvider {
    */
   async setMyPartstat(cal: CalendarConfig, ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> {
     const cfg = cal.caldav;
-    if (!cfg?.accountId || !cfg.calendarUrl) return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: CalDAV календарь не настроен" }));
+    if (!cfg?.accountId || !cfg.calendarUrl)
+      return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: CalDAV календарь не настроен" }));
 
     const account = this.settings.caldav.accounts.find((a) => a.id === cfg.accountId);
     if (!account) return await Promise.reject(new AppError({ code: APP_ERROR.NOT_FOUND, message: "Ассистент: CalDAV аккаунт не найден" }));
     const readiness = getCaldavAccountReadiness(account);
-    if (!readiness.ok) return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: CalDAV аккаунт не готов (проверьте настройки)" }));
+    if (!readiness.ok)
+      return await Promise.reject(
+        new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: CalDAV аккаунт не готов (проверьте настройки)" }),
+      );
 
     const client = await this.getOrLoginClient(account);
     const calendar: DAVCalendar = {
@@ -156,24 +166,33 @@ export class CaldavProvider implements CalendarProvider {
     const desired = partstatToIcs(partstat);
     const myEmails = splitEmails((this.settings.calendar.myEmail || account.username).trim());
     if (myEmails.length === 0)
-      return await Promise.reject(new AppError({ code: APP_ERROR.VALIDATION, message: "Ассистент: невозможно определить мой email для RSVP (проверьте логин/настройки)" }));
+      return await Promise.reject(
+        new AppError({
+          code: APP_ERROR.VALIDATION,
+          message: "Ассистент: невозможно определить мой email для RSVP (проверьте логин/настройки)",
+        }),
+      );
 
     const target = findBestCalendarObject(objects, ev, myEmails);
     if (!target)
-      return await Promise.reject(new AppError({
-        code: APP_ERROR.NOT_FOUND,
-        message: "Ассистент: не удалось найти CalDAV object для этого события (UID/DTSTART не совпали)",
-      }));
+      return await Promise.reject(
+        new AppError({
+          code: APP_ERROR.NOT_FOUND,
+          message: "Ассистент: не удалось найти CalDAV object для этого события (UID/DTSTART не совпали)",
+        }),
+      );
 
     const updated = updateMyAttendeePartstatInIcal(String(target.data ?? ""), myEmails, desired);
     if (updated === String(target.data ?? "")) {
-      return await Promise.reject(new AppError({
-        code: APP_ERROR.VALIDATION,
-        message:
-          "Ассистент: не удалось обновить PARTSTAT — ATTENDEE для вашего email не найден в VEVENT. " +
-          "Обычно это значит, что вы не участник (ATTENDEE) этой встречи.",
-        details: { myEmails },
-      }));
+      return await Promise.reject(
+        new AppError({
+          code: APP_ERROR.VALIDATION,
+          message:
+            "Ассистент: не удалось обновить PARTSTAT — ATTENDEE для вашего email не найден в VEVENT. " +
+            "Обычно это значит, что вы не участник (ATTENDEE) этой встречи.",
+          details: { myEmails },
+        }),
+      );
     }
 
     const res = await client.updateCalendarObject({
@@ -181,11 +200,13 @@ export class CaldavProvider implements CalendarProvider {
     });
     if (!res.ok) {
       const txt = await safeReadText(res);
-      return await Promise.reject(new AppError({
-        code: APP_ERROR.CALDAV_WRITEBACK,
-        message: `Ассистент: CalDAV write-back не удался (HTTP ${res.status} ${res.statusText})`,
-        cause: txt ? String(txt) : undefined,
-      }));
+      return await Promise.reject(
+        new AppError({
+          code: APP_ERROR.CALDAV_WRITEBACK,
+          message: `Ассистент: CalDAV write-back не удался (HTTP ${res.status} ${res.statusText})`,
+          cause: txt ? String(txt) : undefined,
+        }),
+      );
     }
   }
 
@@ -213,20 +234,24 @@ export class CaldavProvider implements CalendarProvider {
         if (first && !first.ok) {
           const raw = String(first.raw ?? "");
           if (first.status === 403 && raw.includes("accessNotConfigured")) {
-            return await Promise.reject(new AppError({
-              code: APP_ERROR.CALDAV_DISCOVERY,
-              message:
-                "Ассистент: Google CalDAV accessNotConfigured. " +
-                "Похоже, в Google Cloud проекте для вашего OAuth Client ID не включён CalDAV API (или он ещё не активировался). " +
-                "Включите «CalDAV API», подождите 5–10 минут и повторите discovery.",
-              cause: raw,
-            }));
+            return await Promise.reject(
+              new AppError({
+                code: APP_ERROR.CALDAV_DISCOVERY,
+                message:
+                  "Ассистент: Google CalDAV accessNotConfigured. " +
+                  "Похоже, в Google Cloud проекте для вашего OAuth Client ID не включён CalDAV API (или он ещё не активировался). " +
+                  "Включите «CalDAV API», подождите 5–10 минут и повторите discovery.",
+                cause: raw,
+              }),
+            );
           }
-          return await Promise.reject(new AppError({
-            code: APP_ERROR.CALDAV_DISCOVERY,
-            message: `Ассистент: CalDAV PROPFIND не удался (HTTP ${first.status} ${first.statusText})`,
-            cause: raw || undefined,
-          }));
+          return await Promise.reject(
+            new AppError({
+              code: APP_ERROR.CALDAV_DISCOVERY,
+              message: `Ассистент: CalDAV PROPFIND не удался (HTTP ${first.status} ${first.statusText})`,
+              cause: raw || undefined,
+            }),
+          );
         }
       }
     }
@@ -269,11 +294,13 @@ export class CaldavProvider implements CalendarProvider {
       } catch (e2) {
         const msg = String((e2 as unknown) ?? "неизвестная ошибка");
         const method = account.authMethod ?? "basic";
-        return await Promise.reject(new AppError({
-          code: APP_ERROR.CALDAV_AUTH,
-          message: "Ассистент: CalDAV вход не удался (проверьте настройки аккаунта)",
-          cause: `method=${method}, serverUrl=${account.serverUrl}, error=${msg}`,
-        }));
+        return await Promise.reject(
+          new AppError({
+            code: APP_ERROR.CALDAV_AUTH,
+            message: "Ассистент: CalDAV вход не удался (проверьте настройки аккаунта)",
+            cause: `method=${method}, serverUrl=${account.serverUrl}, error=${msg}`,
+          }),
+        );
       }
     }
   }

@@ -55,4 +55,3 @@ function normalizeDirPrefix(root: string): string {
   const r = String(root ?? "").replace(/\/+$/g, "");
   return r ? `${r}/` : "";
 }
-

@@ -7,4 +7,3 @@ export interface ProtocolNoteRepository {
   createEmptyProtocol(): Promise<VaultFileLike>;
   openProtocol(file: VaultFileLike): Promise<void>;
 }
-

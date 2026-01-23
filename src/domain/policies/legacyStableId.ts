@@ -14,4 +14,3 @@ export function extractLegacyStableIdFromPath(path: string): string | null {
 export function legacyStableIdSuffix(sid: string): string {
   return ` [${String(sid ?? "").trim()}].md`;
 }
-

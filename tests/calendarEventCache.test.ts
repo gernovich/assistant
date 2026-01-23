@@ -102,9 +102,24 @@ describe("calendar/store/calendarEventCache", () => {
       calA: {
         fetchedAt: 1,
         events: [
-          { calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } }, id: "1", summary: "1", start: new Date(1) },
-          { calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } }, id: "2", summary: "2", start: new Date(2) },
-          { calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } }, id: "3", summary: "3", start: new Date(3) },
+          {
+            calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } },
+            id: "1",
+            summary: "1",
+            start: new Date(1),
+          },
+          {
+            calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } },
+            id: "2",
+            summary: "2",
+            start: new Date(2),
+          },
+          {
+            calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } },
+            id: "3",
+            summary: "3",
+            start: new Date(3),
+          },
         ],
       },
     };
@@ -297,7 +312,15 @@ describe("calendar/store/calendarEventCache", () => {
             // будет отфильтровано (id пустой)
             { version: 3, calendarId: "calA", id: "", summary: "bad", startMs: Date.UTC(2026, 0, 1, 10, 0, 0) },
             // валидное
-            { version: 3, calendarId: "calA", id: "ok", summary: "ok", startMs: Date.UTC(2026, 0, 1, 10, 0, 0), endMs: Date.UTC(2026, 0, 1, 11, 0, 0), allDay: true },
+            {
+              version: 3,
+              calendarId: "calA",
+              id: "ok",
+              summary: "ok",
+              startMs: Date.UTC(2026, 0, 1, 10, 0, 0),
+              endMs: Date.UTC(2026, 0, 1, 11, 0, 0),
+              allDay: true,
+            },
           ],
         },
       },
@@ -328,8 +351,18 @@ describe("calendar/store/calendarEventCache", () => {
       calA: {
         fetchedAt: 1,
         events: [
-          { calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } }, id: "1", summary: "1", start: new Date(1) },
-          { calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } }, id: "2", summary: "2", start: new Date(2) },
+          {
+            calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } },
+            id: "1",
+            summary: "1",
+            start: new Date(1),
+          },
+          {
+            calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } },
+            id: "2",
+            summary: "2",
+            start: new Date(2),
+          },
         ],
       },
     };
@@ -354,7 +387,17 @@ describe("calendar/store/calendarEventCache", () => {
       }),
     });
     const exportLastGoodForCache = vi.fn(() => ({
-      calA: { fetchedAt: 1, events: [{ calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } }, id: "u", summary: "s", start: new Date(1) }] },
+      calA: {
+        fetchedAt: 1,
+        events: [
+          {
+            calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } },
+            id: "u",
+            summary: "s",
+            start: new Date(1),
+          },
+        ],
+      },
     }));
     await cache.saveFromCalendarService({ exportLastGoodForCache } as any, { enabledCalendarIds: ["calA"], maxEventsPerCalendar: 2000 });
     expect(warns.some((w) => w.m.includes("не удалось сохранить persistent cache"))).toBe(true);
@@ -391,7 +434,14 @@ describe("calendar/store/calendarEventCache", () => {
     const exportLastGoodForCache = vi.fn(() => ({
       calA: {
         fetchedAt: 1,
-        events: [{ calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } }, id: "u", summary: "s", start: new Date(1) }],
+        events: [
+          {
+            calendar: { id: "calA", name: "calA", type: "ics_url", config: { id: "calA", name: "calA", type: "ics_url", enabled: true } },
+            id: "u",
+            summary: "s",
+            start: new Date(1),
+          },
+        ],
       },
     }));
 

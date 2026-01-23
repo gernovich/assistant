@@ -68,4 +68,3 @@ export class DefaultRecordingController implements RecordingController {
     return await this.svc.resumeResult();
   }
 }
-

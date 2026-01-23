@@ -20,4 +20,3 @@ describe("protocolTargetDir", () => {
     expect(protocolTargetDir({ protocolsDir: "Ассистент/Протоколы" })).toBe("Ассистент/Протоколы");
   });
 });
-

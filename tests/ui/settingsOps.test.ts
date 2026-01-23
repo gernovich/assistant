@@ -142,7 +142,7 @@ describe("Settings UI operations use settingsOps port", () => {
     expect(rerender).toHaveBeenCalledTimes(2);
   });
 
-  it("logSection (debug enabled): buttons call openLogPanel/openTodayLogFile", async () => {
+  it("logSection: нет кнопок открытия логов (есть только настройки maxEntries/retentionDays)", async () => {
     const buttons: ButtonRec[] = [];
     installObsidianSettingMock(buttons);
     const { renderLogSection } = await importSection<{ renderLogSection: any }>("../../src/ui/settings/sections/logSection");
@@ -157,20 +157,28 @@ describe("Settings UI operations use settingsOps port", () => {
     } as any;
 
     renderLogSection({ containerEl: makeFakeContainerEl(), plugin });
-    await buttons.find((b) => b.text === "Открыть")!.onClick!();
-    await buttons.find((b) => b.text === "Открыть файл")!.onClick!();
-    expect(plugin.settingsOps.openLogPanel).toHaveBeenCalledTimes(1);
-    expect(plugin.settingsOps.openTodayLogFile).toHaveBeenCalledTimes(1);
+
+    // В секции больше нет кнопок "Открыть"/"Открыть файл" — эти действия доступны внутри панели лога.
+    expect(buttons.some((b) => b.text === "Открыть")).toBe(false);
+    expect(buttons.some((b) => b.text === "Открыть файл")).toBe(false);
   });
 
   it("recordingSection (linux_native): кнопка 'Проверить' вызывает checkLinuxNativeRecordingDependencies()", async () => {
     const buttons: ButtonRec[] = [];
     installObsidianSettingMock(buttons);
-    const { renderRecordingSection } = await importSection<{ renderRecordingSection: any }>("../../src/ui/settings/sections/recordingSection");
+    const { renderRecordingSection } = await importSection<{ renderRecordingSection: any }>(
+      "../../src/ui/settings/sections/recordingSection",
+    );
 
     const plugin = {
       settings: {
-        recording: { audioBackend: "linux_native", linuxNativeAudioProcessing: "normalize", chunkMinutes: 5, autoStartEnabled: true, autoStartSeconds: 5 },
+        recording: {
+          audioBackend: "linux_native",
+          linuxNativeAudioProcessing: "normalize",
+          chunkMinutes: 5,
+          autoStartEnabled: true,
+          autoStartSeconds: 5,
+        },
       },
       settingsOps: { checkLinuxNativeRecordingDependencies: vi.fn(async () => undefined) },
       applySettingsCommand: vi.fn(async () => undefined),
@@ -203,4 +211,3 @@ describe("Settings UI operations use settingsOps port", () => {
     expect(plugin.settingsOps.refreshCalendar).toHaveBeenCalledWith("c1");
   });
 });
-

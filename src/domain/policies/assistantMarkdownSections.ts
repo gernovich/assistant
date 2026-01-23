@@ -187,4 +187,3 @@ function parseFrontmatterLines(lines: string[]): Record<string, string> {
   }
   return out;
 }
-

@@ -35,8 +35,7 @@ export function buildRecordingDialogModelPolicy(params: {
   const defaultKey = String(params.defaultEventKey ?? "").trim();
   const nowMs = Number(params.nowMs) || 0;
 
-  const preferredEv =
-    defaultKey && params.lockDefaultEvent ? params.events.find((ev) => params.keyOfEvent(ev) === defaultKey) : undefined;
+  const preferredEv = defaultKey && params.lockDefaultEvent ? params.events.find((ev) => params.keyOfEvent(ev) === defaultKey) : undefined;
 
   const occurrences = params.events
     .slice()
@@ -70,4 +69,3 @@ export function buildRecordingDialogModelPolicy(params: {
   const autoSeconds = Math.max(1, Math.floor(Number(params.autoStartSeconds) || 5));
   return { occurrences: list, meetingNames, lockedLabel, meta, autoSeconds };
 }
-

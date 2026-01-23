@@ -24,4 +24,3 @@ export function attendeesMarkdownBlockRu(attendees: AttendeeRenderDto[]): string
 
   return lines.join("\n");
 }
-

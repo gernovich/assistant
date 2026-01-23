@@ -33,4 +33,3 @@ export const APP_ERROR = {
 } as const;
 
 export type AppErrorCode = (typeof APP_ERROR)[keyof typeof APP_ERROR];
-

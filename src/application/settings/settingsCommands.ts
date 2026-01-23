@@ -60,4 +60,3 @@ export type LogPatch = {
   maxEntries: number;
   retentionDays: number;
 };
-

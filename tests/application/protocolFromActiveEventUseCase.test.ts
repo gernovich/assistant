@@ -63,4 +63,3 @@ describe("ProtocolFromActiveEventUseCase", () => {
     expect(notice).not.toHaveBeenCalled();
   });
 });
-

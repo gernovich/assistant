@@ -10,4 +10,3 @@ describe("domain/policies/ebur128", () => {
     expect(parseMomentaryLufsFromEbur128Line("nope")).toBeNull();
   });
 });
-

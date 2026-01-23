@@ -38,9 +38,16 @@ export class RsvpUseCase {
     } catch (e) {
       const dto = toAppErrorDto(e, { code: APP_ERROR.CALDAV_WRITEBACK, message: "Ассистент: не удалось изменить статус в календаре" });
       this.deps.notice(dto.message);
-      this.deps.log.error("RSVP: не удалось изменить статус в календаре", { code: dto.code, error: dto.cause, eventKey: `${ev.calendar.id}:${ev.id}` });
+      this.deps.log.error("RSVP: setMyPartstat: ошибка", {
+        code: dto.code,
+        error: e,
+        cause: dto.cause,
+        calendarId: ev.calendar.id,
+        eventId: ev.id,
+        startIso: ev.start?.toISOString?.() ?? "",
+        partstat,
+      });
       return err({ code: dto.code, message: dto.message, cause: dto.cause, details: dto.details });
     }
   }
 }
-

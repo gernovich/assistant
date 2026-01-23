@@ -20,19 +20,7 @@ export type AssistantViewsControllers = {
  * Важно: модуль не знает про `AssistantPlugin` и не лезет в приватные методы.
  */
 export function registerAssistantViews(plugin: PluginPort, deps: AssistantViewsDeps, c: AssistantViewsControllers): void {
-  plugin.registerView(
-    AGENDA_VIEW_TYPE,
-    (leaf: any) =>
-      new AgendaView(
-        leaf,
-        deps.settings,
-        c.createAgendaController(),
-      ),
-  );
+  plugin.registerView(AGENDA_VIEW_TYPE, (leaf: any) => new AgendaView(leaf, deps.settings, c.createAgendaController()));
 
-  plugin.registerView(
-    LOG_VIEW_TYPE,
-    (leaf: any) => new LogView(leaf, c.createLogController()),
-  );
+  plugin.registerView(LOG_VIEW_TYPE, (leaf: any) => new LogView(leaf, c.createLogController()));
 }
-

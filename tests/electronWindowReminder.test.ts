@@ -406,4 +406,3 @@ describe("electronWindowReminder", () => {
     expect(w.close).not.toHaveBeenCalled();
   });
 });
-

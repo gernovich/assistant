@@ -102,4 +102,3 @@ export class ProtocolUseCase {
     return r.value;
   }
 }
-

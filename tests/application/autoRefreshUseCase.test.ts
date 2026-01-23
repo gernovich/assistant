@@ -77,4 +77,3 @@ describe("AutoRefreshUseCase", () => {
     vi.useRealTimers();
   });
 });
-

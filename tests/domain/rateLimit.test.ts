@@ -7,4 +7,3 @@ describe("domain/policies/rateLimit", () => {
     expect(shouldEmitByInterval({ nowMs: 49, lastAtMs: 0, intervalMs: 50 })).toBe(false);
   });
 });
-

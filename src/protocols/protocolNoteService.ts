@@ -20,12 +20,18 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
   private app: App;
   private vault: Vault;
   private protocolsDir: string;
+  private getLogService?: () => { warn: (message: string, data?: Record<string, unknown>) => void };
 
   /** @param protocolsDir Папка протоколов в vault. */
-  constructor(app: App, protocolsDir: string) {
+  constructor(
+    app: App,
+    protocolsDir: string,
+    params?: { logService?: () => { warn: (message: string, data?: Record<string, unknown>) => void } },
+  ) {
     this.app = app;
     this.vault = app.vault;
     this.protocolsDir = normalizePath(protocolsDir);
+    this.getLogService = params?.logService;
   }
 
   /** Обновить папку протоколов (например после изменения настроек). */
@@ -114,13 +120,19 @@ export class ProtocolNoteService implements ProtocolNoteRepository {
     const text = await this.vault.read(meetingFile);
     const mr = parseMeetingNoteFromMd(text, { fileBasename: meetingFile.basename });
     if (!mr.ok) {
-      console.warn("Протокол: не удалось распарсить карточку встречи (frontmatter)", { code: mr.error.code, error: mr.error.message });
+      this.getLogService?.().warn("Протокол: не удалось распарсить карточку встречи (frontmatter)", {
+        code: mr.error.code,
+        error: mr.error.message,
+        file: meetingFile.path,
+      });
       // Не ломаем UX: всё равно создаём “ручной” пустой протокол.
       return await this.createEmptyProtocol();
     }
     const m = mr.value;
     const calendarId = String(m.calendar_id ?? "manual");
-    const uid = String(m.event_id ?? makePseudoRandomId({ prefix: "manual", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) }));
+    const uid = String(
+      m.event_id ?? makePseudoRandomId({ prefix: "manual", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) }),
+    );
     const summary = String(m.summary ?? meetingFile.basename ?? "Встреча");
     const startIso = String(m.start ?? "");
     const endIso = String(m.end ?? "");

@@ -44,4 +44,3 @@ describe("domain/policies/recordingTarget", () => {
     expect(r.selectedEventKey).toBeUndefined();
   });
 });
-

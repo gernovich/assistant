@@ -50,9 +50,7 @@ export type WindowRequest = {
   action: WindowAction;
 };
 
-export type WindowResponse =
-  | { id: string; ok: true }
-  | { id: string; ok: false; error: { code: string; message: string; cause?: string } };
+export type WindowResponse = { id: string; ok: true } | { id: string; ok: false; error: { code: string; message: string; cause?: string } };
 
 export type WindowRequestEvent = IpcEnvelope<"assistant/window/request", WindowRequest>;
 export type WindowResponseEvent = IpcEnvelope<"assistant/window/response", WindowResponse>;
@@ -73,4 +71,3 @@ export type RecordingStatsDto = {
 };
 
 export type RecordingVizDto = { amp01: number };
-

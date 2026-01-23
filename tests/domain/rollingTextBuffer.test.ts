@@ -12,4 +12,3 @@ describe("domain/policies/rollingTextBuffer", () => {
     expect(r.remainder).toBe("part");
   });
 });
-

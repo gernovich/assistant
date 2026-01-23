@@ -17,8 +17,7 @@ describe("reminderWindowHtml", () => {
       minutesBefore: 5,
     });
 
-    expect(html).toContain("window.__assistantElectron.sendTo(hostId, \"assistant/window/request\", req)");
+    expect(html).toContain('window.__assistantElectron.sendTo(hostId, "assistant/window/request", req)');
     expect(html).not.toContain("document.title");
   });
 });
-

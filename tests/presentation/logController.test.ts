@@ -38,4 +38,3 @@ describe("DefaultLogController", () => {
     expect(c.list()).toHaveLength(0);
   });
 });
-

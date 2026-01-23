@@ -156,7 +156,9 @@ export class PersonNoteService implements PersonRepository {
 }
 
 export function renderPersonCard(params: { displayName: string; email?: string }): string {
-  const id = params.email ? makePersonIdFromEmail(params.email) : makePseudoRandomId({ prefix: "person", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) });
+  const id = params.email
+    ? makePersonIdFromEmail(params.email)
+    : makePseudoRandomId({ prefix: "person", nowMs: Date.now(), randomHex: Math.random().toString(16).slice(2) });
   return renderPersonCardMarkdown({
     id,
     displayName: params.displayName,

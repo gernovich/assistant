@@ -100,4 +100,3 @@ describe("AuthorizeGoogleCaldavUseCase", () => {
     expect(notice).toHaveBeenCalledTimes(0); // Result-метод не показывает UI сам
   });
 });
-

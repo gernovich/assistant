@@ -68,4 +68,3 @@ export function buildMeetingFrontmatterData(ev: Event): MeetingFrontmatterData {
     attendeesUnknown: grouped.unknown,
   };
 }
-

@@ -31,4 +31,3 @@ describe("windowBridge (push)", () => {
     await expect(p).resolves.toBeUndefined();
   });
 });
-

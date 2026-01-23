@@ -12,4 +12,3 @@ describe("domain/policies/recordingChunkTiming", () => {
     expect(nextChunkInMsPolicy({ nowMs: 2000, lastChunkAtMs: 0, chunkEveryMs: 1000 })).toBe(0);
   });
 });
-

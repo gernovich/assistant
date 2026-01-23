@@ -9,7 +9,12 @@ function makeSettings(overrides?: Partial<AssistantSettings>): AssistantSettings
 
 function makeEvent(params?: Partial<Event>): Event {
   return {
-    calendar: { id: "cal", name: "Cal", type: "caldav", config: { id: "cal", name: "Cal", type: "caldav", enabled: true, caldav: { accountId: "a1", calendarUrl: "" } } },
+    calendar: {
+      id: "cal",
+      name: "Cal",
+      type: "caldav",
+      config: { id: "cal", name: "Cal", type: "caldav", enabled: true, caldav: { accountId: "a1", calendarUrl: "" } },
+    },
     id: "ev",
     summary: "Meet",
     start: new Date("2020-01-01T10:00:00Z"),
@@ -90,4 +95,3 @@ describe("RsvpUseCase", () => {
     expect(setMyPartstatInCalendar).toHaveBeenCalledTimes(1);
   });
 });
-

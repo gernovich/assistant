@@ -18,4 +18,3 @@ describe("domain/identity/eventKey", () => {
     expect(parseEventKey("ab")).toBeNull();
   });
 });
-

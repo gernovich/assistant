@@ -1,7 +1,5 @@
 import type { Event } from "../types";
-import {
-  installElectronIpcRequestBridge,
-} from "../presentation/electronWindow/bridge/windowBridge";
+import { installElectronIpcRequestBridge } from "../presentation/electronWindow/bridge/windowBridge";
 import { buildReminderWindowHtml } from "../presentation/electronWindow/reminder/reminderWindowHtml";
 import type { WindowAction } from "../presentation/electronWindow/bridge/windowBridgeContracts";
 import type { WindowRequest } from "../presentation/electronWindow/bridge/windowBridgeContracts";
@@ -140,10 +138,7 @@ export function showElectronReminderWindow(params: {
   const initialStatusLine = kind === "start" || initialDiffMs <= 0 ? `Уже началась` : `Через ${formatCountdownRu(initialDiffMs)}`;
   const initialTitleLine = initialEventLine;
 
-  const detailsText = [
-    `Начало: ${ev.start.toLocaleString("ru-RU")}`,
-    ev.end ? `Конец: ${ev.end.toLocaleString("ru-RU")}` : "",
-  ]
+  const detailsText = [`Начало: ${ev.start.toLocaleString("ru-RU")}`, ev.end ? `Конец: ${ev.end.toLocaleString("ru-RU")}` : ""]
     .filter(Boolean)
     .join("\n");
 
@@ -231,4 +226,3 @@ export function showElectronReminderWindow(params: {
 
   return true;
 }
-

@@ -12,4 +12,3 @@ describe("domain/policies/wikiLink", () => {
     expect(wikiLinkLine({ targetPath: "Ассистент/Протоколы/p.md", label: "P" })).toBe("- [[Ассистент/Протоколы/p|P]]");
   });
 });
-

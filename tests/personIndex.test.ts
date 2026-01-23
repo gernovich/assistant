@@ -22,11 +22,7 @@ function makeIndex(params: { files: FakeFile[]; fmByPath: Record<string, any> })
 describe("PersonIndex", () => {
   it("findByEmail: finds card by normalized email inside peopleRoot", () => {
     const idx = makeIndex({
-      files: [
-        { path: "Ассистент/Люди/a.md" },
-        { path: "Ассистент/Люди/b.md" },
-        { path: "Ассистент/Проекты/p.md" },
-      ],
+      files: [{ path: "Ассистент/Люди/a.md" }, { path: "Ассистент/Люди/b.md" }, { path: "Ассистент/Проекты/p.md" }],
       fmByPath: {
         "Ассистент/Люди/a.md": { [FM.emails]: ["  Alice@Example.COM  "] },
         "Ассистент/Люди/b.md": { [FM.emails]: ["bob@example.com"] },
@@ -56,4 +52,3 @@ describe("PersonIndex", () => {
     expect(out.map((x) => x.path)).toEqual(["Ассистент/Люди/b.md", "Ассистент/Люди/c.md", "Ассистент/Люди/a.md"]);
   });
 });
-

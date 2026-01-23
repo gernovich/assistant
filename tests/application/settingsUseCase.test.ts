@@ -124,4 +124,3 @@ describe("SettingsUseCase", () => {
     expect(calls).toEqual(["info:Настройки: сохранить+применить (start)", "saveData", "error:Настройки: сохранить+применить (ошибка)"]);
   });
 });
-

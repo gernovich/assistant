@@ -28,4 +28,3 @@ describe("shared/result", () => {
     expect(isErr(b)).toBe(true);
   });
 });
-

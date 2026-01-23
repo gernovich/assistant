@@ -11,4 +11,3 @@ import { pickDefaultRecordingTargetPolicy, type RecordingTarget } from "../domai
 export function pickDefaultRecordingTarget(events: Event[], now: Date, minutesWindow = 5): RecordingTarget {
   return pickDefaultRecordingTargetPolicy(events, now, minutesWindow, makeEventKey);
 }
-

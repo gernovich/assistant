@@ -102,4 +102,3 @@ describe("ProtocolFromMeetingUseCase", () => {
     expect(notice).toHaveBeenCalled();
   });
 });
-

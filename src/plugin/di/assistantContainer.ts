@@ -73,7 +73,9 @@ export function createAssistantContainer(params: {
   c.register<App>("obsidian.app", { useValue: params.app });
   c.register<MutableRef<AssistantSettings>>("assistant.settingsRef", { useValue: params.settingsRef });
   // Удобный token для случаев, где нужен "снимок" текущих настроек на момент resolve.
-  c.register<AssistantSettings>("assistant.settings", { useFactory: (cc) => cc.resolve<MutableRef<AssistantSettings>>("assistant.settingsRef").get() });
+  c.register<AssistantSettings>("assistant.settings", {
+    useFactory: (cc) => cc.resolve<MutableRef<AssistantSettings>>("assistant.settingsRef").get(),
+  });
   c.register<PluginContextPaths>("assistant.paths", { useValue: params.paths });
   c.register<PluginContextActions>("assistant.actions", { useValue: params.actions });
   c.register<string>("assistant.version", { useValue: params.version ?? "" });
@@ -102,12 +104,17 @@ export function createAssistantContainer(params: {
   });
 
   // Calendar: registry + service
-  c.register<CalendarProviderRegistry>("calendar.providerRegistry", {
-    useFactory: (cc) => createDefaultCalendarProviderRegistry(cc.resolve<AssistantSettings>("assistant.settings")),
-  });
-  c.register(CalendarService, {
-    useFactory: (cc) => new CalendarService(cc.resolve<AssistantSettings>("assistant.settings"), cc.resolve<CalendarProviderRegistry>("calendar.providerRegistry")),
-  });
+  // Важно: это должен быть один инстанс на весь runtime плагина (иначе Sync и Повестка видят разные сторы).
+  //
+  // tsyringe@4.x не поддерживает lifecycle Singleton для FactoryProvider (useFactory).
+  // Поэтому singletons, которые создаются фабрикой, фиксируем в composition root как инстансы.
+  const calendarProviderRegistry: CalendarProviderRegistry = createDefaultCalendarProviderRegistry(
+    c.resolve<AssistantSettings>("assistant.settings"),
+  );
+  c.register<CalendarProviderRegistry>("calendar.providerRegistry", { useValue: calendarProviderRegistry });
+
+  const calendarService = new CalendarService(c.resolve<AssistantSettings>("assistant.settings"), calendarProviderRegistry);
+  c.register(CalendarService, { useValue: calendarService });
 
   // Recording: use-case + facade + service
   c.register(RecordingUseCase, {
@@ -189,15 +196,20 @@ export function createAssistantContainer(params: {
   });
 
   c.register(ProtocolNoteService, {
-    useFactory: (cc) => new ProtocolNoteService(cc.resolve<App>("obsidian.app"), cc.resolve<AssistantSettings>("assistant.settings").folders.protocols),
+    useFactory: (cc) =>
+      new ProtocolNoteService(cc.resolve<App>("obsidian.app"), cc.resolve<AssistantSettings>("assistant.settings").folders.protocols, {
+        logService: () => cc.resolve<LogService>("assistant.logService"),
+      }),
   });
 
   c.register(PersonNoteService, {
-    useFactory: (cc) => new PersonNoteService(cc.resolve<App>("obsidian.app"), cc.resolve<AssistantSettings>("assistant.settings").folders.people),
+    useFactory: (cc) =>
+      new PersonNoteService(cc.resolve<App>("obsidian.app"), cc.resolve<AssistantSettings>("assistant.settings").folders.people),
   });
 
   c.register(ProjectNoteService, {
-    useFactory: (cc) => new ProjectNoteService(cc.resolve<App>("obsidian.app"), cc.resolve<AssistantSettings>("assistant.settings").folders.projects),
+    useFactory: (cc) =>
+      new ProjectNoteService(cc.resolve<App>("obsidian.app"), cc.resolve<AssistantSettings>("assistant.settings").folders.projects),
   });
 
   c.register(BaseWorkspaceService, {
@@ -243,17 +255,6 @@ export function createAssistantContainer(params: {
         },
       });
     },
-  });
-
-  c.register(SyncService, {
-    useFactory: (cc) =>
-      new SyncService(
-        cc.resolve(CalendarService),
-        cc.resolve(EventNoteService),
-        cc.resolve(NotificationScheduler),
-        cc.resolve<LogService>("assistant.logService"),
-        cc.resolve(PersonNoteService),
-      ),
   });
 
   /**
@@ -330,7 +331,9 @@ export function createAssistantContainer(params: {
     useFactory: (cc) =>
       new SettingsUseCase({
         log: cc.resolve<LogService>("assistant.logService"),
-        getSettingsSummaryForLog: cc.resolve<(s: AssistantSettings) => Record<string, unknown>>("assistant.controller.getSettingsSummaryForLog"),
+        getSettingsSummaryForLog: cc.resolve<(s: AssistantSettings) => Record<string, unknown>>(
+          "assistant.controller.getSettingsSummaryForLog",
+        ),
         saveData: cc.resolve<(s: AssistantSettings) => Promise<void>>("assistant.controller.saveData"),
         applyCoreSettings: cc.resolve<(s: AssistantSettings) => Promise<void>>("assistant.controller.applyCoreSettings"),
         ensureVaultStructure: cc.resolve<(s: AssistantSettings) => Promise<void>>("assistant.controller.ensureVaultStructure"),
@@ -344,7 +347,11 @@ export function createAssistantContainer(params: {
 
   // Индексы/контроллеры Presentation
   c.register(ProtocolIndex, {
-    useFactory: (cc) => new ProtocolIndex({ vault: cc.resolve("assistant.controller.vaultPort") as any, metadataCache: cc.resolve("assistant.controller.metadataCachePort") as any }),
+    useFactory: (cc) =>
+      new ProtocolIndex({
+        vault: cc.resolve("assistant.controller.vaultPort") as any,
+        metadataCache: cc.resolve("assistant.controller.metadataCachePort") as any,
+      }),
   });
 
   c.register("assistant.factory.agendaController", {
@@ -363,14 +370,13 @@ export function createAssistantContainer(params: {
   });
 
   c.register("assistant.factory.logController", {
-    useFactory: (cc) =>
-      () =>
-        new DefaultLogController({
-          log: cc.resolve<LogService>("assistant.logService"),
-          openTodayFile: cc.resolve<() => void>("assistant.controller.openTodayLogFile"),
-          clearTodayFile: cc.resolve<() => void>("assistant.controller.clearTodayLogFile"),
-          openAgenda: cc.resolve<() => void>("assistant.controller.openAgendaView"),
-        }),
+    useFactory: (cc) => () =>
+      new DefaultLogController({
+        log: cc.resolve<LogService>("assistant.logService"),
+        openTodayFile: cc.resolve<() => void>("assistant.controller.openTodayLogFile"),
+        clearTodayFile: cc.resolve<() => void>("assistant.controller.clearTodayLogFile"),
+        openAgenda: cc.resolve<() => void>("assistant.controller.openAgendaView"),
+      }),
   });
 
   c.register(RsvpUseCase, {
@@ -399,7 +405,8 @@ export function createAssistantContainer(params: {
       new OutboxApplyUseCase({
         list: () => cc.resolve(OutboxService).list(),
         replace: (items) => cc.resolve(OutboxService).replace(items),
-        setMyPartstatInCalendar: (p, partstat) => cc.resolve(CalendarService).setMyPartstat({ calendar: p.calendar, id: p.id, summary: "", start: p.start }, partstat as any),
+        setMyPartstatInCalendar: (p, partstat) =>
+          cc.resolve(CalendarService).setMyPartstat({ calendar: p.calendar, id: p.id, summary: "", start: p.start }, partstat as any),
         notice: cc.resolve<(m: string) => void>("assistant.controller.notice"),
         log: cc.resolve<LogService>("assistant.logService"),
       }),
@@ -429,7 +436,8 @@ export function createAssistantContainer(params: {
         getActiveFile: () => workspace.getActiveFile(),
         readFileText: (f) => vault.read(f),
         getFrontmatterCache: (f) => mc.getFileCache(f)?.frontmatter ?? undefined,
-        setMyPartstatInCalendar: (p, partstat) => cc.resolve(CalendarService).setMyPartstat({ calendar: p.calendar, id: p.id, summary: "", start: p.start }, partstat),
+        setMyPartstatInCalendar: (p, partstat) =>
+          cc.resolve(CalendarService).setMyPartstat({ calendar: p.calendar, id: p.id, summary: "", start: p.start }, partstat),
         enqueueOutbox: (it) => cc.resolve(OutboxService).enqueue(it),
         notice: cc.resolve<(m: string) => void>("assistant.controller.notice"),
         log: cc.resolve<LogService>("assistant.logService"),
@@ -538,9 +546,14 @@ export function createAssistantContainer(params: {
       return new RecordingDialogUseCase({
         getSettings: cc.resolve<() => AssistantSettings>("assistant.controller.getSettings"),
         getEvents: () => cc.resolve(CalendarService).getEvents(),
-        getRecordingsProtocolsList: (limit) => protocolIndex.listRecent({ protocolsRoot: cc.resolve<() => AssistantSettings>("assistant.controller.getSettings")().folders.protocols, limit }),
+        getRecordingsProtocolsList: (limit) =>
+          protocolIndex.listRecent({
+            protocolsRoot: cc.resolve<() => AssistantSettings>("assistant.controller.getSettings")().folders.protocols,
+            limit,
+          }),
         warnLinuxNativeDepsOnOpen: cc.resolve<() => void>("assistant.controller.warnLinuxNativeDepsOnOpen"),
-        createProtocolFromEvent: async (ev) => (await cc.resolve<(ev: any) => Promise<{ path: string }>>("assistant.controller.createProtocolFromEvent")(ev)).path,
+        createProtocolFromEvent: async (ev) =>
+          (await cc.resolve<(ev: any) => Promise<{ path: string }>>("assistant.controller.createProtocolFromEvent")(ev)).path,
         createEmptyProtocolAndOpen: async () => {
           const r = await cc.resolve(EmptyProtocolUseCase).createAndOpenResult();
           if (!r.ok) return "";
@@ -575,4 +588,3 @@ export function createAssistantContainer(params: {
 
   return c;
 }
-

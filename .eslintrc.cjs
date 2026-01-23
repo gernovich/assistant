@@ -30,4 +30,3 @@ module.exports = {
   },
   ignorePatterns: ["dist/", "coverage/", "node_modules/", "recordings/"],
 };
-

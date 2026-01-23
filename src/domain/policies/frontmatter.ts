@@ -56,4 +56,3 @@ export function upsertFrontmatter(md: string, updates: Record<string, string | n
   const nextFm = stringifyFrontmatterMap(cur);
   return ["---", nextFm, "---", body.startsWith("\n") ? body.slice(1) : body].join("\n");
 }
-

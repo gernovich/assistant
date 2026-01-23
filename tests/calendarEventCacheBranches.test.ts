@@ -52,4 +52,3 @@ describe("CalendarEventCache decodeSnapshot branches", () => {
     expect(ev.calendar.id).toBe("cal1");
   });
 });
-

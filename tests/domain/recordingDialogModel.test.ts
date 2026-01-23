@@ -52,4 +52,3 @@ describe("domain/policies/recordingDialogModel", () => {
     expect(m.lockedLabel).toBe("L:past");
   });
 });
-

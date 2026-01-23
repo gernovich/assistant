@@ -26,4 +26,3 @@ describe("decideMeetingNoteFile", () => {
     expect(decideMeetingNoteFile({ targetPath: "A.md" })).toEqual({ kind: "create_new", shouldIndexEventKey: true });
   });
 });
-

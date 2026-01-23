@@ -38,4 +38,3 @@ describe("DiscoverCaldavCalendarsUseCase", () => {
     expect(log.error).toHaveBeenCalledTimes(1);
   });
 });
-

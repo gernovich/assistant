@@ -29,7 +29,7 @@ export class UpdateSettingsUseCase {
       await this.deps.saveSettingsAndApply();
       return ok(undefined);
     } catch (e) {
-      this.deps.log.error("Settings: update failed", { error: String((e as unknown) ?? "unknown") });
+      this.deps.log.error("Настройки: update: ошибка", { error: e });
       return err({
         code: APP_ERROR.SETTINGS,
         message: "Не удалось сохранить/применить настройки",
@@ -46,4 +46,3 @@ export class UpdateSettingsUseCase {
     void (await this.updateResult(mutator));
   }
 }
-

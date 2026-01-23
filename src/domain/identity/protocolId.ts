@@ -11,4 +11,3 @@ export type ProtocolId = string & { readonly __brand: "ProtocolId" };
 export function protocolIdFromEventKey(eventKey: EventKey): ProtocolId {
   return String(eventKey) as ProtocolId;
 }
-

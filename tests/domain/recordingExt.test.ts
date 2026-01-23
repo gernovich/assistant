@@ -11,4 +11,3 @@ describe("domain/policies/recordingExt", () => {
     expect(recordingExtFromMimeType("")).toBe("webm");
   });
 });
-

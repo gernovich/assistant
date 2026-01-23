@@ -85,7 +85,15 @@ export class OutboxApplyUseCase {
         applied++;
       } catch (e) {
         const msg = String((e as unknown) ?? "неизвестная ошибка");
-        this.deps.log.warn("Outbox: не удалось применить действие", { id: it.id, error: msg });
+        this.deps.log.warn("Outbox: не удалось применить действие", {
+          id: it.id,
+          error: e,
+          message: msg,
+          calendarId,
+          uid,
+          startIso,
+          partstat,
+        });
         remaining.push(it);
         errors.push({
           id: it.id,
@@ -107,7 +115,7 @@ export class OutboxApplyUseCase {
     const r = await this.executeResult();
     if (!r.ok) {
       this.deps.notice("Ассистент: не удалось применить офлайн-очередь (подробности в логе)");
-      this.deps.log.warn("Outbox: applyAll failed", { code: r.error.code, error: r.error.cause });
+      this.deps.log.warn("Outbox: applyAll: ошибка", { code: r.error.code, error: r.error.cause });
       return { applied: 0, remaining: 0 };
     }
     if (r.value.applied === 0 && r.value.remaining === 0) {
@@ -118,4 +126,3 @@ export class OutboxApplyUseCase {
     return { applied: r.value.applied, remaining: r.value.remaining };
   }
 }
-

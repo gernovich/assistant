@@ -31,7 +31,6 @@ describe("vault re-export modules", () => {
   });
 
   test("yamlEscape re-export works", () => {
-    expect(yamlEscape("a\nb")).toBe("\"a b\"");
+    expect(yamlEscape("a\nb")).toBe('"a b"');
   });
 });
-

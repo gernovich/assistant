@@ -208,4 +208,3 @@ describe("EntityIndex", () => {
     await expect(idx.readJsonStringArrayFromMd({ path: "err.md" }, "emails")).resolves.toEqual([]);
   });
 });
-

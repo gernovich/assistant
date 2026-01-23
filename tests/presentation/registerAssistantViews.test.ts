@@ -15,11 +15,10 @@ describe("registerAssistantViews", () => {
     registerAssistantViews(
       plugin,
       { settings: {} as any },
-      { createAgendaController: () => ({} as any), createLogController: () => ({} as any) },
+      { createAgendaController: () => ({}) as any, createLogController: () => ({}) as any },
     );
 
     expect(types).toContain(AGENDA_VIEW_TYPE);
     expect(types).toContain(LOG_VIEW_TYPE);
   });
 });
-

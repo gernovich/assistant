@@ -15,4 +15,3 @@ describe("domain/policies/linuxNativeFfmpegArgs", () => {
     expect(args.join(" ")).toContain("pipe:1");
   });
 });
-

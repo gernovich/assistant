@@ -35,4 +35,3 @@ export function hasMyAttendeePolicy(ev: Event, myEmails: string[]): boolean {
   }
   return false;
 }
-

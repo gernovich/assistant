@@ -23,4 +23,3 @@ describe("CaldavAccountsUseCase", () => {
     expect(notice).toHaveBeenCalled();
   });
 });
-

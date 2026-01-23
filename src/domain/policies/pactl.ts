@@ -9,7 +9,12 @@ export function parsePactlListShortRows(stdout: string): string[][] {
     .split("\n")
     .map((x) => x.trim())
     .filter(Boolean)
-    .map((row) => row.split(/\s+/).map((p) => p.trim()).filter(Boolean));
+    .map((row) =>
+      row
+        .split(/\s+/)
+        .map((p) => p.trim())
+        .filter(Boolean),
+    );
 }
 
 export function parsePactlDefaultSinkFromInfo(stdout: string): string {
@@ -23,7 +28,12 @@ export function parsePactlDefaultSourceFromInfo(stdout: string): string {
 }
 
 export function parsePactlGetDefaultSink(stdout: string): string {
-  return String(stdout ?? "").trim().split("\n")[0]?.trim() ?? "";
+  return (
+    String(stdout ?? "")
+      .trim()
+      .split("\n")[0]
+      ?.trim() ?? ""
+  );
 }
 
 export function parseMonitorSourcesFromListShortSources(stdout: string): {
@@ -40,7 +50,9 @@ export function parseMonitorSourcesFromListShortSources(stdout: string): {
 
   for (const parts of rows) {
     const name = String(parts[1] ?? "").trim();
-    const state = String(parts[parts.length - 1] ?? "").trim().toUpperCase();
+    const state = String(parts[parts.length - 1] ?? "")
+      .trim()
+      .toUpperCase();
     if (!name.endsWith(".monitor")) continue;
     monitorSources.add(name);
     fallbackFirstMonitors.push(name);
@@ -57,7 +69,9 @@ export function parseSinksFromListShortSinks(stdout: string): { sinkIdxToName: M
   for (const parts of rows) {
     const idx = String(parts[0] ?? "").trim();
     const name = String(parts[1] ?? "").trim();
-    const state = String(parts[parts.length - 1] ?? "").trim().toUpperCase();
+    const state = String(parts[parts.length - 1] ?? "")
+      .trim()
+      .toUpperCase();
     if (idx && name) sinkIdxToName.set(idx, name);
     if (name && state === "RUNNING") runningSinks.push(name);
   }
@@ -69,7 +83,9 @@ export function countSinkInputsFromListShortSinkInputs(stdout: string): Map<stri
   const counts = new Map<string, { running: number; total: number }>();
   for (const parts of rows) {
     const sinkIdx = String(parts[1] ?? "").trim();
-    const state = String(parts[parts.length - 1] ?? "").trim().toUpperCase();
+    const state = String(parts[parts.length - 1] ?? "")
+      .trim()
+      .toUpperCase();
     if (!sinkIdx) continue;
     const cur = counts.get(sinkIdx) ?? { running: 0, total: 0 };
     cur.total += 1;
@@ -86,7 +102,7 @@ export function rankActiveSinkNames(params: {
   return Array.from(params.counts.entries())
     .map(([idx, c]) => ({ name: params.sinkIdxToName.get(idx) ?? "", running: c.running, total: c.total }))
     .filter((x) => Boolean(x.name))
-    .sort((a, b) => (b.running - a.running) || (b.total - a.total))
+    .sort((a, b) => b.running - a.running || b.total - a.total)
     .map((x) => x.name);
 }
 
@@ -98,7 +114,9 @@ export function buildPulseMonitorCandidates(params: {
   defaultSinkFromGetDefaultSink?: string;
 }): string[] {
   const out: string[] = [];
-  const { monitorSources, runningMonitors, idleMonitors, fallbackFirstMonitors } = parseMonitorSourcesFromListShortSources(params.sourcesStdout);
+  const { monitorSources, runningMonitors, idleMonitors, fallbackFirstMonitors } = parseMonitorSourcesFromListShortSources(
+    params.sourcesStdout,
+  );
 
   // 1) sink-inputs -> active sink -> <sink>.monitor
   try {
@@ -171,4 +189,3 @@ export function buildPulseMicCandidates(params: { defaultSourceFromInfo?: string
   }
   return uniq;
 }
-

@@ -19,4 +19,3 @@ export function parseEventKey(raw: string): EventKey | null {
   if (i <= 0 || i === s.length - 1) return null;
   return s as EventKey;
 }
-

@@ -20,4 +20,3 @@ export function splitLinesKeepRemainder(buf: string): { lines: string[]; remaind
   const remainder = parts.pop() ?? "";
   return { lines: parts.filter((x) => x !== ""), remainder };
 }
-

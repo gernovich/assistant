@@ -27,9 +27,8 @@ export class CreateProjectCardUseCase {
   async createAndOpen(params?: { title?: string }): Promise<void> {
     const r = await this.createAndOpenResult(params);
     if (!r.ok) {
-      this.deps.log.warn("CreateProjectCardUseCase: failed", { code: r.error.code, error: r.error.cause });
+      this.deps.log.warn("Projects: create project card: ошибка", { code: r.error.code, error: r.error.cause });
       this.deps.notice(r.error.message);
     }
   }
 }
-

@@ -11,4 +11,3 @@ describe("sortProtocolInfosNewestFirst", () => {
     expect(out.map((x: any) => x.id)).toEqual(["b", "a", "c"]);
   });
 });
-

@@ -20,4 +20,3 @@ export interface MeetingNoteRepository {
   linkProtocol(ev: Event, protocolFile: VaultFileLike): Promise<void>;
   listProtocolInfos(ev: Event): Promise<Array<{ file: VaultFileLike; start?: Date }>>;
 }
-

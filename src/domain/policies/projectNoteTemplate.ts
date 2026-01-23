@@ -58,4 +58,3 @@ export function renderProjectCardMarkdown(params: {
     "",
   ].join("\n");
 }
-

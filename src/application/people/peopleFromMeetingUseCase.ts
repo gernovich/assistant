@@ -44,11 +44,10 @@ export class PeopleFromMeetingUseCase {
         await this.deps.people.ensureByEmail({ email });
         ensured++;
       } catch (e) {
-        this.deps.log.warn("People: ensureByEmail ошибка (пропускаю)", { email, error: String((e as unknown) ?? "неизвестная ошибка") });
+        this.deps.log.warn("People: ensureByEmail: ошибка (пропускаю)", { email, error: e });
       }
     }
 
     this.deps.notice(`Ассистент: карточки людей обработаны: ${ensured}`);
   }
 }
-

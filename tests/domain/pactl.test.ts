@@ -14,11 +14,7 @@ describe("domain/policies/pactl", () => {
   });
 
   it("builds monitor candidates from sources list + default sink", () => {
-    const sources = [
-      "1 sinkA.monitor module RUNNING",
-      "2 sinkB.monitor module IDLE",
-      "3 mic module RUNNING",
-    ].join("\n");
+    const sources = ["1 sinkA.monitor module RUNNING", "2 sinkB.monitor module IDLE", "3 mic module RUNNING"].join("\n");
     const cands = buildPulseMonitorCandidates({
       sourcesStdout: sources,
       defaultSinkFromInfo: "sinkA",
@@ -33,4 +29,3 @@ describe("domain/policies/pactl", () => {
     expect(c).toContain("@DEFAULT_SOURCE@");
   });
 });
-

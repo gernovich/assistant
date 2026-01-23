@@ -15,10 +15,7 @@ export type GroupedAttendeePersonIds = {
   unknown: string[];
 };
 
-export function groupAttendeePersonIds(
-  attendees: AttendeeLike[],
-  toPersonId: (email: string) => string,
-): GroupedAttendeePersonIds {
+export function groupAttendeePersonIds(attendees: AttendeeLike[], toPersonId: (email: string) => string): GroupedAttendeePersonIds {
   const accepted: string[] = [];
   const declined: string[] = [];
   const tentative: string[] = [];
@@ -45,4 +42,3 @@ export function groupAttendeePersonIds(
   const all = Array.from(allSet.values());
   return { all, accepted, declined, tentative, needsAction, unknown };
 }
-

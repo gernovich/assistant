@@ -71,4 +71,3 @@ export class SettingsUseCase {
     void (await this.saveAndApplyResult(settings));
   }
 }
-

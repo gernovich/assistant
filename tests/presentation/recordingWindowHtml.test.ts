@@ -16,8 +16,7 @@ describe("recordingWindowHtml", () => {
       hostWebContentsId: 123,
     });
 
-    expect(html).toContain("window.__assistantElectron.sendTo(hostId, \"assistant/window/request\", req)");
+    expect(html).toContain('window.__assistantElectron.sendTo(hostId, "assistant/window/request", req)');
     expect(html).not.toContain("document.title");
   });
 });
-

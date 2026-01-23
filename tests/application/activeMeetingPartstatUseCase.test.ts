@@ -72,4 +72,3 @@ describe("ActiveMeetingPartstatUseCase", () => {
     expect(notice).toHaveBeenCalledWith("Ассистент: не удалось применить. Действие добавлено в офлайн-очередь.");
   });
 });
-

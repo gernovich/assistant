@@ -15,7 +15,14 @@ describe("parseIcs", () => {
       id: "cal-color",
       name: "cal-color",
       type: "caldav",
-      config: { id: "cal-color", name: "cal-color", type: "caldav", enabled: true, color: "#00ff00", caldav: { accountId: "a", calendarUrl: "u" } },
+      config: {
+        id: "cal-color",
+        name: "cal-color",
+        type: "caldav",
+        enabled: true,
+        color: "#00ff00",
+        caldav: { accountId: "a", calendarUrl: "u" },
+      },
     };
     const ics = [
       "BEGIN:VCALENDAR",

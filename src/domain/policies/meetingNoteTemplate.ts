@@ -85,4 +85,3 @@ export function renderMeetingNoteMarkdown(params: {
   if (!params.includeUserSections) return base;
   return base + ["", "- (пока пусто)", "", "## Заметки", "", "<!-- ASSISTANT:USER -->", ""].join("\n");
 }
-

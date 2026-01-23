@@ -38,11 +38,7 @@ export type MetadataCachePort = {
 };
 
 export type PluginPort = {
-  addRibbonIcon: (
-    icon: string,
-    title: string,
-    callback: (evt: MouseEvent) => unknown,
-  ) => HTMLElement;
+  addRibbonIcon: (icon: string, title: string, callback: (evt: MouseEvent) => unknown) => HTMLElement;
   // Команды / views тоже часть инфраструктурного API Obsidian. Держим структурно и “широко”.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   addCommand: (cmd: any) => void;
@@ -51,4 +47,3 @@ export type PluginPort = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerEvent: (eventRef: any) => void;
 };
-

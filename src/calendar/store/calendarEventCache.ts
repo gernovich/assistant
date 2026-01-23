@@ -96,7 +96,8 @@ export class CalendarEventCache {
     try {
       const raw = await fs.readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as CalendarCacheSnapshotV1 | CalendarCacheSnapshotV2 | CalendarCacheSnapshotV3;
-      if (!parsed || (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) || typeof parsed.savedAtMs !== "number") return null;
+      if (!parsed || (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) || typeof parsed.savedAtMs !== "number")
+        return null;
       return parsed;
     } catch {
       return null;
@@ -151,7 +152,9 @@ function encodeSnapshot(lastGood: Record<CalendarId, { fetchedAt: number; events
         myPartstat: ev.status,
         timeZone: ev.timeZone,
         rrule: ev.recurrence?.rrule,
-        remindersMinutesBefore: ev.reminders?.map((r) => r.minutesBefore).filter((n): n is number => typeof n === "number" && Number.isFinite(n)),
+        remindersMinutesBefore: ev.reminders
+          ?.map((r) => r.minutesBefore)
+          .filter((n): n is number => typeof n === "number" && Number.isFinite(n)),
         eventColor: ev.color?.value,
       })),
     };
@@ -159,7 +162,9 @@ function encodeSnapshot(lastGood: Record<CalendarId, { fetchedAt: number; events
   return { version: 3, savedAtMs: Date.now(), calendars };
 }
 
-function decodeSnapshot(snap: CalendarCacheSnapshotV1 | CalendarCacheSnapshotV2 | CalendarCacheSnapshotV3): Record<CalendarId, { fetchedAt: number; events: Event[] }> {
+function decodeSnapshot(
+  snap: CalendarCacheSnapshotV1 | CalendarCacheSnapshotV2 | CalendarCacheSnapshotV3,
+): Record<CalendarId, { fetchedAt: number; events: Event[] }> {
   const out: Record<CalendarId, { fetchedAt: number; events: Event[] }> = {};
   for (const [calendarId, v] of Object.entries(snap.calendars ?? {})) {
     const fetchedAt = Number(v?.fetchedAtMs);
@@ -182,7 +187,12 @@ function decodeSnapshot(snap: CalendarCacheSnapshotV1 | CalendarCacheSnapshotV2 
           const eventColor = "eventColor" in e && e.eventColor ? String(e.eventColor) : undefined;
           const id = "id" in e && e.id ? String(e.id) : "uid" in e && (e as any).uid ? String((e as any).uid) : "";
           if (!id) return null;
-          const calendar: Calendar = { id: calendarId, name: "", type: "ics_url", config: ({ id: calendarId, name: "", type: "ics_url", enabled: true } as unknown) as CalendarConfig };
+          const calendar: Calendar = {
+            id: calendarId,
+            name: "",
+            type: "ics_url",
+            config: { id: calendarId, name: "", type: "ics_url", enabled: true } as unknown as CalendarConfig,
+          };
           const reminderPerson: Person = {};
           const reminderStatus: ReminderStatus = "planned";
           return {

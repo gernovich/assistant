@@ -14,4 +14,3 @@ export function sortProtocolInfosNewestFirst<T extends { start?: Date }>(items: 
   });
   return out;
 }
-

@@ -146,8 +146,12 @@ export class AssistantController {
     this.di.register("assistant.controller.notice", { useValue: (m: string) => this.notice.show(m) });
     this.di.register("assistant.controller.openExternal", { useValue: (url: string) => this.openExternal(url) });
     this.di.register("assistant.controller.saveData", { useValue: (s: AssistantSettings) => this.saveData(s) });
-    this.di.register("assistant.controller.applyCoreSettings", { useValue: async (s: AssistantSettings) => await this.ctx.applySettings(s) });
-    this.di.register("assistant.controller.getSettingsSummaryForLog", { useValue: (s: AssistantSettings) => this.getSettingsSummaryForLog(s) });
+    this.di.register("assistant.controller.applyCoreSettings", {
+      useValue: async (s: AssistantSettings) => await this.ctx.applySettings(s),
+    });
+    this.di.register("assistant.controller.getSettingsSummaryForLog", {
+      useValue: (s: AssistantSettings) => this.getSettingsSummaryForLog(s),
+    });
     this.di.register("assistant.randomHex", { useValue: () => Math.random().toString(16).slice(2) });
 
     // SettingsUseCase ports
@@ -184,11 +188,21 @@ export class AssistantController {
     this.di.register("assistant.controller.openLogView", { useValue: () => void this.activateLogView() });
     this.di.register("assistant.controller.openEvent", { useValue: (ev: Event) => void this.ctx.eventNoteService.openEvent(ev) });
     this.di.register("assistant.controller.openRecorder", { useValue: (ev: Event) => this.openRecordingDialog(ev) });
-    this.di.register("assistant.controller.setMyPartstat", { useValue: async (ev: Event, partstat: NonNullable<Event["status"]>) => await this.di.resolve(RsvpUseCase).setMyPartstat(ev, partstat) });
-    this.di.register("assistant.controller.getProtocolMenuState", { useValue: async (ev: Event) => await this.di.resolve(ProtocolUseCase).getMenuState(ev) });
-    this.di.register("assistant.controller.openCurrentProtocol", { useValue: (ev: Event) => void this.di.resolve(ProtocolUseCase).openCurrent(ev) });
-    this.di.register("assistant.controller.openLatestProtocol", { useValue: (ev: Event) => void this.di.resolve(ProtocolUseCase).openLatest(ev) });
-    this.di.register("assistant.controller.createProtocolFromEventAction", { useValue: (ev: Event) => void this.di.resolve(ProtocolUseCase).createOrOpenFromEvent(ev) });
+    this.di.register("assistant.controller.setMyPartstat", {
+      useValue: async (ev: Event, partstat: NonNullable<Event["status"]>) => await this.di.resolve(RsvpUseCase).setMyPartstat(ev, partstat),
+    });
+    this.di.register("assistant.controller.getProtocolMenuState", {
+      useValue: async (ev: Event) => await this.di.resolve(ProtocolUseCase).getMenuState(ev),
+    });
+    this.di.register("assistant.controller.openCurrentProtocol", {
+      useValue: (ev: Event) => void this.di.resolve(ProtocolUseCase).openCurrent(ev),
+    });
+    this.di.register("assistant.controller.openLatestProtocol", {
+      useValue: (ev: Event) => void this.di.resolve(ProtocolUseCase).openLatest(ev),
+    });
+    this.di.register("assistant.controller.createProtocolFromEventAction", {
+      useValue: (ev: Event) => void this.di.resolve(ProtocolUseCase).createOrOpenFromEvent(ev),
+    });
     this.di.register("assistant.controller.debugShowReminder", { useValue: (ev: Event) => void this.debugShowReminder(ev) });
     this.di.register("assistant.controller.openTodayLogFile", { useValue: () => void this.ctx.logFileWriter.openTodayLog() });
     this.di.register("assistant.controller.clearTodayLogFile", { useValue: () => void this.ctx.logFileWriter.clearTodayLogFile() });
@@ -196,7 +210,9 @@ export class AssistantController {
     // Recording dialog deps
     this.di.register("assistant.controller.warnLinuxNativeDepsOnOpen", { useValue: () => void this.warnLinuxNativeDepsOnRecorderOpen() });
     this.di.register("assistant.controller.refreshCalendars", { useValue: async () => await this.refreshCalendars() });
-    this.di.register("assistant.controller.createProtocolFromEvent", { useValue: async (ev: Event) => await this.createProtocolFromEvent(ev) });
+    this.di.register("assistant.controller.createProtocolFromEvent", {
+      useValue: async (ev: Event) => await this.createProtocolFromEvent(ev),
+    });
     this.di.register("assistant.controller.recordingDialogFactory", {
       useValue: (p: any) =>
         new RecordingDialog({
@@ -238,12 +254,14 @@ export class AssistantController {
     const rsvpUseCase = this.di.resolve(RsvpUseCase);
     const protocolUseCase = this.di.resolve(ProtocolUseCase);
 
-    registerAssistantViews(this.plugin, { settings: this.getSettings() }, {
-      createAgendaController: () =>
-        this.di.resolve<() => AgendaController>("assistant.factory.agendaController")(),
-      createLogController: () =>
-        this.di.resolve<() => DefaultLogController>("assistant.factory.logController")(),
-    });
+    registerAssistantViews(
+      this.plugin,
+      { settings: this.getSettings() },
+      {
+        createAgendaController: () => this.di.resolve<() => AgendaController>("assistant.factory.agendaController")(),
+        createLogController: () => this.di.resolve<() => DefaultLogController>("assistant.factory.logController")(),
+      },
+    );
 
     const commandsController: CommandsController = {
       openAgenda: () => void this.activateAgendaView(),
@@ -273,16 +291,13 @@ export class AssistantController {
   /**
    * Асинхронная инициализация после layoutReady.
    */
-  async initAsync(params: {
-    normalizeSettings: (raw: unknown) => AssistantSettings;
-    defaultSettings: AssistantSettings;
-  }): Promise<void> {
+  async initAsync(params: { normalizeSettings: (raw: unknown) => AssistantSettings; defaultSettings: AssistantSettings }): Promise<void> {
     const { normalizeSettings, defaultSettings } = params;
     try {
       const next = normalizeSettings(await this.loadData());
       this.setSettings(next);
     } catch (e) {
-      console.error("Ассистент: не удалось загрузить настройки", e);
+      this.ctx.logService.warn("Настройки: не удалось загрузить, использую defaults", { error: e });
       this.setSettings(defaultSettings);
     }
 
@@ -306,17 +321,20 @@ export class AssistantController {
       await this.ctx.baseWorkspaceService.ensureBaseFiles();
       await this.ctx.eventNoteService.warmUpIndex();
     } catch (e) {
-      console.error("Ассистент: не удалось создать папки в vault", e);
-      this.ctx.logService.error("Не удалось создать папки в vault");
+      this.ctx.logService.error("Vault: не удалось создать базовую структуру", { error: e });
     }
 
     // Persistent cache
     await this.ctx.calendarEventCache.loadIntoCalendarService(this.ctx.calendarService, {
-      enabledCalendarIds: this.getSettings().calendars.filter((c) => c.enabled).map((c) => c.id),
+      enabledCalendarIds: this.getSettings()
+        .calendars.filter((c) => c.enabled)
+        .map((c) => c.id),
     });
     this.ctx.calendarService.onChange(() => {
       void this.ctx.calendarEventCache.saveFromCalendarService(this.ctx.calendarService, {
-        enabledCalendarIds: this.getSettings().calendars.filter((c) => c.enabled).map((c) => c.id),
+        enabledCalendarIds: this.getSettings()
+          .calendars.filter((c) => c.enabled)
+          .map((c) => c.id),
         maxEventsPerCalendar: this.getSettings().calendar.persistentCacheMaxEventsPerCalendar,
       });
     });
@@ -641,4 +659,3 @@ export class AssistantController {
     };
   }
 }
-

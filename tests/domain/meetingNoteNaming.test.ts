@@ -27,4 +27,3 @@ describe("domain/policies/meetingNoteNaming", () => {
     expect(s2).toBe("A");
   });
 });
-

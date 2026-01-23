@@ -65,22 +65,20 @@ export default class AssistantPlugin extends Plugin {
 
     this.addSettingTab(new AssistantSettingsTab(this.app, this));
 
-    this.controller =
-      controller =
-        new AssistantController({
-          plugin: this,
-          workspace: this.app.workspace,
-          vault: this.app.vault,
-          metadataCache: this.app.metadataCache,
-          notice: { show: (m) => new Notice(m) },
-          ctx: this.ctx,
-          getSettings: () => this.settings,
-          setSettings: (next) => {
-            this.settings = next;
-          },
-          loadData: () => this.loadData(),
-          saveData: (d) => this.saveData(d),
-        });
+    this.controller = controller = new AssistantController({
+      plugin: this,
+      workspace: this.app.workspace,
+      vault: this.app.vault,
+      metadataCache: this.app.metadataCache,
+      notice: { show: (m) => new Notice(m) },
+      ctx: this.ctx,
+      getSettings: () => this.settings,
+      setSettings: (next) => {
+        this.settings = next;
+      },
+      loadData: () => this.loadData(),
+      saveData: (d) => this.saveData(d),
+    });
 
     this.controller.registerPresentation();
 

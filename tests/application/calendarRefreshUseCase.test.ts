@@ -18,7 +18,7 @@ describe("CalendarRefreshUseCase", () => {
 
     await uc.refreshAll();
     expect(notice).toHaveBeenCalledWith("Ассистент: не удалось обновить календари");
-    expect(error).toHaveBeenCalledWith("Обновление календарей: ошибка", expect.any(Object));
+    expect(error).toHaveBeenCalledWith("Календарь: refreshAll: ошибка", { code: "E_NETWORK", error: "Error: boom" });
   });
 
   it("refreshOne: логирует ошибки по календарям, синкает и пишет ok если ошибок нет", async () => {
@@ -53,7 +53,7 @@ describe("CalendarRefreshUseCase", () => {
     });
 
     await uc.refreshOne("c1");
-    expect(info).toHaveBeenCalledWith("Календарь: обновление (один): ok", { calendarId: "c1" });
+    expect(info).toHaveBeenCalledWith("Календарь: refreshOne: ok", { calendarId: "c1" });
   });
 
   it("refreshAllResult: возвращает Result error вместо throw", async () => {
@@ -73,4 +73,3 @@ describe("CalendarRefreshUseCase", () => {
     expect(r.error.message).toContain("не удалось обновить календари");
   });
 });
-

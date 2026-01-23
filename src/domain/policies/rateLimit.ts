@@ -7,4 +7,3 @@ export function shouldEmitByInterval(params: { nowMs: number; lastAtMs: number; 
   const interval = Math.max(0, Number(params.intervalMs) || 0);
   return now - last >= interval;
 }
-

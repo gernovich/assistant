@@ -11,4 +11,3 @@ export function recordingBackendFromSettings(raw: unknown): RecordingBackendId {
   // default
   return "electron_media_devices";
 }
-

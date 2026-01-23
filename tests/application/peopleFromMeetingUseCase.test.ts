@@ -64,4 +64,3 @@ describe("PeopleFromMeetingUseCase", () => {
     expect(notice).toHaveBeenCalledWith("Ассистент: карточки людей обработаны: 2");
   });
 });
-

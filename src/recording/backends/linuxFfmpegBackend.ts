@@ -81,11 +81,13 @@ export class LinuxFfmpegBackend {
     const candidates: string[] = [];
     if (await commandExists("pactl")) {
       const info = await execShell("pactl info 2>/dev/null");
+      if (this.settings.debug?.enabled) {
       this.params.log.info("Linux Native: pactl info (для mic)", {
         ok: info.ok,
         stdout: trimForLog(info.stdout, 900),
         stderr: trimForLog(info.stderr, 300),
       });
+      }
       const srcInfo = parsePactlDefaultSourceFromInfo(info.stdout);
       const next = buildPulseMicCandidates({ defaultSourceFromInfo: srcInfo });
       for (const c of next) candidates.push(c);
@@ -112,11 +114,13 @@ export class LinuxFfmpegBackend {
     // Базовый путь: оставляем прежние алиасы, но логируем sources (для диагностики).
     try {
       const srcList = await execShell("pactl list short sources 2>/dev/null");
+      if (this.settings.debug?.enabled) {
       this.params.log.info("Linux Native: pactl list short sources", {
         ok: srcList.ok,
         stdout: trimForLog(srcList.stdout, 1200),
         stderr: trimForLog(srcList.stderr, 400),
       });
+      }
       // На этом инкременте сохраняем прежний порядок алиасов (важно для совместимости),
       // добавляя только дефолтные, если удастся их угадать.
       out.push("@DEFAULT_MONITOR@", "default.monitor");
@@ -149,10 +153,12 @@ export class LinuxFfmpegBackend {
 
     const micCandidates = await this.guessPulseMicSource();
     const monitorCandidates = await this.guessPulseMonitorSource();
+    if (this.settings.debug?.enabled) {
     this.params.log.info("Linux Native: кандидаты источников", {
       micCandidates,
       monitorCandidates: monitorCandidates.slice(0, 30),
     });
+    }
 
     const trySpawn = async (micName: string, monitorName: string | null): Promise<import("child_process").ChildProcess | null> => {
       const wantViz = Boolean(this.params.getOnViz());
@@ -167,12 +173,14 @@ export class LinuxFfmpegBackend {
         filterGraph: { withMonitor: g.withMonitor, withMonitorViz: g.withMonitorViz },
       });
 
+      if (this.settings.debug?.enabled) {
       this.params.log.info("Linux Native: ffmpeg spawn", {
         micName,
         monitorName,
         out: tmpPath,
         args: args.join(" "),
       });
+      }
 
       const proc = spawn("ffmpeg", args, { stdio: ["pipe", wantViz ? "pipe" : "ignore", "pipe"] });
       session.native.stderrTail = "";
@@ -225,7 +233,7 @@ export class LinuxFfmpegBackend {
           if (now - last > 5000) {
             session.native.lastVizParseErrAtMs = now;
             this.params.log.warn("Linux Native: ошибка парсинга метрик уровня из ffmpeg stderr", {
-              error: String((e as unknown) ?? ""),
+              error: e,
               stderrTail: trimForLog(session.native.stderrTail, 900),
             });
           }
@@ -263,7 +271,7 @@ export class LinuxFfmpegBackend {
             const last = Number(session.native.lastVizParseErrAtMs ?? 0);
             if (now - last > 5000) {
               session.native.lastVizParseErrAtMs = now;
-              this.params.log.warn("Linux Native: ошибка парсинга PCM для визуализации", { error: String((e as unknown) ?? "") });
+              this.params.log.warn("Linux Native: ошибка парсинга PCM для визуализации", { error: e });
             }
           }
         });
@@ -282,7 +290,7 @@ export class LinuxFfmpegBackend {
         try {
           proc.kill("SIGKILL");
         } catch (e) {
-          this.params.log.warn("Linux Native: не удалось прибить ffmpeg (SIGKILL) после быстрого exit", { error: String((e as unknown) ?? "") });
+          this.params.log.warn("Linux Native: не удалось прибить ffmpeg (SIGKILL) после быстрого exit", { error: e });
         }
         return null;
       }
@@ -342,13 +350,13 @@ export class LinuxFfmpegBackend {
         proc.stdin.end();
       }
     } catch (e) {
-      this.params.log.warn("Linux Native: не удалось отправить 'q' в stdin ffmpeg", { error: String((e as unknown) ?? "") });
+      this.params.log.warn("Linux Native: не удалось отправить 'q' в stdin ffmpeg", { error: e });
     }
 
     try {
       proc.kill("SIGINT");
     } catch (e) {
-      this.params.log.warn("Linux Native: не удалось послать SIGINT ffmpeg", { error: String((e as unknown) ?? "") });
+      this.params.log.warn("Linux Native: не удалось послать SIGINT ffmpeg", { error: e });
     }
 
     await Promise.race([waitExit, waitMs(8000)]);
@@ -356,7 +364,7 @@ export class LinuxFfmpegBackend {
       try {
         proc.kill("SIGKILL");
       } catch (e) {
-        this.params.log.warn("Linux Native: не удалось послать SIGKILL ffmpeg", { error: String((e as unknown) ?? "") });
+        this.params.log.warn("Linux Native: не удалось послать SIGKILL ffmpeg", { error: e });
       }
       await Promise.race([waitExit, waitMs(2000)]);
     }
@@ -379,7 +387,7 @@ export class LinuxFfmpegBackend {
         } catch (e) {
           this.params.log.error("Linux Native: tmp file отсутствует (ffmpeg не создал выход?)", {
             tmpPath,
-            error: String((e as unknown) ?? ""),
+            error: e,
             stderrTail: trimForLog(session.native.stderrTail, 1600),
             monitorName: session.native.monitorName,
           });
@@ -395,14 +403,13 @@ export class LinuxFfmpegBackend {
         await this.params.writeBinary(path, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
         this.params.onFileSaved?.(path);
       } catch (e) {
-        const msg = String((e as unknown) ?? "");
-        this.params.log.error("Linux Native: ошибка финализации файла (read/save/append)", { error: msg, tmpPath });
+        this.params.log.error("Linux Native: ошибка финализации файла (read/save/append)", { error: e, tmpPath });
       } finally {
         try {
           await fs.rm(tmpPath, { force: true });
           await fs.rm(tmpPath.replace(/\/chunk\.ogg$/, ""), { recursive: true, force: true });
         } catch (e) {
-          this.params.log.warn("Linux Native: не удалось удалить временные файлы", { error: String((e as unknown) ?? ""), tmpPath });
+          this.params.log.warn("Linux Native: не удалось удалить временные файлы", { error: e, tmpPath });
         }
       }
     })();

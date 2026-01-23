@@ -10,4 +10,3 @@ describe("domain/policies/rsvpStatusBadgeRu", () => {
     expect(rsvpStatusBadgeRu(undefined)).toBe("");
   });
 });
-

@@ -7,9 +7,7 @@ import { ApplySettingsCommandUseCase } from "../../src/application/settings/appl
 describe("ApplySettingsCommandUseCase", () => {
   it("caldav.account.remove: выключает связанные caldav-календари", async () => {
     const settings = structuredClone(DEFAULT_SETTINGS);
-    settings.caldav.accounts = [
-      { id: "acc1", name: "A", enabled: true, serverUrl: "", username: "", password: "", authMethod: "basic" },
-    ];
+    settings.caldav.accounts = [{ id: "acc1", name: "A", enabled: true, serverUrl: "", username: "", password: "", authMethod: "basic" }];
     settings.calendars = [
       {
         id: "cal1",
@@ -116,4 +114,3 @@ describe("ApplySettingsCommandUseCase", () => {
     expect(settings.recording.autoStartSeconds).toBe(5);
   });
 });
-

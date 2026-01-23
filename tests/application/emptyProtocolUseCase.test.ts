@@ -14,4 +14,3 @@ describe("EmptyProtocolUseCase", () => {
     expect(openProtocol).toHaveBeenCalledWith(file);
   });
 });
-

@@ -14,4 +14,3 @@ describe("domain/policies/frontmatterYaml", () => {
     expect(yamlStringArrayLines({ key: "k", values: ["a"], escape: () => "X" })).toEqual(["k:", "  - X"]);
   });
 });
-

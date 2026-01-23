@@ -16,4 +16,3 @@ describe("ensureMarkdownFilePath", () => {
     expect(ensureMarkdownFilePath("")).toBe("");
   });
 });
-

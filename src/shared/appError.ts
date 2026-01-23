@@ -24,4 +24,3 @@ export function toAppErrorDto(e: unknown, fallback: { code: ErrorCode; message: 
   const cause = String((e as unknown) ?? "неизвестная ошибка");
   return { code: fallback.code, message: fallback.message, cause, details: fallback.details };
 }
-

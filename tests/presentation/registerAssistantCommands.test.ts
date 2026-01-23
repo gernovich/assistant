@@ -40,4 +40,3 @@ describe("registerAssistantCommands", () => {
     expect(ids).toContain("apply-outbox");
   });
 });
-

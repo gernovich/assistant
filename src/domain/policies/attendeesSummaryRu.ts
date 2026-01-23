@@ -44,4 +44,3 @@ export function attendeesTooltipRu(attendees: AttendeeStatusLike[]): string {
   if (c.unknown > 0) parts.push(`Нет ответа: ${c.unknown}`);
   return parts.length ? parts.join("; ") + ";" : "";
 }
-

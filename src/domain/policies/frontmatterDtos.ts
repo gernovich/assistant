@@ -189,4 +189,3 @@ export function parseProjectNoteFromCache(frontmatter: Record<string, unknown>):
     protocols: Array.isArray(frontmatter[FM.protocols]) ? (frontmatter[FM.protocols] as any) : undefined,
   });
 }
-

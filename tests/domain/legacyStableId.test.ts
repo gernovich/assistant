@@ -17,4 +17,3 @@ describe("domain/policies/legacyStableId", () => {
     expect(legacyStableIdSuffix("abcdef")).toBe(" [abcdef].md");
   });
 });
-

@@ -33,8 +33,8 @@ function makeFakeVaultWithMarkdown() {
     binaries,
     mdByPath,
     getAbstractFileByPath: (p: string) => {
-      if (folders.has(p)) return ({ path: p } as any);
-      if (mdByPath.has(p)) return ({ path: p, extension: "md", basename: p.split("/").pop()?.replace(/\.md$/i, "") ?? "x" } as any);
+      if (folders.has(p)) return { path: p } as any;
+      if (mdByPath.has(p)) return { path: p, extension: "md", basename: p.split("/").pop()?.replace(/\.md$/i, "") ?? "x" } as any;
       return null;
     },
     createFolder: async (p: string) => {
@@ -166,10 +166,7 @@ describe("RecordingService flushes chunks on pause/stop", () => {
     installMediaMocks();
 
     const protocolPath = "Ассистент/Протоколы/p.md";
-    vault.mdByPath.set(
-      protocolPath,
-      ["---", "assistant_type: protocol", "protocol_id: x", "files: []", "---", "", "## P"].join("\n"),
-    );
+    vault.mdByPath.set(protocolPath, ["---", "assistant_type: protocol", "protocol_id: x", "files: []", "---", "", "## P"].join("\n"));
 
     const svc = makeRecordingService(app, { recording: { chunkMinutes: 5 } } as any);
     await svc.start({ eventKey: "cal:ev", protocolFilePath: protocolPath });

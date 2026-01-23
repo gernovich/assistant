@@ -118,4 +118,3 @@ describe("MeetingStatusWritebackUseCase", () => {
     expect(notice).toHaveBeenCalledWith("Ассистент: не удалось применить. Действие добавлено в офлайн-очередь.");
   });
 });
-

@@ -31,4 +31,3 @@ contextBridge.exposeInMainWorld("__assistantElectron", {
     }
   },
 });
-

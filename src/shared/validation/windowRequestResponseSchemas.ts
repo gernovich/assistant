@@ -25,4 +25,3 @@ export const WindowResponseSchema = z.discriminatedUnion("ok", [
     })
     .strict(),
 ]);
-

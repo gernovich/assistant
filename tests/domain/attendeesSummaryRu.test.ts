@@ -22,4 +22,3 @@ describe("domain/policies/attendeesSummaryRu", () => {
     expect(s).toBe("Принято: 2; Отклонено: 1;");
   });
 });
-

@@ -98,7 +98,7 @@ export class MeetingStatusWritebackUseCase {
     } catch (e) {
       const msg = String((e as unknown) ?? "неизвестная ошибка");
       if (opts.silent) {
-        this.deps.log.warn("RSVP: не удалось применить status из заметки встречи", { error: msg, file: file.path });
+        this.deps.log.warn("RSVP: apply status from meeting note: ошибка", { error: e, message: msg, file: file.path });
         return err({ code: APP_ERROR.CALDAV_WRITEBACK, message: "Не удалось применить status из заметки встречи", cause: msg });
       }
 
@@ -118,14 +118,24 @@ export class MeetingStatusWritebackUseCase {
           kind: "set_event_partstat",
           payload: { calendarId, uid, start, partstat },
         });
-        this.deps.log.warn("Офлайн-режим: статус из заметки добавлен в очередь", { calendarId, uid, start, partstat, error: msg });
+        this.deps.log.warn("Outbox: enqueue from meeting note status (offline)", {
+          calendarId,
+          uid,
+          start,
+          partstat,
+          error: e,
+          message: msg,
+        });
         this.deps.notice("Ассистент: не удалось применить. Действие добавлено в офлайн-очередь.");
         return ok({ outcome: "enqueued" });
       } catch (e2) {
         const msg2 = String((e2 as unknown) ?? "неизвестная ошибка");
-        this.deps.log.warn("RSVP: не удалось применить status из заметки встречи (и не удалось положить в очередь)", {
-          error: msg,
-          enqueueError: msg2,
+        this.deps.log.warn("Outbox: enqueue from meeting note status: ошибка", {
+          error: e,
+          message: msg,
+          enqueueError: e2,
+          enqueueMessage: msg2,
+          file: file.path,
         });
         this.deps.notice(`Ассистент: не удалось применить статус: ${msg}`);
         return err({ code: APP_ERROR.OUTBOX, message: "Не удалось положить действие в офлайн-очередь", cause: msg2 });
@@ -137,4 +147,3 @@ export class MeetingStatusWritebackUseCase {
     await this.applyFromMeetingFileResult(file, opts);
   }
 }
-

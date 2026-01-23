@@ -10,4 +10,3 @@ describe("domain/policies/frontmatterJsonArrays", () => {
     expect(parseJsonStringArray("[")).toEqual([]);
   });
 });
-

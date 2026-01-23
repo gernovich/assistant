@@ -306,8 +306,8 @@ export function renderCaldavAccountsSection(params: {
           .setButtonText("Удалить")
           .setWarning()
           .onClick(async () => {
-          await plugin.caldavAccounts.removeAccount(acc.id);
-          delete discoveredCaldavCalendars[acc.id];
+            await plugin.caldavAccounts.removeAccount(acc.id);
+            delete discoveredCaldavCalendars[acc.id];
             params.rerenderPreservingScroll();
           }),
       );

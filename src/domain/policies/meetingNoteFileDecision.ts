@@ -31,4 +31,3 @@ export function decideMeetingNoteFile(params: {
 
   return { kind: "create_new", shouldIndexEventKey: true };
 }
-
