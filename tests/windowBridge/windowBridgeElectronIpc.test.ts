@@ -39,6 +39,7 @@ describe("windowBridge (electron ipc transport)", () => {
     const h = handlers.get("assistant/window/request");
     expect(h).toBeTruthy();
 
+    // Тестовый мок использует формат (e: { senderId }, payload)
     h?.({ senderId: 777 }, { id: "r1", ts: Date.now(), action: { kind: "close" } });
 
     expect(sendTo).toHaveBeenCalledWith(777, "assistant/window/response", { id: "r1", ok: true });

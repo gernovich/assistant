@@ -11,7 +11,8 @@ export type IpcChannel =
   | "assistant/window/request"
   | "assistant/window/response"
   | "assistant/recording/stats"
-  | "assistant/recording/viz";
+  | "assistant/recording/viz"
+  | "assistant/test/message";
 
 export type IpcEnvelope<TChannel extends IpcChannel, TPayload> = {
   id: string;
@@ -32,7 +33,11 @@ export type WindowAction =
   | { kind: "recording.stop" }
   | { kind: "recording.pause" }
   | { kind: "recording.resume" }
-  | { kind: "recording.openProtocol"; protocolFilePath: string };
+  | { kind: "recording.openProtocol"; protocolFilePath: string }
+  // test dialog
+  | { kind: "test.dialogOne" }
+  | { kind: "test.dialogTwo" }
+  | { kind: "test.dialogThree" };
 
 export type RecordingStartPayload = {
   mode: "manual_new" | "occurrence_new" | "meeting_new" | "continue_protocol";
@@ -71,3 +76,11 @@ export type RecordingStatsDto = {
 };
 
 export type RecordingVizDto = { amp01: number };
+
+// Transport envelope (transport-agnostic)
+export type WindowTransportMessage =
+  | { type: "window/request"; payload: WindowRequest }
+  | { type: "window/response"; payload: WindowResponse }
+  | { type: "recording/stats"; payload: RecordingStatsDto }
+  | { type: "recording/viz"; payload: RecordingVizDto }
+  | { type: "test/message"; payload: { message: string; ts: number } };

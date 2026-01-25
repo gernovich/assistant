@@ -2,13 +2,16 @@ import type { AssistantSettings, Event } from "../types";
 import type { RecordingStats } from "./recordingService";
 import { escHtml } from "../domain/policies/escHtml";
 import { buildRecordingDialogModelPolicy } from "../domain/policies/recordingDialogModel";
-import { installElectronIpcRequestBridge } from "../presentation/electronWindow/bridge/windowBridge";
+import { installWindowTransportRequestBridge } from "../presentation/electronWindow/bridge/windowTransportBridge";
 import type { WindowAction } from "../presentation/electronWindow/bridge/windowBridgeContracts";
 import type { WindowRequest } from "../presentation/electronWindow/bridge/windowBridgeContracts";
-import { pushRecordingStats, pushRecordingViz } from "../presentation/electronWindow/bridge/windowBridge";
+import type { WindowTransportMessage } from "../presentation/electronWindow/bridge/windowBridgeContracts";
 import { buildRecordingWindowHtml } from "../presentation/electronWindow/recording/recordingWindowHtml";
 import { handleRecordingWindowAction } from "../presentation/electronWindow/bridge/windowActionRouter";
 import type { RecordingController } from "../presentation/controllers/recordingController";
+import { createDialogTransport } from "../presentation/electronWindow/transport/transportFactory";
+import type { WindowTransport } from "../presentation/electronWindow/transport/windowTransport";
+import type { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
 
 type ElectronLike = {
   remote?: { BrowserWindow?: any };
@@ -32,6 +35,9 @@ type RecordingDialogParams = {
   onOpenProtocol?: (protocolFilePath: string) => void | Promise<void>;
   recordingController: RecordingController;
   onLog?: (m: string) => void;
+  /** Абсолютный путь к директории плагина (для preload скрипта). */
+  pluginDirPath?: string | null;
+  transportRegistry?: TransportRegistry;
 };
 
 export class RecordingDialog {
@@ -55,9 +61,26 @@ export class RecordingDialog {
     const width = 760;
     const height = 420;
 
+    // Определяем путь к preload скрипту
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const path = require("node:path") as typeof import("node:path");
-    const preloadPath = path.join(__dirname, "ipc-preload.cjs");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require("node:fs") as typeof import("node:fs");
+    
+    let preloadPath: string;
+    if (this.params.pluginDirPath) {
+      // Используем явно переданный путь (рекомендуется)
+      preloadPath = path.resolve(this.params.pluginDirPath, "bridge-preload.cjs");
+    } else {
+      // Fallback на __dirname (может не работать в AppImage)
+      preloadPath = path.join(__dirname, "bridge-preload.cjs");
+    }
+    
+    // Проверяем существование файла
+    if (!fs.existsSync(preloadPath)) {
+      this.params.onLog?.(`Запись: WARNING - preload файл не найден: ${preloadPath}`);
+      this.params.onLog?.(`Запись: pluginDirPath: ${this.params.pluginDirPath || "не передан"}, __dirname: ${__dirname}`);
+    }
 
     const win = new BrowserWindow({
       width,
@@ -137,10 +160,65 @@ export class RecordingDialog {
       )
       .join("");
     // Host webContentsId (Obsidian renderer), used by window preload to send IPC requests via sendTo(hostId,...)
+    // В Obsidian плагине код выполняется в renderer-процессе, поэтому используем ipcRenderer напрямую
+    // Проблема: в renderer-процессе нет прямого способа получить свой webContentsId без remote API
+    // Решение: используем несколько fallback методов для максимальной совместимости
     let hostWebContentsId = 0;
     try {
-      hostWebContentsId = Number((electron as any)?.remote?.getCurrentWebContents?.()?.id ?? (electron as any)?.ipcRenderer?.senderId ?? 0);
-    } catch {
+      const ipcRenderer = (electron as any)?.ipcRenderer;
+      
+      // Способ 1: remote.getCurrentWebContents() (устарел в Electron 20+, но работает в старых версиях)
+      // Это основной способ для Electron < 20
+      if ((electron as any)?.remote?.getCurrentWebContents) {
+        const wc = (electron as any).remote.getCurrentWebContents();
+        if (wc?.id) {
+          hostWebContentsId = Number(wc.id);
+        }
+      }
+      
+      // Способ 2: ipcRenderer.senderId (может быть доступен в некоторых версиях Electron)
+      // В некоторых версиях ipcRenderer имеет свойство senderId
+      if (hostWebContentsId === 0 && ipcRenderer) {
+        // Попробуем получить ID через внутренние свойства ipcRenderer
+        // В некоторых версиях Electron ipcRenderer имеет _senderId или другие внутренние свойства
+        if (typeof (ipcRenderer as any).senderId === "number") {
+          hostWebContentsId = Number((ipcRenderer as any).senderId);
+        } else if (typeof (ipcRenderer as any)._senderId === "number") {
+          hostWebContentsId = Number((ipcRenderer as any)._senderId);
+        }
+      }
+      
+      // Способ 3: Используем webFrame для получения информации о текущем frame
+      // webFrame может дать доступ к некоторым свойствам текущего контекста
+      if (hostWebContentsId === 0) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const webFrame = require("electron").webFrame;
+          // webFrame не дает прямой доступ к webContentsId, но мы можем попробовать другие методы
+          // В некоторых версиях webFrame имеет доступ к webContents через внутренние свойства
+          if (webFrame && typeof (webFrame as any).top === "object") {
+            const topFrame = (webFrame as any).top;
+            if (topFrame && typeof (topFrame as any).webContentsId === "number") {
+              hostWebContentsId = Number((topFrame as any).webContentsId);
+            }
+          }
+        } catch {
+          // webFrame может быть недоступен
+        }
+      }
+      
+      // Если все способы не сработали, используем 0
+      // В этом случае IPC сообщения не будут работать, но окно откроется
+      // Это лучше, чем полный отказ от открытия окна
+      if (hostWebContentsId === 0) {
+        this.params.onLog?.("Запись: не удалось определить hostWebContentsId, IPC может не работать");
+        this.params.onLog?.(`Запись: remote доступен: ${!!(electron as any)?.remote}`);
+        this.params.onLog?.(`Запись: ipcRenderer доступен: ${!!ipcRenderer}`);
+      } else {
+        this.params.onLog?.(`Запись: hostWebContentsId определен: ${hostWebContentsId}`);
+      }
+    } catch (e) {
+      this.params.onLog?.(`Запись: ошибка при определении hostWebContentsId: ${e}`);
       hostWebContentsId = 0;
     }
 
@@ -169,22 +247,23 @@ export class RecordingDialog {
       this.vizPushInFlight = false;
     };
 
+    const transport: WindowTransport = this.params.transportRegistry
+      ? this.params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
+      : createDialogTransport();
+    transport.attach();
+
     const pushStats = (stats: RecordingStats) => {
-      if (!this.win) return;
-      pushRecordingStats({ win: this.win as any, stats: stats as any });
+      const payload: WindowTransportMessage = { type: "recording/stats", payload: stats as any };
+      transport.send(payload);
     };
 
     const pushViz = (amp01: number) => {
-      if (!this.win) return;
       try {
         this.vizPushInFlight = true;
-        const p = pushRecordingViz({ win: this.win as any, viz: { amp01 } });
-        void p?.finally?.(() => {
-          this.vizPushInFlight = false;
-        });
-      } catch {
+        const payload: WindowTransportMessage = { type: "recording/viz", payload: { amp01 } };
+        transport.send(payload);
+      } finally {
         this.vizPushInFlight = false;
-        // ignore
       }
     };
 
@@ -218,7 +297,9 @@ export class RecordingDialog {
     const close = () => {
       stopStatsTimer();
       try {
-        this.win?.close();
+        if (this.win) {
+          this.win.close();
+        }
       } catch {
         // ignore
       }
@@ -320,26 +401,60 @@ export class RecordingDialog {
     };
 
     // Transport: Electron IPC sendTo.
-    const unIpc = installElectronIpcRequestBridge({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expectedSenderId: Number((win.webContents as any)?.id ?? 0),
+    const unIpc = installWindowTransportRequestBridge({
+      transport,
       timeoutMs: 2500,
       onRequest: async (req: WindowRequest) => {
         await onWindowAction(req.action);
       },
     });
 
+    let dialogLoaded = false;
+    let configSent = false;
+    const trySendConfig = () => {
+      if (configSent || !dialogLoaded) return;
+      const config = transport.getConfig();
+      if (!config) return;
+      try {
+        win.webContents.send("assistant/transport/config", config);
+        configSent = true;
+      } catch {
+        // ignore
+      }
+    };
+    transport.onReady(() => trySendConfig());
+    win.webContents.once("did-finish-load", () => {
+      dialogLoaded = true;
+      trySendConfig();
+    });
+
+    // Cleanup слушателей: добавляем в win.on("close") (до закрытия) и win.on("closed") (после закрытия)
+    // Это гарантирует cleanup даже если окно закрывается нестандартным способом
+    let cleanupCalled = false;
+    const doCleanup = () => {
+      if (cleanupCalled) return;
+      cleanupCalled = true;
+      stopStatsTimer();
+      try {
+        unIpc();
+        transport.close();
+      } catch (e) {
+        this.params.onLog?.(`Запись: ошибка при cleanup IPC: ${e}`);
+      }
+    };
+
     win.once("ready-to-show", () => {
       win.show();
     });
 
+    win.on("close", () => {
+      // Cleanup до закрытия окна
+      doCleanup();
+    });
+
     win.on("closed", () => {
-      stopStatsTimer();
-      try {
-        unIpc();
-      } catch {
-        /* ignore */
-      }
+      // Cleanup после закрытия окна (fallback)
+      doCleanup();
       try {
         const st = this.params.recordingController.getStats();
         if (st.status !== "idle") void this.params.recordingController.stopResult();

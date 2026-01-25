@@ -3,8 +3,8 @@ import type { WindowRequest, WindowResponse } from "./windowBridgeContracts";
 import { WindowRequestSchema } from "../../../shared/validation/windowRequestResponseSchemas";
 
 type IpcRendererLike = {
-  on: (channel: string, cb: (e: { senderId?: number }, payload: unknown) => void) => void;
-  removeListener: (channel: string, cb: (e: { senderId?: number }, payload: unknown) => void) => void;
+  on: (channel: string, cb: (event: any, ...args: unknown[]) => void) => void;
+  removeListener: (channel: string, cb: (event: any, ...args: unknown[]) => void) => void;
   sendTo: (webContentsId: number, channel: string, payload: unknown) => void;
 };
 
@@ -54,10 +54,50 @@ export function installElectronIpcRequestBridge(params: {
   const timeoutMs = Math.max(50, Math.floor(Number(params.timeoutMs ?? 3000)));
   const channel = "assistant/window/request";
 
-  const handler = (e: { senderId?: number }, payload: unknown) => {
-    const from = Number((e as any)?.senderId);
-    if (!Number.isFinite(from) || from !== senderId) return;
+  const handler = (eventOrSender: any, payloadOrArg?: unknown, ...restArgs: unknown[]) => {
+    // Поддержка двух форматов:
+    // 1. Тестовый мок: (e: { senderId?: number }, payload: unknown)
+    // 2. Реальный Electron: (event, payload, ...args) где event.sender.id содержит senderId
+    
+    let payload: unknown;
+    let from: number;
+    
+    // Проверяем, является ли первый аргумент объектом с senderId (тестовый мок)
+    if (eventOrSender && typeof eventOrSender === "object" && "senderId" in eventOrSender && payloadOrArg !== undefined) {
+      // Формат тестового мока: (e: { senderId }, payload)
+      from = Number((eventOrSender as any).senderId ?? 0);
+      payload = payloadOrArg;
+    } else {
+      // Формат реального Electron: (event, payload, ...args)
+      // payload идет как второй аргумент (или первый, если event не содержит sender)
+      payload = payloadOrArg ?? (restArgs.length > 0 ? restArgs[0] : undefined);
+      
+      // Получаем senderId из event.sender.id или event.senderId
+      from = Number(
+        (eventOrSender as any)?.sender?.id ?? 
+        (eventOrSender as any)?.senderId ?? 
+        (eventOrSender as any)?.id ?? 
+        0
+      );
+    }
+    
+    // Логирование для диагностики
+    console.log(`[Assistant] windowBridge: получено событие, eventOrSender:`, eventOrSender);
+    console.log(`[Assistant] windowBridge: payloadOrArg:`, payloadOrArg, `restArgs:`, restArgs);
+    console.log(`[Assistant] windowBridge: expectedSenderId: ${senderId}, from: ${from}`);
+    console.log(`[Assistant] windowBridge: payload:`, payload);
+    
+    if (!Number.isFinite(from) || from !== senderId) {
+      console.log(`[Assistant] windowBridge: сообщение отклонено (from: ${from}, expected: ${senderId})`);
+      return;
+    }
 
+    if (!payload) {
+      console.log(`[Assistant] windowBridge: payload отсутствует, игнорирую`);
+      return;
+    }
+
+    console.log(`[Assistant] windowBridge: сообщение принято, парсинг payload...`);
     const parsed = WindowRequestSchema.safeParse(payload);
     if (!parsed.success) {
       const badId = typeof (payload as any)?.id === "string" ? String((payload as any).id) : "";
@@ -134,5 +174,24 @@ export function pushRecordingViz(params: { win: BrowserWindowLike; viz: Recordin
     return Promise.resolve(undefined);
   } catch {
     return null;
+  }
+}
+
+export function pushTestMessage(params: { win: BrowserWindowLike; message: string }): void {
+  const { win, message } = params;
+  const ipc = tryGetIpcRenderer();
+  const wcId = Number(win.webContents?.id);
+  console.log(`[Assistant] pushTestMessage: отправка "${message}" в webContents id: ${wcId}, ipc доступен: ${!!ipc}`);
+  if (!ipc || !Number.isFinite(wcId)) {
+    console.warn(`[Assistant] pushTestMessage: не могу отправить (ipc: ${!!ipc}, wcId: ${wcId})`);
+    return;
+  }
+  try {
+    const payload = { message, ts: Date.now() };
+    console.log(`[Assistant] pushTestMessage: отправляю payload:`, payload);
+    ipc.sendTo(wcId, "assistant/test/message", payload);
+    console.log(`[Assistant] pushTestMessage: сообщение отправлено`);
+  } catch (e) {
+    console.error(`[Assistant] pushTestMessage: ошибка при отправке:`, e);
   }
 }

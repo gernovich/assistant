@@ -123,6 +123,7 @@ export const RawAssistantSettingsSchema = z
         retentionDays: zNumOrStr.optional(),
       })
       .optional(),
+
   })
   .strict();
 

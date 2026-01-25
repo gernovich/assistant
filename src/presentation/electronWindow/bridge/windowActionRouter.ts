@@ -24,6 +24,11 @@ export function handleReminderWindowAction(action: WindowAction, h: ReminderWind
     case "recording.resume":
     case "recording.openProtocol":
       return;
+    // ignore: test dialog actions are not for reminder window
+    case "test.dialogOne":
+    case "test.dialogTwo":
+    case "test.dialogThree":
+      return;
     default: {
       const _never: never = action;
       return _never;
@@ -59,9 +64,43 @@ export function handleRecordingWindowAction(action: WindowAction, h: RecordingWi
     case "reminder.createProtocol":
     case "reminder.meetingCancelled":
       return;
+    // ignore: test dialog actions are not for reminder window
+    case "test.dialogOne":
+    case "test.dialogTwo":
+    case "test.dialogThree":
+      return;
     default: {
       const _never: never = action;
       return _never;
+    }
+  }
+}
+
+export type TestDialogActionHandlers = {
+  onMessage: (action: WindowAction) => void | Promise<void>;
+};
+
+export function handleTestDialogAction(action: WindowAction, h: TestDialogActionHandlers): void | Promise<void> {
+  switch (action.kind) {
+    case "test.dialogOne":
+    case "test.dialogTwo":
+    case "test.dialogThree":
+      return h.onMessage(action);
+    // ignore: other actions are not for test dialog
+    case "close":
+    case "reminder.startRecording":
+    case "reminder.createProtocol":
+    case "reminder.meetingCancelled":
+    case "recording.start":
+    case "recording.stop":
+    case "recording.pause":
+    case "recording.resume":
+    case "recording.openProtocol":
+      return;
+    default: {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const _exhaustive: never = action;
+      return;
     }
   }
 }

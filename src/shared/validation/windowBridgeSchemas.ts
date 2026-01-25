@@ -21,4 +21,7 @@ export const WindowActionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("recording.resume") }).strict(),
   z.object({ kind: z.literal("recording.openProtocol"), protocolFilePath: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("recording.start"), payload: RecordingStartPayloadSchema }).strict(),
+  z.object({ kind: z.literal("test.dialogOne") }).strict(),
+  z.object({ kind: z.literal("test.dialogTwo") }).strict(),
+  z.object({ kind: z.literal("test.dialogThree") }).strict(),
 ]);

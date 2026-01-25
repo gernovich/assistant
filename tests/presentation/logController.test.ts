@@ -11,8 +11,10 @@ describe("DefaultLogController", () => {
     const openTodayFile = vi.fn();
     const clearTodayFile = vi.fn(async () => {});
     const openAgenda = vi.fn();
+    const openTestDialog = vi.fn();
+    const sendTestMessage = vi.fn();
 
-    const c = new DefaultLogController({ log, openTodayFile, clearTodayFile, openAgenda });
+    const c = new DefaultLogController({ log, openTodayFile, clearTodayFile, openAgenda, openTestDialog, sendTestMessage });
 
     expect(c.list().length).toBe(2);
     await c.clearAll();
@@ -32,6 +34,8 @@ describe("DefaultLogController", () => {
         throw new Error("boom");
       },
       openAgenda: () => {},
+      openTestDialog: () => {},
+      sendTestMessage: () => {},
     });
 
     await expect(c.clearAll()).resolves.toBeUndefined();

@@ -117,6 +117,9 @@ export class AgendaView extends ItemView {
     header.createDiv({ text: formatDayLabel(this.dayOffset), cls: "assistant-agenda__day" });
     header.createDiv({ text: formatNow(), cls: "assistant-agenda__now", attr: { "data-assistant-now": "1" } });
 
+    // Область для алертов (сообщения над календарем)
+    const alertsContainer = el.createDiv({ cls: "assistant-agenda__alerts" });
+
     // Баннер “данные устарели”: если часть календарей не обновилась — показываем предупреждение, но продолжаем отображать кэш.
     const status = this.controller.getRefreshResult().perCalendar;
     {
@@ -132,10 +135,10 @@ export class AgendaView extends ItemView {
           .join(", ");
         const hintMore = stale.length > 5 ? ` (+${stale.length - 5})` : "";
         const text =
-          `⚠️ Данные устарели: ${stale.length}/${total} календарей не обновились. ` +
+          `Данные устарели: ${stale.length}/${total} календарей не обновились. ` +
           `Показываю последние сохранённые события. См. лог.` +
           (staleNames ? ` (${staleNames}${hintMore})` : "");
-        el.createDiv({ cls: "assistant-agenda__notice assistant-agenda__notice--warning", text });
+        this.createAlert(alertsContainer, "warning", text);
       }
     }
 
@@ -189,18 +192,17 @@ export class AgendaView extends ItemView {
       nowLine.style.top = `${(minutes / 60) * HOUR_HEIGHT_PX}px`;
     }
 
+    // Сообщения о пустом состоянии и ближайшей встрече
     if (timed.length === 0) {
-      const emptyContainer = timeline.createDiv({ cls: "assistant-agenda__empty-container" });
-      const empty = emptyContainer.createDiv({ cls: "assistant-agenda__empty-overlay" });
-      empty.textContent = allDay.length > 0 ? "Нет встреч с временем на этот день." : "Нет встреч на этот день.";
+      const emptyText = allDay.length > 0 ? "Нет встреч с временем на этот день." : "Нет встреч на этот день.";
+      this.createAlert(alertsContainer, "info", emptyText);
 
       const next = this.controller.getNextEventAfterNow();
       if (next) {
-        const nextBox = emptyContainer.createDiv({ cls: "assistant-agenda__empty-next" });
         const nextWhen = `${next.start.toLocaleString(RU, { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
-        nextBox.createDiv({ text: `Ближайшая: ${nextWhen} — ${next.summary || "(без названия)"}` });
-
-        const jump = nextBox.createEl("button", { text: "Перейти к ближайшей", cls: "assistant-agenda__empty-jump" });
+        const nextText = `Ближайшая: ${nextWhen} — ${next.summary || "(без названия)"}`;
+        const nextAlert = this.createAlert(alertsContainer, "info", nextText);
+        const jump = nextAlert.createEl("button", { text: "Ближайшие", cls: "assistant-agenda__alert-action assistant-agenda__alert-action--outline" });
         jump.onclick = () => {
           this.dayOffset = diffDaysLocalDay(new Date(), next.start);
           this.render();
@@ -354,6 +356,20 @@ export class AgendaView extends ItemView {
     const att = attendeesTooltip(ev);
     if (att) parts.push(att);
     return parts.join("\n");
+  }
+
+  /**
+   * Создать алерт (сообщение) в контейнере алертов.
+   *
+   * @param container - контейнер для алертов
+   * @param type - тип алерта: "info", "warning", "error", "success"
+   * @param text - текст сообщения
+   * @returns созданный элемент алерта (для добавления дополнительных элементов, например кнопок)
+   */
+  private createAlert(container: HTMLElement, type: "info" | "warning" | "error" | "success", text: string): HTMLElement {
+    const alert = container.createDiv({ cls: `assistant-agenda__alert assistant-agenda__alert--${type}` });
+    alert.createDiv({ text, cls: "assistant-agenda__alert-text" });
+    return alert;
   }
 }
 

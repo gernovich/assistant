@@ -48,4 +48,5 @@ export class DefaultLogController implements LogController {
   openAgenda(): void | Promise<void> {
     return this.deps.openAgenda();
   }
+
 }

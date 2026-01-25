@@ -44,6 +44,7 @@ export default class AssistantPlugin extends Plugin {
     this.settings = DEFAULT_SETTINGS;
     // controller нужен для actions в NotificationScheduler (в ctx). Используем позднюю привязку.
     let controller: AssistantController | undefined;
+    const pluginDirPathForContext = this.getPluginDirPath();
     this.ctx = createPluginContext({
       app: this.app,
       settings: this.settings,
@@ -52,6 +53,7 @@ export default class AssistantPlugin extends Plugin {
         calendarCacheFilePath: this.getCalendarCacheFilePath(),
         eventNoteIndexCacheFilePath: this.getEventNoteIndexCacheFilePath(),
         outboxFilePath: this.getOutboxFilePath(),
+        pluginDirPath: pluginDirPathForContext,
       },
       actions: {
         createProtocol: (ev) => controller?.createProtocolFromEvent(ev) ?? Promise.reject(new Error("Assistant: controller not ready")),
@@ -64,6 +66,32 @@ export default class AssistantPlugin extends Plugin {
     this.logService = this.ctx.logService;
 
     this.addSettingTab(new AssistantSettingsTab(this.app, this));
+
+    // Диагностика путей для preload скрипта
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pathModule = require("node:path") as typeof import("node:path");
+    const __dirnameValue = __dirname;
+    const vaultBasePath = this.getVaultBasePath();
+    const pluginDirPath = this.getPluginDirPath();
+    const manifestId = this.manifest.id;
+    const requireMainFilename = require.main?.filename;
+    const requireMainDirname = requireMainFilename ? pathModule.dirname(requireMainFilename) : null;
+    
+    console.log("[Assistant] main.ts: Диагностика путей для preload скрипта:");
+    console.log(`[Assistant]   __dirname: ${__dirnameValue}`);
+    console.log(`[Assistant]   require.main?.filename: ${requireMainFilename || "undefined"}`);
+    console.log(`[Assistant]   require.main dirname: ${requireMainDirname || "undefined"}`);
+    console.log(`[Assistant]   vaultBasePath: ${vaultBasePath || "null"}`);
+    console.log(`[Assistant]   manifest.id: ${manifestId}`);
+    console.log(`[Assistant]   pluginDirPath (getPluginDirPath): ${pluginDirPath || "null"}`);
+    if (pluginDirPath) {
+      const expectedPreloadPath = pathModule.resolve(pluginDirPath, "bridge-preload.cjs");
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const fs = require("node:fs") as typeof import("node:fs");
+      const preloadExists = fs.existsSync(expectedPreloadPath);
+      console.log(`[Assistant]   expected preload path: ${expectedPreloadPath}`);
+      console.log(`[Assistant]   preload file exists: ${preloadExists}`);
+    }
 
     this.controller = controller = new AssistantController({
       plugin: this,
@@ -78,6 +106,7 @@ export default class AssistantPlugin extends Plugin {
       },
       loadData: () => this.loadData(),
       saveData: (d) => this.saveData(d),
+      pluginDirPath: pluginDirPath,
     });
 
     this.controller.registerPresentation();
@@ -182,7 +211,8 @@ export default class AssistantPlugin extends Plugin {
   private getPluginDirPath(): string | null {
     const basePath = this.getVaultBasePath();
     if (!basePath) return null;
-    return path.join(basePath, ".obsidian", "plugins", this.manifest.id);
+    // Используем path.resolve для гарантированного абсолютного пути
+    return path.resolve(basePath, ".obsidian", "plugins", this.manifest.id);
   }
 
   /** Путь к persistent cache календарей (JSON) в системной директории плагина. */

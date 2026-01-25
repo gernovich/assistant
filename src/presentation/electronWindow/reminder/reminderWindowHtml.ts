@@ -27,7 +27,7 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ws://127.0.0.1:* ws://localhost:*;" />
   <style>
     :root { color-scheme: dark; }
     body {
@@ -101,14 +101,14 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
     <div class="btns">
       <button onclick="sendAction({ kind: 'reminder.startRecording' })"><span class="btn-icon">🎙</span>Диктофон</button>
       <button onclick="sendAction({ kind: 'reminder.meetingCancelled' })"><span class="btn-icon">⊖</span>Встреча отменена</button>
-      <button class="btn-danger" onclick="sendAction({ kind: 'close' })"><span class="btn-icon">✕</span>Закрыть</button>
+      <button class="btn-danger" id="closeBtn"><span class="btn-icon">✕</span>Закрыть</button>
     </div>
   </div>
   <script>
-    // Electron IPC request/response (renderer<->renderer) через preload window.__assistantElectron.
+    // WindowTransport (renderer<->renderer) через preload window.__assistantTransport.
     (function(){
       const pending = new Map();
-      const hostId = ${hostId};
+      const transport = window.__assistantTransport;
       function randId(){
         return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
       }
@@ -126,10 +126,10 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
         try{
           const id = randId();
           const req = { id: id, ts: Date.now(), action: action };
-          if(!(hostId > 0 && window.__assistantElectron && window.__assistantElectron.sendTo)){
-            return Promise.reject("assistant ipc not available");
+          if(!(transport && transport.send && transport.isReady && transport.isReady())){
+            return Promise.reject("assistant transport not available");
           }
-          window.__assistantElectron.sendTo(hostId, "assistant/window/request", req);
+          transport.send({ type: "window/request", payload: req });
           const p = new Promise((resolve,reject)=>pending.set(id,{resolve,reject}));
           return p;
         }catch{
@@ -137,11 +137,15 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
         }
       };
 
-      // Electron IPC: route responses into the same handler used by title transport.
+      // Transport: route responses.
       try{
-        if(window.__assistantElectron && window.__assistantElectron.on){
-          window.__assistantElectron.on("assistant/window/response", function(resp){
-            try{ window.__assistantIpcOnResponse(resp); }catch{}
+        if(transport && transport.onMessage){
+          transport.onMessage(function(msg){
+            try{
+              if(msg && msg.type === "window/response"){
+                window.__assistantIpcOnResponse(msg.payload);
+              }
+            }catch{}
           });
         }
       }catch{}
@@ -155,6 +159,7 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
       const location = ${JSON.stringify(p.location)};
       const url = ${JSON.stringify(p.urlLink)};
       const minutesBefore = ${minutesBefore};
+      const hostId = ${hostId};
 
       function pad2(n){ return String(n).padStart(2,'0'); }
       function formatCountdownRu(diffMs){
@@ -232,6 +237,28 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
       void location;
       void url;
       void fmtTime;
+
+      // Обработчик кнопки закрытия
+      const closeBtn = document.getElementById('closeBtn');
+      if(closeBtn){
+        closeBtn.addEventListener('click', () => {
+          console.log('[Assistant] Reminder: кнопка закрыть нажата');
+          console.log('[Assistant] Reminder: hostId:', hostId);
+          console.log('[Assistant] Reminder: window.__assistantElectron:', window.__assistantElectron ? 'есть' : 'нет');
+          console.log('[Assistant] Reminder: window.__assistantElectron?.sendTo:', window.__assistantElectron?.sendTo ? 'есть' : 'нет');
+          
+          sendAction({ kind: 'close' }).catch((err) => {
+            console.error('[Assistant] Reminder: ошибка при отправке действия close:', err);
+            // Если IPC не работает, пытаемся закрыть окно напрямую через window.close()
+            // Это может не сработать в Electron, но попробуем
+            try {
+              window.close();
+            } catch (e) {
+              console.error('[Assistant] Reminder: не удалось закрыть окно:', e);
+            }
+          });
+        });
+      }
     } catch {
       // Если скрипт упал/заблокирован — остаются сервер-сайд тексты (headline/details).
     }

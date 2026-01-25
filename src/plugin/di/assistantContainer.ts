@@ -25,6 +25,7 @@ import { ProjectNoteService } from "../../projects/projectNoteService";
 import { BaseWorkspaceService } from "../../base/baseWorkspaceService";
 import { OutboxService } from "../../offline/outboxService";
 import { NotificationScheduler } from "../../notifications/notificationScheduler";
+import { TransportRegistry } from "../../presentation/electronWindow/transport/transportRegistry";
 import { SyncService } from "../../sync/syncService";
 import { SettingsUseCase } from "../../application/settings/settingsUseCase";
 import { UpdateSettingsUseCase } from "../../application/settings/updateSettingsUseCase";
@@ -51,6 +52,7 @@ import { RecordingDialogUseCase } from "../../application/recording/recordingDia
 import { AutoRefreshUseCase } from "../../application/calendar/autoRefreshUseCase";
 import { ProtocolIndex } from "../../protocols/protocolIndex";
 import { DefaultLogController } from "../../presentation/controllers/logController";
+import { DefaultTestTransportController, TestTransportLog } from "../../presentation/controllers/testTransportController";
 import { AgendaController } from "../../application/agenda/agendaController";
 import { DefaultRecordingController } from "../../presentation/controllers/recordingController";
 
@@ -71,6 +73,7 @@ export function createAssistantContainer(params: {
 
   // Базовые runtime зависимости (useValue)
   c.register<App>("obsidian.app", { useValue: params.app });
+  c.register("assistant.randomHex", { useValue: () => Math.random().toString(16).slice(2) });
   c.register<MutableRef<AssistantSettings>>("assistant.settingsRef", { useValue: params.settingsRef });
   // Удобный token для случаев, где нужен "снимок" текущих настроек на момент resolve.
   c.register<AssistantSettings>("assistant.settings", {
@@ -245,7 +248,11 @@ export function createAssistantContainer(params: {
       const sRef = cc.resolve<MutableRef<AssistantSettings>>("assistant.settingsRef");
       const actions = cc.resolve<PluginContextActions>("assistant.actions");
       const log = cc.resolve<LogService>("assistant.logService");
-      return new NotificationScheduler(sRef.get(), (m) => log.info(m), {
+      const paths = cc.resolve<PluginContextPaths>("assistant.paths");
+      return new NotificationScheduler(
+        sRef.get(),
+        (m) => log.info(m),
+        {
         createProtocol: (ev) => actions.createProtocol(ev),
         startRecording: async (ev) => {
           await actions.startRecording(ev);
@@ -253,8 +260,18 @@ export function createAssistantContainer(params: {
         meetingCancelled: async (ev) => {
           await actions.meetingCancelled(ev);
         },
-      });
+        },
+        paths.pluginDirPath,
+        cc.resolve(TransportRegistry),
+      );
     },
+  });
+
+  c.register(TransportRegistry, {
+    useFactory: (cc) =>
+      new TransportRegistry({
+        randomHex: cc.resolve<() => string>("assistant.randomHex"),
+      }),
   });
 
   /**
@@ -376,6 +393,17 @@ export function createAssistantContainer(params: {
         openTodayFile: cc.resolve<() => void>("assistant.controller.openTodayLogFile"),
         clearTodayFile: cc.resolve<() => void>("assistant.controller.clearTodayLogFile"),
         openAgenda: cc.resolve<() => void>("assistant.controller.openAgendaView"),
+      }),
+  });
+
+  c.register(TestTransportLog, { useValue: new TestTransportLog() });
+
+  c.register("assistant.factory.testTransportController", {
+    useFactory: (cc) => () =>
+      new DefaultTestTransportController({
+        log: cc.resolve(TestTransportLog),
+        openDialog: cc.resolve<() => void>("assistant.controller.openTestDialog"),
+        sendMessage: cc.resolve<(message: string) => void>("assistant.controller.sendTestMessage"),
       }),
   });
 

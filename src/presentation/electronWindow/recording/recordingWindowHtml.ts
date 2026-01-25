@@ -31,7 +31,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ws://127.0.0.1:* ws://localhost:*;" />
   <style>
     :root { color-scheme: dark; }
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background: rgba(0,0,0,0); }
@@ -217,16 +217,16 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         </div>
         <div class="btns">
           <button id="pauseBtn" class="secondary" style="display:none"><span class="btn-icon">⏸</span>Пауза</button>
-          <button id="closeBtn" class="secondary danger" onclick="sendAction({ kind: 'close' })"><span class="btn-icon">✕</span>Закрыть</button>
+          <button id="closeBtn" class="secondary danger"><span class="btn-icon">✕</span>Закрыть</button>
         </div>
       </div>
     </div>
   </div>
   <script>
-    // Electron IPC request/response (renderer<->renderer) через preload window.__assistantElectron.
+    // WindowTransport (renderer<->renderer) через preload window.__assistantTransport.
+    const transport = window.__assistantTransport;
     (function(){
       const pending = new Map();
-      const hostId = ${hostId};
       function randId(){
         return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
       }
@@ -245,10 +245,10 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         try{
           const id = randId();
           const req = { id: id, ts: Date.now(), action: action };
-          if(!(hostId > 0 && window.__assistantElectron && window.__assistantElectron.sendTo)){
-            return Promise.reject("assistant ipc not available");
+          if(!(transport && transport.send && transport.isReady && transport.isReady())){
+            return Promise.reject("assistant transport not available");
           }
-          window.__assistantElectron.sendTo(hostId, "assistant/window/request", req);
+          transport.send({ type: "window/request", payload: req });
           const p = new Promise((resolve,reject)=>pending.set(id,{resolve,reject}));
           return p;
         }catch{
@@ -256,11 +256,15 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         }
       };
 
-      // Electron IPC: route responses into the same handler used by title transport.
+      // Transport: route responses.
       try{
-        if(window.__assistantElectron && window.__assistantElectron.on){
-          window.__assistantElectron.on("assistant/window/response", function(resp){
-            try{ window.__assistantIpcOnResponse(resp); }catch{}
+        if(transport && transport.onMessage){
+          transport.onMessage(function(msg){
+            try{
+              if(msg && msg.type === "window/response"){
+                window.__assistantIpcOnResponse(msg.payload);
+              }
+            }catch{}
           });
         }
       }catch{}
@@ -533,16 +537,28 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     // Закрытие во время записи должно показывать анимацию "стоп" (finalize может быть не мгновенным).
     if(closeBtn){
       closeBtn.addEventListener('click', () => {
-        if(state.switching) return;
-        if(state.recording){
+        console.log('[Assistant] Recording: кнопка закрыть нажата');
+        console.log('[Assistant] Recording: transport:', transport ? 'есть' : 'нет');
+        
+        // Если идет запись, сначала останавливаем её (визуально показываем "стоп")
+        if(state.recording && !state.switching){
           state.switching = true;
           state.switchingKind = "stop";
           state.switchingSinceMs = Date.now();
           state.paused = false;
           render();
         }
-        // action уже отправлен (inline onclick). Осталось синхронизировать в виде request.
-        sendAction({ kind: "close" });
+        // Отправляем действие закрытия (окно закроется на стороне main процесса)
+        sendAction({ kind: "close" }).catch((err) => {
+          console.error('[Assistant] Recording: ошибка при отправке действия close:', err);
+          // Если IPC не работает, пытаемся закрыть окно напрямую через window.close()
+          // Это может не сработать в Electron, но попробуем
+          try {
+            window.close();
+          } catch (e) {
+            console.error('[Assistant] Recording: не удалось закрыть окно:', e);
+          }
+        });
       });
     }
 
@@ -624,14 +640,18 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       state.ampTarget = Math.max(0, Math.min(1, v));
     };
 
-    // Electron IPC push: stats/viz without executeJavaScript.
+    // Transport push: stats/viz without executeJavaScript.
     try{
-      if(window.__assistantElectron && window.__assistantElectron.on){
-        window.__assistantElectron.on("assistant/recording/stats", function(dto){
-          try{ window.__assistantRecordingUpdate && window.__assistantRecordingUpdate(dto); }catch{}
-        });
-        window.__assistantElectron.on("assistant/recording/viz", function(dto){
-          try{ window.__assistantRecordingVizUpdate && window.__assistantRecordingVizUpdate(dto); }catch{}
+      if(transport && transport.onMessage){
+        transport.onMessage(function(msg){
+          try{
+            if(msg && msg.type === "recording/stats"){
+              window.__assistantRecordingUpdate && window.__assistantRecordingUpdate(msg.payload);
+            }
+            if(msg && msg.type === "recording/viz"){
+              window.__assistantRecordingVizUpdate && window.__assistantRecordingVizUpdate(msg.payload);
+            }
+          }catch{}
         });
       }
     }catch{}

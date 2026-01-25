@@ -2,6 +2,7 @@ import { Notice } from "obsidian";
 import type { AssistantSettings, Event } from "../types";
 import { MS_PER_HOUR, NOTIFICATIONS_HORIZON_HOURS } from "../calendar/constants";
 import { showElectronReminderWindow } from "./electronWindowReminder";
+import type { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
 
 /**
  * Планировщик уведомлений по событиям календаря.
@@ -15,10 +16,12 @@ export class NotificationScheduler {
   private settings: AssistantSettings;
   private timers: number[] = [];
   private onLog?: (message: string) => void;
+  private pluginDirPath?: string | null;
 
   /**
    * @param onLog Логгер для диагностики (используется в LogService).
    * @param actions Коллбеки на действия из popup окна (создать протокол, и т.п.).
+   * @param pluginDirPath Абсолютный путь к директории плагина (для preload скрипта).
    */
   constructor(
     settings: AssistantSettings,
@@ -28,9 +31,12 @@ export class NotificationScheduler {
       startRecording?: (ev: Event) => void | Promise<void>;
       meetingCancelled?: (ev: Event) => void | Promise<void>;
     },
+    pluginDirPath?: string | null,
+    private transportRegistry?: TransportRegistry,
   ) {
     this.settings = settings;
     this.onLog = onLog;
+    this.pluginDirPath = pluginDirPath;
   }
 
   /** Обновить настройки без пересоздания планировщика. */
@@ -111,7 +117,10 @@ export class NotificationScheduler {
         kind,
         minutesBefore: Math.max(0, this.settings.notifications.minutesBefore),
         actions: this.actions,
+        pluginDirPath: this.pluginDirPath,
+        transportRegistry: this.transportRegistry,
       });
+      this.onLog?.(`NotificationScheduler: showElectronReminderWindow вернул: ${ok}`);
       if (!ok) {
         this.onLog?.("electron_window: недоступен (нет BrowserWindow), fallback на Notice");
         new Notice(msg);

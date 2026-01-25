@@ -23,6 +23,8 @@ export type PluginContextPaths = {
   calendarCacheFilePath: string;
   eventNoteIndexCacheFilePath: string;
   outboxFilePath: string;
+  /** Абсолютный путь к директории плагина (для preload скрипта). */
+  pluginDirPath: string | null;
 };
 
 export type PluginContextActions = {

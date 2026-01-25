@@ -60,7 +60,7 @@ const buildOptions = {
           await fs.mkdir("dist", { recursive: true });
           await fs.copyFile("resources/manifest.json", "dist/manifest.json");
           await fs.copyFile("resources/styles.css", "dist/styles.css");
-          await fs.copyFile("resources/ipc-preload.cjs", "dist/ipc-preload.cjs");
+          await fs.copyFile("resources/bridge-preload.cjs", "dist/bridge-preload.cjs");
         });
       },
     },

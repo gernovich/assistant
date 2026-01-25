@@ -37,7 +37,10 @@ import type { CaldavAccountPatch } from "../application/settings/settingsCommand
 import { redactUrlForLog } from "../log/redact";
 import { DefaultRecordingController } from "../presentation/controllers/recordingController";
 import { DefaultLogController } from "../presentation/controllers/logController";
+import { DefaultTestTransportController, TestTransportLog } from "../presentation/controllers/testTransportController";
 import { AgendaController } from "../application/agenda/agendaController";
+import { TEST_TRANSPORT_VIEW_TYPE } from "../views/testTransportView";
+import { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
 import type { CommandsController } from "../presentation/controllers/commandsController";
 import { ProtocolIndex } from "../protocols/protocolIndex";
 import type { DependencyContainer } from "tsyringe";
@@ -53,6 +56,8 @@ type AssistantControllerParams = {
   setSettings: (next: AssistantSettings) => void;
   loadData: () => Promise<unknown>;
   saveData: (data: unknown) => Promise<void>;
+  /** Абсолютный путь к директории плагина (для preload скрипта). */
+  pluginDirPath: string | null;
 };
 
 /**
@@ -74,6 +79,7 @@ export class AssistantController {
   private readonly saveData: (data: unknown) => Promise<void>;
   private agendaRibbonEl?: HTMLElement;
   private logRibbonEl?: HTMLElement;
+  private testTransportRibbonEl?: HTMLElement;
   private recordingRibbonEl?: HTMLElement;
 
   private meetingStatusApplyTimerByPath = new Map<string, number>();
@@ -124,6 +130,9 @@ export class AssistantController {
       await this.caldavAccountsUseCase.addCalendarFromDiscovery(p),
   };
 
+  private readonly pluginDirPath: string | null;
+  private testDialogWindow: { close: () => void; sendMessage: (message: string) => void } | null = null;
+
   constructor(p: AssistantControllerParams) {
     this.plugin = p.plugin;
     this.workspace = p.workspace;
@@ -135,6 +144,7 @@ export class AssistantController {
     this.setSettings = p.setSettings;
     this.loadData = p.loadData;
     this.saveData = p.saveData;
+    this.pluginDirPath = p.pluginDirPath;
 
     // DI (controller-scoped): регистрируем порты/коллбеки, затем резолвим use-cases/controllers из container.
     this.di = this.ctx.container;
@@ -187,6 +197,8 @@ export class AssistantController {
     this.di.register("assistant.controller.openAgendaView", { useValue: () => void this.activateAgendaView() });
     this.di.register("assistant.controller.openLogView", { useValue: () => void this.activateLogView() });
     this.di.register("assistant.controller.openEvent", { useValue: (ev: Event) => void this.ctx.eventNoteService.openEvent(ev) });
+    this.di.register("assistant.controller.openTestDialog", { useValue: () => this.openTestDialog() });
+    this.di.register("assistant.controller.sendTestMessage", { useValue: (message: string) => this.sendTestMessage(message) });
     this.di.register("assistant.controller.openRecorder", { useValue: (ev: Event) => this.openRecordingDialog(ev) });
     this.di.register("assistant.controller.setMyPartstat", {
       useValue: async (ev: Event, partstat: NonNullable<Event["status"]>) => await this.di.resolve(RsvpUseCase).setMyPartstat(ev, partstat),
@@ -227,6 +239,8 @@ export class AssistantController {
           onCreateEmptyProtocol: p.onCreateEmptyProtocol,
           onOpenProtocol: p.onOpenProtocol,
           onLog: p.onLog,
+          pluginDirPath: this.pluginDirPath,
+          transportRegistry: this.di.resolve(TransportRegistry),
         }),
     });
 
@@ -260,6 +274,7 @@ export class AssistantController {
       {
         createAgendaController: () => this.di.resolve<() => AgendaController>("assistant.factory.agendaController")(),
         createLogController: () => this.di.resolve<() => DefaultLogController>("assistant.factory.logController")(),
+        createTestTransportController: () => this.di.resolve<() => DefaultTestTransportController>("assistant.factory.testTransportController")(),
       },
     );
 
@@ -267,6 +282,7 @@ export class AssistantController {
       openAgenda: () => void this.activateAgendaView(),
       openRecordingDialog: () => void this.openRecordingDialog(),
       openLog: () => void this.activateLogView(),
+      openTestTransportPanel: () => void this.activateTestTransportView(),
       refreshCalendars: () => void this.refreshCalendars(),
       createMeetingCard: () => void this.createManualMeetingCard(),
       createProtocolCard: () => void this.createEmptyProtocolCard(),
@@ -579,6 +595,14 @@ export class AssistantController {
     this.workspace.revealLeaf(leaf as any);
   }
 
+  async activateTestTransportView(): Promise<void> {
+    const existing = this.workspace.getLeavesOfType(TEST_TRANSPORT_VIEW_TYPE);
+    const leaf = existing.length > 0 ? existing[0] : this.workspace.getRightLeaf(false);
+    if (!leaf) return;
+    await (leaf as any).setViewState({ type: TEST_TRANSPORT_VIEW_TYPE, active: true });
+    this.workspace.revealLeaf(leaf);
+  }
+
   private setupRibbonIcons(): void {
     if (!this.agendaRibbonEl) {
       this.agendaRibbonEl = this.plugin.addRibbonIcon("calendar", "Ассистент: Повестка", async () => await this.activateAgendaView());
@@ -590,11 +614,61 @@ export class AssistantController {
     }
   }
 
+  openTestDialog(): void {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { openTestDialog } = require("../presentation/electronWindow/test/testDialog");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { handleTestDialogAction } = require("../presentation/electronWindow/bridge/windowActionRouter");
+
+    const dialog = openTestDialog({
+      pluginDirPath: this.pluginDirPath,
+      transportRegistry: this.di.resolve(TransportRegistry),
+      onMessage: (action: { kind: string }) => {
+        // Логируем сообщение от диалога
+        this.ctx.logService.info(`test_transport_dialog_received`, { action });
+        this.di
+          .resolve(TestTransportLog)
+          .push({ id: `test_transport_${Date.now()}`, ts: Date.now(), direction: "dialog->app", message: action.kind, data: action });
+        handleTestDialogAction(action as any, {
+          onMessage: (a: { kind: string }) => {
+            this.ctx.logService.info(`test_transport_dialog_action`, { kind: a.kind });
+          },
+        });
+      },
+    });
+
+    if (dialog) {
+      this.testDialogWindow = dialog;
+    }
+  }
+
+  sendTestMessage(message: string): void {
+    if (!this.testDialogWindow) {
+      this.ctx.logService.warn("TestDialog: окно не открыто, нельзя отправить сообщение");
+      this.di
+        .resolve(TestTransportLog)
+        .push({ id: `test_transport_${Date.now()}`, ts: Date.now(), direction: "system", message: "test_transport_dialog_not_open" });
+      return;
+    }
+    this.testDialogWindow.sendMessage(message);
+    this.ctx.logService.info(`test_transport_app_sent`, { message });
+    this.di
+      .resolve(TestTransportLog)
+      .push({ id: `test_transport_${Date.now()}`, ts: Date.now(), direction: "app->dialog", message, data: { message } });
+  }
+
   private updateRibbonIcons(): void {
     const debugEnabled = this.getSettings().debug?.enabled === true;
     if (debugEnabled) {
       if (!this.logRibbonEl) {
         this.logRibbonEl = this.plugin.addRibbonIcon("list", "Ассистент: Лог", async () => await this.activateLogView());
+      }
+      if (!this.testTransportRibbonEl) {
+        this.testTransportRibbonEl = this.plugin.addRibbonIcon(
+          "flask-conical",
+          "Test window transport",
+          async () => await this.activateTestTransportView(),
+        );
       }
       return;
     }
@@ -602,6 +676,10 @@ export class AssistantController {
     if (this.logRibbonEl) {
       this.logRibbonEl.remove();
       this.logRibbonEl = undefined;
+    }
+    if (this.testTransportRibbonEl) {
+      this.testTransportRibbonEl.remove();
+      this.testTransportRibbonEl = undefined;
     }
   }
 
