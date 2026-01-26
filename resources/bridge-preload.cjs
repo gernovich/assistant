@@ -156,26 +156,34 @@ ipcRenderer.on("assistant/message-channel-port", (event) => {
   const port = event?.ports?.[0];
   if (!port) return;
   messagePort = port;
+  const handleMessage = (evt) => {
+    const data = evt?.data ?? evt;
+    pendingMessages.push(data);
+    for (const cb of messageListeners) {
+      try {
+        cb(data);
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      transportNotifyMessage(data);
+    } catch {
+      // ignore
+    }
+  };
   if (typeof messagePort.start === "function") {
     messagePort.start();
   }
   if (typeof messagePort.on === "function") {
-    messagePort.on("message", (evt) => {
-      const data = evt?.data;
-      pendingMessages.push(data);
-      for (const cb of messageListeners) {
-        try {
-          cb(data);
-        } catch {
-          // ignore
-        }
-      }
-      try {
-        transportNotifyMessage(data);
-      } catch {
-        // ignore
-      }
-    });
+    messagePort.on("message", handleMessage);
+  } else if (typeof messagePort.addEventListener === "function") {
+    messagePort.addEventListener("message", handleMessage);
+    if (typeof messagePort.start === "function") {
+      messagePort.start();
+    }
+  } else if ("onmessage" in messagePort) {
+    messagePort.onmessage = handleMessage;
   }
   for (const cb of portReadyCallbacks) {
     try {

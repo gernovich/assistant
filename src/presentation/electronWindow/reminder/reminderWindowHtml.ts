@@ -251,16 +251,26 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
           console.log('[Assistant] Reminder: window.__assistantElectron:', window.__assistantElectron ? 'есть' : 'нет');
           console.log('[Assistant] Reminder: window.__assistantElectron?.sendTo:', window.__assistantElectron?.sendTo ? 'есть' : 'нет');
           
-          sendAction({ kind: 'close' }).catch((err) => {
-            console.error('[Assistant] Reminder: ошибка при отправке действия close:', err);
-            // Если IPC не работает, пытаемся закрыть окно напрямую через window.close()
-            // Это может не сработать в Electron, но попробуем
+          const closeFallback = setTimeout(() => {
             try {
               window.close();
             } catch (e) {
               console.error('[Assistant] Reminder: не удалось закрыть окно:', e);
             }
-          });
+          }, 600);
+          sendAction({ kind: 'close' })
+            .then(() => clearTimeout(closeFallback))
+            .catch((err) => {
+              clearTimeout(closeFallback);
+              console.error('[Assistant] Reminder: ошибка при отправке действия close:', err);
+              // Если IPC не работает, пытаемся закрыть окно напрямую через window.close()
+              // Это может не сработать в Electron, но попробуем
+              try {
+                window.close();
+              } catch (e) {
+                console.error('[Assistant] Reminder: не удалось закрыть окно:', e);
+              }
+            });
         });
       }
     } catch {

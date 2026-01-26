@@ -625,6 +625,28 @@ export class AssistantController {
     const dialog = openTestDialog({
       pluginDirPath: this.pluginDirPath,
       transportRegistry: this.di.resolve(TransportRegistry),
+      onOpen: () => {
+        this.ctx.logService.info("test_transport_dialog_opened");
+        this.di
+          .resolve(TestTransportLog)
+          .push({
+            id: `test_transport_${Date.now()}`,
+            ts: Date.now(),
+            direction: "system",
+            message: "test_transport_dialog_opened",
+          });
+      },
+      onClose: () => {
+        this.ctx.logService.info("test_transport_dialog_closed");
+        this.di
+          .resolve(TestTransportLog)
+          .push({
+            id: `test_transport_${Date.now()}`,
+            ts: Date.now(),
+            direction: "system",
+            message: "test_transport_dialog_closed",
+          });
+      },
       onMessage: (action: { kind: string }) => {
         // Логируем сообщение от диалога
         this.ctx.logService.info(`test_transport_dialog_received`, { action });

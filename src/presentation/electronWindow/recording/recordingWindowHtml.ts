@@ -626,14 +626,23 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
           render();
         }
         // Отправляем действие закрытия (окно закроется на стороне основного процесса)
-        sendAction({ kind: "close" }).catch(() => {
-          // Если IPC не работает, пытаемся закрыть окно напрямую через window.close()
-          // Это может не сработать в Electron, но попробуем
+        const closeFallback = setTimeout(() => {
           try {
             window.close();
           } catch (e) {
           }
-        });
+        }, 600);
+        sendAction({ kind: "close" })
+          .then(() => clearTimeout(closeFallback))
+          .catch(() => {
+            clearTimeout(closeFallback);
+            // Если IPC не работает, пытаемся закрыть окно напрямую через window.close()
+            // Это может не сработать в Electron, но попробуем
+            try {
+              window.close();
+            } catch (e) {
+            }
+          });
       });
     }
 

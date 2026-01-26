@@ -27,6 +27,10 @@ export function openTestDialog(params: {
   pluginDirPath?: string | null;
   /** Callback для обработки сообщений от диалога. */
   onMessage?: (action: { kind: string }) => void;
+  /** Callback при успешном открытии окна. */
+  onOpen?: () => void;
+  /** Callback при закрытии окна (любым способом). */
+  onClose?: () => void;
   transportRegistry?: TransportRegistry;
 }): TestDialogWindow | null {
   const { pluginDirPath, onMessage } = params;
@@ -100,7 +104,7 @@ export function openTestDialog(params: {
 
   const transport: WindowTransport = params.transportRegistry
     ? params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
-    : createDialogTransport();
+    : createDialogTransport({ webContents: win.webContents });
 
   transport.attach();
   transport.onReady(() => {
@@ -125,6 +129,13 @@ export function openTestDialog(params: {
     },
   });
 
+  let onCloseCalled = false;
+  const callOnCloseOnce = () => {
+    if (onCloseCalled) return;
+    onCloseCalled = true;
+    if (params.onClose) params.onClose();
+  };
+
   const close = () => {
     try {
       if (win && !win.isDestroyed()) {
@@ -133,6 +144,7 @@ export function openTestDialog(params: {
     } catch {
       // Игнорируем ошибки загрузки.
     }
+    callOnCloseOnce();
     testDialogWindow = null;
   };
 
@@ -169,6 +181,7 @@ export function openTestDialog(params: {
 
   win.on("closed", () => {
     doCleanup();
+    callOnCloseOnce();
     testDialogWindow = null;
   });
 
@@ -178,6 +191,7 @@ export function openTestDialog(params: {
     } catch {
       // Игнорируем ошибки показа окна.
     }
+    if (params.onOpen) params.onOpen();
   });
 
   let dialogLoaded = false;

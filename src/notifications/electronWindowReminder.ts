@@ -200,9 +200,9 @@ export function showElectronReminderWindow(params: {
     }
   };
 
-  const transport: WindowTransport = params.transportRegistry
-    ? params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
-    : createDialogTransport();
+    const transport: WindowTransport = params.transportRegistry
+      ? params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
+      : createDialogTransport({ webContents: win.webContents });
   transport.attach();
   transport.onReady(() => {
     params.onLog?.(`WindowTransport: транспорт окна напоминания готов (${kind})`);

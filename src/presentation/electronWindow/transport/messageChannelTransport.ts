@@ -119,4 +119,8 @@ export class MessageChannelTransport implements WindowTransport {
   getConfig(): { type: "messageChannel"; channel?: string } | null {
     return { type: "messageChannel", channel: this.channelName };
   }
+
+  getCspConnectSrc(): string[] | null {
+    return null;
+  }
 }

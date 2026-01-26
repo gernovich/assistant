@@ -178,7 +178,7 @@ export class RecordingDialog {
     const hostWebContentsId = 0;
     const transport: WindowTransport = this.params.transportRegistry
       ? this.params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
-      : createDialogTransport();
+      : createDialogTransport({ webContents: win.webContents });
     transport.attach();
     transport.onReady(() => {
       this.params.onLog?.("WindowTransport: транспорт окна записи готов");

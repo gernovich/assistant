@@ -163,6 +163,9 @@ export function buildTestDialogHtml(p: TestDialogHtmlParams): string {
           const req = { id: id, ts: Date.now(), action: { kind: 'close' } };
           if (transport && transport.send && transport.isReady && transport.isReady()) {
             transport.send({ type: 'window/request', payload: req });
+            setTimeout(() => {
+              try { window.close(); } catch {}
+            }, 600);
           } else {
             window.close();
           }
