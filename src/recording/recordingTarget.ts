@@ -1,5 +1,4 @@
 import type { Event } from "../types";
-import { makeEventKey } from "../ids/stableIds";
 import { pickDefaultRecordingTargetPolicy, type RecordingTarget } from "../domain/policies/recordingTarget";
 
 /**
@@ -9,5 +8,5 @@ import { pickDefaultRecordingTargetPolicy, type RecordingTarget } from "../domai
  * - иначе ставим галочку "новый протокол"
  */
 export function pickDefaultRecordingTarget(events: Event[], now: Date, minutesWindow = 5): RecordingTarget {
-  return pickDefaultRecordingTargetPolicy(events, now, minutesWindow, makeEventKey);
+  return pickDefaultRecordingTargetPolicy(events, now, minutesWindow);
 }

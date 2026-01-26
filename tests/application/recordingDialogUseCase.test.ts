@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RecordingDialogUseCase } from "../../src/application/recording/recordingDialogUseCase";
 import { DEFAULT_SETTINGS } from "../../src/settingsStore";
 import type { Event } from "../../src/types";
+import { makeOccurrenceKey } from "../../src/ids/stableIds";
 
 function makeEvent(): Event {
   return {
@@ -17,8 +18,9 @@ describe("RecordingDialogUseCase", () => {
     const warnLinuxNativeDepsOnOpen = vi.fn();
     const dlgOpen = vi.fn();
     const dialogFactory = vi.fn().mockImplementation((p) => {
+      const ev = makeEvent();
       expect(p.lockDefaultEvent).toBe(true);
-      expect(p.defaultEventKey).toBe("cal:uid");
+      expect(p.defaultEventKey).toBe(makeOccurrenceKey(ev.calendar.id, ev.id, ev.start));
       return { open: dlgOpen };
     });
 

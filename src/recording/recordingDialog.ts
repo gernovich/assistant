@@ -13,6 +13,7 @@ import { createDialogTransport } from "../presentation/electronWindow/transport/
 import type { WindowTransport } from "../presentation/electronWindow/transport/windowTransport";
 import type { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
 import { RecordingVizNormalizer } from "./recordingVizNormalizer";
+import { makeOccurrenceKey } from "../ids/stableIds";
 
 type ElectronLike = {
   remote?: { BrowserWindow?: any };
@@ -149,7 +150,7 @@ export class RecordingDialog {
       defaultEventKey: defaultKey,
       lockDefaultEvent: Boolean(this.params.lockDefaultEvent),
       autoStartSeconds: this.params.settings.recording.autoStartSeconds,
-      keyOfEvent: (ev) => `${ev.calendar.id}:${ev.id}`,
+      keyOfEvent: (ev) => makeOccurrenceKey(ev.calendar.id, ev.id, ev.start),
       labelOfEvent: (ev) =>
         `${ev.start.toLocaleString("ru-RU", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} — ${ev.summary}`,
     });
@@ -337,7 +338,9 @@ export class RecordingDialog {
           // 3) continue_existing -> используем выбранный протокол
           if (!protocolFilePath) {
             if (mode === "occurrence_new" && occurrenceKey) {
-              const ev = this.params.events.find((e) => `${e.calendar.id}:${e.id}` === occurrenceKey);
+              const ev = this.params.events.find(
+                (e) => makeOccurrenceKey(e.calendar.id, e.id, e.start) === occurrenceKey,
+              );
               if (ev) {
                 const p = await this.params.onCreateProtocol?.(ev);
                 protocolFilePath = typeof p === "string" && p.trim() ? p.trim() : undefined;
@@ -349,7 +352,7 @@ export class RecordingDialog {
                   .sort((a, b) => a.start.getTime() - b.start.getTime())
                   .find((e) => String(e.summary || "").trim() === eventSummary) ?? null;
               if (ev) {
-                resolvedEventKey = `${ev.calendar.id}:${ev.id}`;
+                resolvedEventKey = makeOccurrenceKey(ev.calendar.id, ev.id, ev.start);
                 const p = await this.params.onCreateProtocol?.(ev);
                 protocolFilePath = typeof p === "string" && p.trim() ? p.trim() : undefined;
               }
@@ -359,6 +362,11 @@ export class RecordingDialog {
             }
           }
 
+          this.params.onLog?.(
+            `Запись: запуск, mode=${mode}, occurrence_key=${String(resolvedEventKey || "")}, protocol=${
+              protocolFilePath || ""
+            }`,
+          );
           const res = await this.params.recordingController.startResult({
             eventKey: resolvedEventKey,
             protocolFilePath,

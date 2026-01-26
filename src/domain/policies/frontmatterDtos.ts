@@ -36,6 +36,10 @@ export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: s
   const status = String(map[FM.status] ?? "").trim();
   const organizerEmail = String(map[FM.organizerEmail] ?? "").trim();
   const organizerCn = String(map[FM.organizerCn] ?? "").trim();
+  const timezone = String(map[FM.timezone] ?? "").trim();
+  const rrule = String(map[FM.rrule] ?? "").trim();
+  const eventColor = String(map[FM.eventColor] ?? "").trim();
+  const remindersMinutesBefore = parseNumberArray(map[FM.remindersMinutesBefore]);
 
   return ok({
     assistant_type: "calendar_event",
@@ -49,6 +53,10 @@ export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: s
     status: (status || undefined) as MeetingNoteDto["status"],
     organizer_email: organizerEmail || undefined,
     organizer_cn: organizerCn || undefined,
+    timezone: timezone || undefined,
+    rrule: rrule || undefined,
+    reminders_minutes_before: remindersMinutesBefore,
+    event_color: eventColor || undefined,
   });
 }
 
@@ -70,6 +78,24 @@ function readObject(fm: Record<string, unknown>, key: string): Record<string, un
   return v as Record<string, unknown>;
 }
 
+function parseNumberArray(raw: unknown): number[] | undefined {
+  if (Array.isArray(raw)) {
+    const nums = raw.filter((n) => typeof n === "number" && Number.isFinite(n)) as number[];
+    return nums.length ? nums : undefined;
+  }
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!Array.isArray(parsed)) return undefined;
+    const nums = parsed.filter((n) => typeof n === "number" && Number.isFinite(n)) as number[];
+    return nums.length ? nums : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function requireType(fm: Record<string, unknown>, expected: string): Result<void> {
   const t = readString(fm, FM.assistantType);
   if (t !== expected) return err({ code: APP_ERROR.VALIDATION, message: `Неверный assistant_type (ожидали ${expected})` });
@@ -82,12 +108,21 @@ export function parseProtocolNoteFromCache(frontmatter: Record<string, unknown>)
 
   const id = String(readString(frontmatter, FM.protocolId) ?? "").trim();
   const calendarId = String(readString(frontmatter, FM.calendarId) ?? "").trim();
+  const eventIdRaw = String(readString(frontmatter, FM.eventId) ?? "").trim();
+  const occurrenceIdRaw = String(readString(frontmatter, FM.occurrenceId) ?? "").trim();
+  const recurrenceId = String(readString(frontmatter, FM.recurrenceId) ?? "").trim();
   const start = String(readString(frontmatter, FM.start) ?? "").trim();
   const end = String(readString(frontmatter, FM.end) ?? "").trim();
 
   if (!id) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует protocol_id" });
   if (!calendarId) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует calendar_id" });
   if (!start) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует start" });
+
+  const eventId = eventIdRaw || parseEventIdFromProtocolId(id);
+  if (!eventId) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует event_id" });
+
+  const occurrenceId = occurrenceIdRaw || makeOccurrenceIdFromStart(calendarId, eventId, start);
+  if (!occurrenceId) return err({ code: APP_ERROR.VALIDATION, message: "В протоколе отсутствует occurrence_id" });
 
   const files = readStringArray(frontmatter, FM.files);
   const participantsRaw = frontmatter[FM.participants];
@@ -125,6 +160,9 @@ export function parseProtocolNoteFromCache(frontmatter: Record<string, unknown>)
     assistant_type: "protocol",
     protocol_id: id,
     calendar_id: calendarId as CalendarId,
+    event_id: eventId,
+    occurrence_id: occurrenceId,
+    recurrence_id: recurrenceId || undefined,
     start,
     end: end || undefined,
     summary: readString(frontmatter, FM.summary),
@@ -133,6 +171,19 @@ export function parseProtocolNoteFromCache(frontmatter: Record<string, unknown>)
     participants,
     projects,
   });
+}
+
+function parseEventIdFromProtocolId(protocolId: string): string | undefined {
+  const s = String(protocolId ?? "").trim();
+  const idx = s.indexOf(":");
+  if (idx <= 0 || idx === s.length - 1) return undefined;
+  return s.slice(idx + 1);
+}
+
+function makeOccurrenceIdFromStart(calendarId: string, eventId: string, startIso: string): string | undefined {
+  const ms = Date.parse(startIso);
+  if (!Number.isFinite(ms)) return undefined;
+  return `${calendarId}:${eventId}:${Math.floor(ms)}`;
 }
 
 export function parsePersonNoteFromCache(frontmatter: Record<string, unknown>): Result<PersonNoteDto> {

@@ -267,6 +267,8 @@ export interface Occurrence {
   calendar: Calendar;
   /** UID события (общий для series/master). */
   eventId: string;
+  /** Стабильный ключ экземпляра: `calendar_id:event_id:start_ms`. */
+  occurrence_key: string;
   /** DTSTART конкретного экземпляра. */
   start: Date;
   /** DTEND конкретного экземпляра (если есть). */
@@ -299,6 +301,10 @@ export interface MeetingNoteDto {
   organizer_email?: string;
   organizer_cn?: string;
   status?: RsvpStatus;
+  timezone?: string;
+  rrule?: string;
+  reminders_minutes_before?: number[];
+  event_color?: string;
   /** Все участники (person_id). */
   attendees?: string[];
   /** Участники по статусам (person_id). */
@@ -408,6 +414,9 @@ export type ProjectRef = Pick<Project, "id" | "title">;
 export interface Protocol {
   id: ProtocolId;
   calendar: Calendar;
+  event_id?: string;
+  occurrence_id?: string;
+  recurrence_id?: string;
   start: string; // ISO
   end?: string; // ISO
   /** Краткое содержание. */
@@ -427,6 +436,9 @@ export interface ProtocolNote {
   assistant_type: "protocol";
   protocol_id: string;
   calendar_id: CalendarId;
+  event_id: string;
+  occurrence_id: string;
+  recurrence_id?: string;
   start: string; // ISO
   end?: string; // ISO
   summary?: string;

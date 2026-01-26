@@ -27,6 +27,10 @@ export const FM = {
   status: "status",
   organizerEmail: "organizer_email",
   organizerCn: "organizer_cn",
+  timezone: "timezone",
+  rrule: "rrule",
+  remindersMinutesBefore: "reminders_minutes_before",
+  eventColor: "event_color",
   attendees: "attendees",
   attendeesAccepted: "attendees_accepted",
   attendeesDeclined: "attendees_declined",
@@ -35,6 +39,8 @@ export const FM = {
   attendeesUnknown: "attendees_unknown",
 
   // protocol note
+  occurrenceId: "occurrence_id",
+  recurrenceId: "recurrence_id",
   transcript: "transcript",
   files: "files",
   participants: "participants",

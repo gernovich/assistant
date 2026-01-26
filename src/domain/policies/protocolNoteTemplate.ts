@@ -13,6 +13,9 @@ export function renderProtocolMarkdown(params: {
     assistantType: string;
     protocolId: string;
     calendarId: string;
+    eventId: string;
+    occurrenceId: string;
+    recurrenceId: string;
     start: string;
     end: string;
     summary: string;
@@ -27,6 +30,8 @@ export function renderProtocolMarkdown(params: {
   const startIso = params.ev.start.toISOString();
   const endIso = params.ev.end ? params.ev.end.toISOString() : "";
   const eventKey = params.makeEventKey(params.ev.calendar.id, params.ev.id);
+  const occurrenceId = makeOccurrenceId(params.ev.calendar.id, params.ev.id, startIso);
+  const recurrenceId = String(params.ev.recurrence?.recurrenceId ?? "").trim();
   const eventLinkTarget = params.eventFilePath ? stripMarkdownExtension(params.eventFilePath) : "";
 
   return [
@@ -34,6 +39,9 @@ export function renderProtocolMarkdown(params: {
     `${params.keys.assistantType}: protocol`,
     `${params.keys.protocolId}: ${params.escape(eventKey)}`,
     `${params.keys.calendarId}: ${params.escape(params.ev.calendar.id)}`,
+    `${params.keys.eventId}: ${params.escape(params.ev.id)}`,
+    `${params.keys.occurrenceId}: ${params.escape(occurrenceId)}`,
+    `${params.keys.recurrenceId}: ${params.escape(recurrenceId)}`,
     `${params.keys.start}: ${params.escape(startIso)}`,
     `${params.keys.end}: ${params.escape(endIso)}`,
     `${params.keys.summary}: `,
@@ -97,6 +105,9 @@ export function renderEmptyProtocolMarkdown(params: {
     assistantType: string;
     protocolId: string;
     calendarId: string;
+    eventId: string;
+    occurrenceId: string;
+    recurrenceId: string;
     start: string;
     end: string;
     summary: string;
@@ -107,11 +118,17 @@ export function renderEmptyProtocolMarkdown(params: {
   };
   escape: (s: string) => string;
 }): string {
+  const calendarId = "manual";
+  const eventId = parseEventIdFromProtocolId(params.id) || params.id;
+  const occurrenceId = makeOccurrenceId(calendarId, eventId, params.startIso);
   return [
     "---",
     `${params.keys.assistantType}: protocol`,
     `${params.keys.protocolId}: ${params.escape(params.id)}`,
-    `${params.keys.calendarId}: ${params.escape("manual")}`,
+    `${params.keys.calendarId}: ${params.escape(calendarId)}`,
+    `${params.keys.eventId}: ${params.escape(eventId)}`,
+    `${params.keys.occurrenceId}: ${params.escape(occurrenceId)}`,
+    `${params.keys.recurrenceId}: `,
     `${params.keys.start}: ${params.escape(params.startIso)}`,
     `${params.keys.end}: `,
     `${params.keys.summary}: `,
@@ -150,4 +167,17 @@ export function renderEmptyProtocolMarkdown(params: {
     "- (пока пусто)",
     "",
   ].join("\n");
+}
+
+function parseEventIdFromProtocolId(protocolId: string): string | undefined {
+  const s = String(protocolId ?? "").trim();
+  const idx = s.indexOf(":");
+  if (idx <= 0 || idx === s.length - 1) return undefined;
+  return s.slice(idx + 1);
+}
+
+function makeOccurrenceId(calendarId: string, eventId: string, startIso: string): string {
+  const ms = Date.parse(startIso);
+  const safeMs = Number.isFinite(ms) ? Math.floor(ms) : 0;
+  return `${calendarId}:${eventId}:${safeMs}`;
 }

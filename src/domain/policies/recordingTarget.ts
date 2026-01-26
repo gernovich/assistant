@@ -1,4 +1,5 @@
 import type { Event } from "../../types";
+import { makeOccurrenceKey } from "../../ids/stableIds";
 
 export type RecordingTarget = {
   selectedEventKey?: string;
@@ -16,7 +17,6 @@ export function pickDefaultRecordingTargetPolicy(
   events: Event[],
   now: Date,
   minutesWindow: number,
-  makeEventKey: (calendarId: string, eventId: string) => string,
 ): RecordingTarget {
   const nowMs = now.getTime();
   const windowMs = Math.max(0, minutesWindow) * 60_000;
@@ -44,5 +44,5 @@ export function pickDefaultRecordingTargetPolicy(
 
   const picked = ongoing ?? soon;
   if (!picked) return { selectedEventKey: undefined, createNewProtocol: true };
-  return { selectedEventKey: makeEventKey(picked.calendar.id, picked.id), createNewProtocol: false };
+  return { selectedEventKey: makeOccurrenceKey(picked.calendar.id, picked.id, picked.start), createNewProtocol: false };
 }

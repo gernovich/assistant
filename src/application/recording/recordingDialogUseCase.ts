@@ -1,5 +1,5 @@
 import type { AssistantSettings, Event } from "../../types";
-import { makeEventKey } from "../../ids/stableIds";
+import { makeOccurrenceKey } from "../../ids/stableIds";
 import { pickDefaultRecordingTarget } from "../../recording/recordingTarget";
 import { err, ok, type Result } from "../../shared/result";
 
@@ -53,7 +53,9 @@ export class RecordingDialogUseCase {
     const settings = this.deps.getSettings();
     const events = this.deps.getEvents();
 
-    const preferredKey = preferredEvent ? makeEventKey(preferredEvent.calendar.id, preferredEvent.id) : undefined;
+    const preferredKey = preferredEvent
+      ? makeOccurrenceKey(preferredEvent.calendar.id, preferredEvent.id, preferredEvent.start)
+      : undefined;
 
     // Защита: не открываем окно повторно “в спам” (например если таймер/клик сработали одновременно).
     const key = String(preferredKey ?? "");

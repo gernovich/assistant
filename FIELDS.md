@@ -72,9 +72,10 @@
 - `assistant_type: protocol`
 - `protocol_id: string` (формат: `calendar_id:event_id`)
 - `calendar_id: string`
+- `event_id: string`
+- `occurrence_id: string` (формат: `calendar_id:event_id:start_ms`)
 - `start: ISO string`
-- `occurrence_key: string` (формат: `calendar_id:event_id:start_ms`) — **ключ экземпляра**, должен однозначно указывать “какая дата” протокола
-  - Для обратной совместимости старых протоколов допускается отсутствие `occurrence_key`, тогда экземпляр определяется по `(calendar_id, protocol_id, start)`.
+  - Для обратной совместимости старых протоколов допускается отсутствие `occurrence_id`, тогда экземпляр определяется по `(calendar_id, protocol_id, start)`.
 
 **Опциональные**:
 
@@ -209,7 +210,7 @@
 
 ## Событие Occurrence (конкретная дата/экземпляр повторяющейся встречи)
 
-Статус: ✅ (контракт оформлен; в коде occurrences пока часто представлены как `Event` со `start` и `recurrence.recurrenceId?`)
+Статус: ✅ (контракт оформлен; в коде occurrences пока часто представлены как `Event` со `start` и `recurrence.recurrenceId?`; использовать как контракт)
 
 Occurrence нужен, чтобы обновлять **конкретный экземпляр** повторяющейся встречи (а не master-событие).
 Пример: встреча уже прошла → сделали протокол, прикрепили файлы, расшифровали, сделали summary → и хотим обновить описание/статус **именно этой даты** в календаре (CalDAV).
@@ -234,6 +235,8 @@ Occurrence нужен, чтобы обновлять **конкретный эк
 | --------------------------- | -------------------------- | ------------------------------------------------------- | --------------- | ------------------------------------- |
 | Код                         | `Protocol.id`              | `protocol_id`                                           | +               | Встреча → плагин → vault              |
 | Код календаря               | `ProtocolNote.calendar_id` | `calendar_id`                                           |                 | Встреча → плагин → vault              |
+| Код события                 | `ProtocolNote.event_id`    | `event_id`                                              |                 | Встреча → плагин → vault              |
+| Код экземпляра              | `ProtocolNote.occurrence_id` | `occurrence_id`                                       |                 | Встреча → плагин → vault              |
 | Начало                      | `Protocol.start`           | `start`                                                 | +               | Встреча → плагин → vault              |
 | Конец                       | `Protocol.end?`            | `end`                                                   | +               | Встреча → плагин → vault              |
 | Краткое содержание          | `Protocol.summary?`        | `summary`                                               |                 | Пользователь → vault                  |

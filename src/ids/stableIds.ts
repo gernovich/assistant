@@ -1,6 +1,8 @@
 /** Стабильный ключ события (используется для связи “календарь ↔ протокол/встреча”). */
 export { makeEventKey } from "../domain/identity/eventKey";
 export type { EventKey } from "../domain/identity/eventKey";
+export { makeOccurrenceKey } from "../domain/identity/occurrenceKey";
+export type { OccurrenceKey } from "../domain/identity/occurrenceKey";
 
 import { normalizeEmail } from "../domain/policies/normalizeEmail";
 

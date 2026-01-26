@@ -13,7 +13,6 @@ describe("registerAssistantCommands", () => {
     const controller = {
       openAgenda: vi.fn(),
       openRecordingDialog: vi.fn(),
-      openLog: vi.fn(),
       refreshCalendars: vi.fn(),
       createMeetingCard: vi.fn(),
       createProtocolCard: vi.fn(),
@@ -35,7 +34,6 @@ describe("registerAssistantCommands", () => {
     const ids = added.map((x) => x.id);
     expect(ids).toContain("open-agenda");
     expect(ids).toContain("recording-open-dialog");
-    expect(ids).toContain("open-log");
     expect(ids).toContain("refresh-calendars");
     expect(ids).toContain("apply-outbox");
   });

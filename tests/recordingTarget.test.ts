@@ -19,21 +19,23 @@ function ev(params: { calId: string; id: string; start: string; end?: string; su
 describe("recordingTarget (compat wrapper)", () => {
   it("selects ongoing event over soon event", () => {
     const now = new Date("2026-01-21T10:00:00.000Z");
+    const onStart = "2026-01-21T09:30:00.000Z";
     const events = [
       ev({ calId: "c", id: "soon", start: "2026-01-21T10:03:00.000Z", end: "2026-01-21T11:00:00.000Z" }),
-      ev({ calId: "c", id: "on", start: "2026-01-21T09:30:00.000Z", end: "2026-01-21T10:30:00.000Z" }),
+      ev({ calId: "c", id: "on", start: onStart, end: "2026-01-21T10:30:00.000Z" }),
     ];
     const r = pickDefaultRecordingTarget(events, now, 5);
     expect(r.createNewProtocol).toBe(false);
-    expect(r.selectedEventKey).toContain("c:on");
+    expect(r.selectedEventKey).toBe(`c:on:${Date.parse(onStart)}`);
   });
 
   it("selects soon event within 5 minutes", () => {
     const now = new Date("2026-01-21T10:00:00.000Z");
-    const events = [ev({ calId: "c", id: "soon", start: "2026-01-21T10:04:00.000Z" })];
+    const soonStart = "2026-01-21T10:04:00.000Z";
+    const events = [ev({ calId: "c", id: "soon", start: soonStart })];
     const r = pickDefaultRecordingTarget(events, now, 5);
     expect(r.createNewProtocol).toBe(false);
-    expect(r.selectedEventKey).toContain("c:soon");
+    expect(r.selectedEventKey).toBe(`c:soon:${Date.parse(soonStart)}`);
   });
 
   it("defaults to new protocol when nothing ongoing/soon", () => {

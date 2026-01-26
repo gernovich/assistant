@@ -52,7 +52,6 @@ import { RecordingDialogUseCase } from "../../application/recording/recordingDia
 import { AutoRefreshUseCase } from "../../application/calendar/autoRefreshUseCase";
 import { ProtocolIndex } from "../../protocols/protocolIndex";
 import { DefaultLogController } from "../../presentation/controllers/logController";
-import { DefaultTestTransportController, TestTransportLog } from "../../presentation/controllers/testTransportController";
 import { AgendaController } from "../../application/agenda/agendaController";
 import { DefaultRecordingController } from "../../presentation/controllers/recordingController";
 
@@ -390,17 +389,6 @@ export function createAssistantContainer(params: {
         openTodayFile: cc.resolve<() => void>("assistant.controller.openTodayLogFile"),
         clearTodayFile: cc.resolve<() => void>("assistant.controller.clearTodayLogFile"),
         openAgenda: cc.resolve<() => void>("assistant.controller.openAgendaView"),
-      }),
-  });
-
-  c.register(TestTransportLog, { useValue: new TestTransportLog() });
-
-  c.register("assistant.factory.testTransportController", {
-    useFactory: (cc) => () =>
-      new DefaultTestTransportController({
-        log: cc.resolve(TestTransportLog),
-        openDialog: cc.resolve<() => void>("assistant.controller.openTestDialog"),
-        sendMessage: cc.resolve<(message: string) => void>("assistant.controller.sendTestMessage"),
       }),
   });
 
