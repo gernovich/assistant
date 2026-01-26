@@ -34,7 +34,7 @@ export class PeopleFromMeetingUseCase {
     const text = await this.deps.readFileText(file);
     const emails = extractEmailsFromTextPolicy(text);
     if (emails.length === 0) {
-      this.deps.notice("Ассистент: не удалось извлечь emails участников из тела заметки встречи");
+      this.deps.notice("Ассистент: не удалось извлечь email участников из тела заметки встречи");
       return;
     }
 
@@ -44,7 +44,7 @@ export class PeopleFromMeetingUseCase {
         await this.deps.people.ensureByEmail({ email });
         ensured++;
       } catch (e) {
-        this.deps.log.warn("People: ensureByEmail: ошибка (пропускаю)", { email, error: e });
+        this.deps.log.warn("Люди: обработка по email: ошибка (пропускаю)", { email, error: e });
       }
     }
 

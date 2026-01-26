@@ -1,5 +1,5 @@
 /**
- * Policy: генерация YAML-строк для frontmatter.
+ * Политика: генерация YAML-строк для frontmatter.
  *
  * Важно: pure-функции, escaping передаётся снаружи.
  */

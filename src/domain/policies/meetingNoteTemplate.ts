@@ -2,7 +2,7 @@ import type { MeetingFrontmatterData } from "./meetingFrontmatterData";
 import { yamlStringArrayLines } from "./frontmatterYaml";
 
 /**
- * Policy: шаблон карточки встречи (markdown).
+ * Политика: шаблон карточки встречи (markdown).
  *
  * Важно: чистая функция. Все инфраструктурные детали передаются параметрами (escape/keys/renderers).
  */

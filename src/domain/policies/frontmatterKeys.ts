@@ -1,7 +1,7 @@
 import type { AssistantEntityType } from "../../types";
 
 /**
- * Policy: единый словарь ключей frontmatter.
+ * Политика: единый словарь ключей frontmatter.
  *
  * Чистое: только константы/предикаты. Вынесено из vault.
  */

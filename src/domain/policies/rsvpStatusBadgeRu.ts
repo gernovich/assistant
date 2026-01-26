@@ -1,7 +1,7 @@
 import type { RsvpStatus } from "../../types";
 
 /**
- * Policy: отображение RSVP статуса (accepted/declined/...) в badge-текст для UI (RU).
+ * Политика: отображение RSVP статуса (accepted/declined/...) в badge-текст для UI (RU).
  *
  * Важно: это чистая функция. Формат строки оставляем совместимым с текущим UI `AgendaView` (с ведущим " • ").
  */

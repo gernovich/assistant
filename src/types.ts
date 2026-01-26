@@ -27,7 +27,7 @@ export interface EventRecurrenceDto {
   rrule?: string;
   /** Сырые EXDATE как строки из ICS (могут быть списком через запятую). */
   exdates?: string[];
-  /** RECURRENCE-ID (если это override-экземпляр). */
+  /** RECURRENCE-ID (если это экземпляр переопределения). */
   recurrenceId?: string;
 }
 
@@ -60,7 +60,7 @@ export interface CalendarConfig {
   type: CalendarSourceType;
   /** Включён ли календарь в refresh/sync. */
   enabled: boolean;
-  /** Цвет календаря (в основном для CalDAV discovery; используется как fallback для `Event.color`, если у события нет COLOR). */
+  /** Цвет календаря (в основном для CalDAV discovery; используется как резерв для `Event.color`, если у события нет COLOR). */
   color?: string;
   /** URL ICS, если `type = "ics_url"`. */
   url?: string;
@@ -229,9 +229,9 @@ export interface Event {
   status?: RsvpStatus;
   /** Повторяемость (если удалось извлечь из ICS). */
   recurrence?: EventRecurrenceDto;
-  /** SEQUENCE (для CalDAV write-back и контроля конфликтов), если удалось извлечь. */
+  /** SEQUENCE (для обратной записи CalDAV и контроля конфликтов), если удалось извлечь. */
   sequence?: number;
-  /** LAST-MODIFIED (для CalDAV write-back и контроля конфликтов), если удалось извлечь. */
+  /** LAST-MODIFIED (для обратной записи CalDAV и контроля конфликтов), если удалось извлечь. */
   lastModified?: string;
   /** Напоминания (если удалось извлечь из ICS). */
   reminders?: Array<
@@ -283,10 +283,10 @@ export interface Occurrence {
 // DTO (контракты между слоями). Используем как “единый словарь” сущностей проекта.
 // -----------------------------------------------------------------------------
 
-/** Deprecated: старое имя, оставлено для обратной совместимости типов. */
+/** Устаревшее: старое имя, оставлено для обратной совместимости типов. */
 export type CalendarAccountDto = CalendarAccountConfig;
 
-/** DTO frontmatter карточки встречи (md в vault). */
+/** DTO frontmatter карточки встречи (md в хранилище). */
 export interface MeetingNoteDto {
   assistant_type: "calendar_event";
   calendar_id: CalendarId;
@@ -310,8 +310,8 @@ export interface MeetingNoteDto {
 }
 
 // -----------------------------------------------------------------------------
-// Domain DTO: сущности, с которыми работает код (runtime/UI/use-cases).
-// Frontmatter DTO: как эти сущности выглядят в vault (YAML, snake_case).
+// Domain DTO: сущности, с которыми работает код (runtime/интерфейс/юзкейсы).
+// Frontmatter DTO: как эти сущности выглядят в хранилище (YAML, snake_case).
 // -----------------------------------------------------------------------------
 
 export type PersonId = string;
@@ -353,7 +353,7 @@ export interface Person {
   photo?: string;
   /** День рождения (например `YYYY-MM-DD`). */
   birthday?: string;
-  /** Voiceprint (например путь к файлу / идентификатор / ссылка). */
+  /** Голосовой отпечаток (например путь к файлу / идентификатор / ссылка). */
   voiceprint?: string;
   /** Email-адреса человека. */
   emails?: string[];

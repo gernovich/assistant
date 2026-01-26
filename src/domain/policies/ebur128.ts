@@ -1,5 +1,5 @@
 /**
- * Policy: парсинг ebur128 из stderr ffmpeg.
+ * Политика: парсинг ebur128 из stderr ffmpeg.
  *
  * В текущем пайплайне нас интересует momentary loudness `M: -28.3` (LUFS).
  */

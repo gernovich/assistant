@@ -26,6 +26,7 @@ describe("windowBridge (electron ipc transport)", () => {
     const sendTo = vi.fn();
     const on = vi.fn((ch: string, cb: any) => handlers.set(ch, cb));
     const removeListener = vi.fn((ch: string) => handlers.delete(ch));
+    const onLog = vi.fn();
 
     (globalThis as any).__assistantElectronIpcMock = { on, removeListener, sendTo };
 
@@ -34,6 +35,7 @@ describe("windowBridge (electron ipc transport)", () => {
       expectedSenderId: 777,
       timeoutMs: 200,
       onRequest,
+      onLog,
     });
 
     const h = handlers.get("assistant/window/request");
@@ -47,6 +49,7 @@ describe("windowBridge (electron ipc transport)", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onLog).toHaveBeenCalledWith("windowBridge: сообщение принято");
 
     un();
     expect(removeListener).toHaveBeenCalled();

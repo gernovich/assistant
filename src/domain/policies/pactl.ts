@@ -1,5 +1,5 @@
 /**
- * Policy: парсинг `pactl` stdout (list short / info) и вычисление кандидатов.
+ * Политика: парсинг `pactl` stdout (list short / info) и вычисление кандидатов.
  *
  * Все функции чистые: принимают stdout как строку.
  */
@@ -128,14 +128,14 @@ export function buildPulseMonitorCandidates(params: {
         const mon = `${sinkName}.monitor`;
         if (monitorSources.has(mon)) out.push(mon);
       }
-      // fallback: RUNNING sinks
+      // Резерв: RUNNING sinks
       for (const sinkName of runningSinks) {
         const mon = `${sinkName}.monitor`;
         if (monitorSources.has(mon)) out.push(mon);
       }
     }
   } catch {
-    // ignore
+    // Игнорируем ошибки анализа sinks.
   }
 
   // 2) RUNNING/IDLE monitor sources

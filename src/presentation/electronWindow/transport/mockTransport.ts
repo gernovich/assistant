@@ -13,7 +13,7 @@ export class MockTransport implements WindowTransport {
   }
 
   attach(): void {
-    // no-op for mock
+    // заглушка: ничего не делаем
   }
 
   onReady(cb: () => void): Unsubscribe {

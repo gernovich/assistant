@@ -27,7 +27,7 @@ type LinuxHandle = RecordingBackendSessionHandle & {
 
 function asElectronHandle(h: RecordingBackendSessionHandle, log: Logger): ElectronHandle | null {
   if (h.kind !== "electron_media_devices") {
-    log.error("Recording backend handle mismatch", { expected: "electron_media_devices", got: h.kind });
+    log.error("Запись: не совпадает тип хэндла бэкенда", { expected: "electron_media_devices", got: h.kind });
     return null;
   }
   return h as ElectronHandle;
@@ -35,7 +35,7 @@ function asElectronHandle(h: RecordingBackendSessionHandle, log: Logger): Electr
 
 function asLinuxHandle(h: RecordingBackendSessionHandle, log: Logger): LinuxHandle | null {
   if (h.kind !== "linux_native") {
-    log.error("Recording backend handle mismatch", { expected: "linux_native", got: h.kind });
+    log.error("Запись: не совпадает тип хэндла бэкенда", { expected: "linux_native", got: h.kind });
     return null;
   }
   return h as LinuxHandle;
@@ -123,7 +123,7 @@ export function createUseCaseRecordingBackends(params: {
           if (!s.vizTimer && s.vizSample) s.vizTimer = window.setInterval(s.vizSample, 50);
         }
       } catch {
-        // ignore
+        // Игнорируем ошибки управления визуализацией.
       }
     },
   };
@@ -189,7 +189,7 @@ export function createUseCaseRecordingBackends(params: {
       try {
         if (paused) params.getOnViz()?.(0);
       } catch {
-        // ignore
+        // Игнорируем ошибки обновления визуализации.
       }
     },
   };

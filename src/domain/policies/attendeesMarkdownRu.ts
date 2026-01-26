@@ -3,7 +3,7 @@ import { partstatLabelRu } from "./partstatLabelRu";
 export type AttendeeRenderDto = { email: string; cn?: string; partstat?: string };
 
 /**
- * Policy: рендер списка участников в markdown (RU), как в карточке встречи.
+ * Политика: рендер списка участников в markdown (RU), как в карточке встречи.
  *
  * Совместимость: формат строк и сортировка должны совпадать с текущим поведением `EventNoteService`.
  */

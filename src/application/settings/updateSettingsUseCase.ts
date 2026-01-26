@@ -4,14 +4,14 @@ import { err, ok, type Result } from "../../shared/result";
 import { APP_ERROR } from "../../shared/appErrorCodes";
 
 /**
- * Use-case: централизованное обновление settings (mutate + save/apply).
+ * Юзкейс: централизованное обновление настроек (мутация + сохранение/применение).
  *
  * Зачем:
- * - UI секции не должны напрямую дергать `saveSettingsAndApply()` и размазывать порядок действий
- * - в одном месте можно позже добавить: validation, audit-log, immutable updates, telemetry и т.п.
+ * - секции интерфейса не должны напрямую дергать `saveSettingsAndApply()` и размазывать порядок действий
+ * - в одном месте можно позже добавить: валидацию, журнал аудита, неизменяемые обновления, телеметрию и т.п.
  *
- * Сейчас это intentionally "mutable" (mutator изменяет текущий объект settings),
- * чтобы не ломать существующие UI refs (например `cal`/`acc` объекты из массива).
+ * Сейчас это намеренно "mutable" (функция‑мутатор изменяет текущий объект настроек),
+ * чтобы не ломать существующие ссылки интерфейса (например объекты `cal`/`acc` из массива).
  */
 export class UpdateSettingsUseCase {
   constructor(
@@ -29,17 +29,17 @@ export class UpdateSettingsUseCase {
       await this.deps.saveSettingsAndApply();
       return ok(undefined);
     } catch (e) {
-      this.deps.log.error("Настройки: update: ошибка", { error: e });
+      this.deps.log.error("Настройки: обновление: ошибка", { error: e });
       return err({
         code: APP_ERROR.SETTINGS,
         message: "Не удалось сохранить/применить настройки",
-        cause: String((e as unknown) ?? "unknown"),
+        cause: String((e as unknown) ?? "неизвестная ошибка"),
       });
     }
   }
 
   /**
-   * Backward-compatible wrapper: не бросаем исключения наружу.
+   * Обратная совместимость: не бросаем исключения наружу.
    * Ошибка уже залогирована внутри `updateResult`.
    */
   async update(mutator: (s: AssistantSettings) => void): Promise<void> {

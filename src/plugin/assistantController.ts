@@ -146,7 +146,7 @@ export class AssistantController {
     this.saveData = p.saveData;
     this.pluginDirPath = p.pluginDirPath;
 
-    // DI (controller-scoped): регистрируем порты/коллбеки, затем резолвим use-cases/controllers из container.
+    // DI (на уровне контроллера): регистрируем порты/коллбеки, затем резолвим use-case'ы/контроллеры из container.
     this.di = this.ctx.container;
     this.di.register("assistant.controller.workspacePort", { useValue: this.workspace });
     this.di.register("assistant.controller.vaultPort", { useValue: this.vault });
@@ -164,7 +164,7 @@ export class AssistantController {
     });
     this.di.register("assistant.randomHex", { useValue: () => Math.random().toString(16).slice(2) });
 
-    // SettingsUseCase ports
+    // Порты SettingsUseCase
     this.di.register("assistant.controller.ensureVaultStructure", {
       useValue: async (s: AssistantSettings) => {
         await ensureFolder(this.vault, s.folders.projects);
@@ -193,7 +193,7 @@ export class AssistantController {
     this.di.register("assistant.controller.updateRibbonIcons", { useValue: () => this.updateRibbonIcons() });
     this.di.register("assistant.controller.applyRecordingMediaPermissions", { useValue: () => this.applyRecordingMediaPermissions() });
 
-    // View controller factories / actions for AgendaController
+    // Фабрики контроллеров/действия для AgendaController
     this.di.register("assistant.controller.openAgendaView", { useValue: () => void this.activateAgendaView() });
     this.di.register("assistant.controller.openLogView", { useValue: () => void this.activateLogView() });
     this.di.register("assistant.controller.openEvent", { useValue: (ev: Event) => void this.ctx.eventNoteService.openEvent(ev) });
@@ -219,7 +219,7 @@ export class AssistantController {
     this.di.register("assistant.controller.openTodayLogFile", { useValue: () => void this.ctx.logFileWriter.openTodayLog() });
     this.di.register("assistant.controller.clearTodayLogFile", { useValue: () => void this.ctx.logFileWriter.clearTodayLogFile() });
 
-    // Recording dialog deps
+    // Зависимости диалога записи
     this.di.register("assistant.controller.warnLinuxNativeDepsOnOpen", { useValue: () => void this.warnLinuxNativeDepsOnRecorderOpen() });
     this.di.register("assistant.controller.refreshCalendars", { useValue: async () => await this.refreshCalendars() });
     this.di.register("assistant.controller.createProtocolFromEvent", {
@@ -238,13 +238,14 @@ export class AssistantController {
           onCreateProtocol: p.onCreateProtocol,
           onCreateEmptyProtocol: p.onCreateEmptyProtocol,
           onOpenProtocol: p.onOpenProtocol,
+          onClosed: p.onClosed,
           onLog: p.onLog,
           pluginDirPath: this.pluginDirPath,
           transportRegistry: this.di.resolve(TransportRegistry),
         }),
     });
 
-    // Finally: resolve singletons from DI
+    // Финально: резолвим singleton'ы из DI
     this.protocolIndex = this.di.resolve(ProtocolIndex);
     this.authorizeGoogleCaldavUseCase = this.di.resolve(AuthorizeGoogleCaldavUseCase);
     this.discoverCaldavCalendarsUseCase = this.di.resolve(DiscoverCaldavCalendarsUseCase);
@@ -274,7 +275,8 @@ export class AssistantController {
       {
         createAgendaController: () => this.di.resolve<() => AgendaController>("assistant.factory.agendaController")(),
         createLogController: () => this.di.resolve<() => DefaultLogController>("assistant.factory.logController")(),
-        createTestTransportController: () => this.di.resolve<() => DefaultTestTransportController>("assistant.factory.testTransportController")(),
+        createTestTransportController: () =>
+          this.di.resolve<() => DefaultTestTransportController>("assistant.factory.testTransportController")(),
       },
     );
 
@@ -340,7 +342,7 @@ export class AssistantController {
       this.ctx.logService.error("Vault: не удалось создать базовую структуру", { error: e });
     }
 
-    // Persistent cache
+    // Постоянный кэш
     await this.ctx.calendarEventCache.loadIntoCalendarService(this.ctx.calendarService, {
       enabledCalendarIds: this.getSettings()
         .calendars.filter((c) => c.enabled)
@@ -393,7 +395,7 @@ export class AssistantController {
         return;
       }
     } catch {
-      // ignore
+      // Игнорируем ошибки — в этом случае откроем ссылку через window.open.
     }
     window.open(url);
   }
@@ -434,7 +436,7 @@ export class AssistantController {
       });
       this.mediaPermissionsInstalled = true;
     } catch {
-      // ignore
+      // Игнорируем ошибку установки обработчика прав.
     }
   }
 

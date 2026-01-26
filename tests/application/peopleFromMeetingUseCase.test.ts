@@ -44,7 +44,7 @@ describe("PeopleFromMeetingUseCase", () => {
     });
 
     await uc.createPeopleCardsFromActiveMeeting();
-    expect(notice).toHaveBeenCalledWith("Ассистент: не удалось извлечь emails участников из тела заметки встречи");
+    expect(notice).toHaveBeenCalledWith("Ассистент: не удалось извлечь email участников из тела заметки встречи");
   });
 
   it("happy path — вызывает ensureByEmail для каждого email и показывает итог", async () => {

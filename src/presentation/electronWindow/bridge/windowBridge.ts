@@ -9,7 +9,7 @@ type IpcRendererLike = {
 };
 
 function tryGetIpcRenderer(): IpcRendererLike | null {
-  // Tests can inject a fake ipc via globalThis (since `electron` module isn't available in vitest env).
+  // В тестах можно подставить фейковый ipc через globalThis (модуля `electron` нет в vitest).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const injected = (globalThis as any).__assistantElectronIpcMock as IpcRendererLike | undefined;
   // TS: избегаем проверки “function as boolean” (TS2774) — проверяем явно.
@@ -34,18 +34,19 @@ export type BrowserWindowLike = {
 };
 
 /**
- * Request/response bridge поверх Electron IPC `ipcRenderer.sendTo`.
+ * Мост запрос/ответ поверх Electron IPC `ipcRenderer.sendTo`.
  *
  * Семантика как у title-bridge:
- * - отправляем ack сразу
- * - выполняем action (fire-and-forget) с таймаутом; при ошибке шлём error response
+ * - сразу отправляем подтверждение (ack)
+ * - выполняем действие (fire-and-forget) с таймаутом; при ошибке шлём ответ об ошибке
  *
- * Важно: это renderer<->renderer transport, не требующий `ipcMain` handlers.
+ * Важно: это транспорт renderer<->renderer, не требующий обработчиков `ipcMain`.
  */
 export function installElectronIpcRequestBridge(params: {
   expectedSenderId: number;
   timeoutMs?: number;
   onRequest: (req: WindowRequest) => void | Promise<void>;
+  onLog?: (message: string) => void;
 }): () => void {
   const ipc = tryGetIpcRenderer();
   const senderId = Number(params.expectedSenderId);
@@ -53,15 +54,16 @@ export function installElectronIpcRequestBridge(params: {
 
   const timeoutMs = Math.max(50, Math.floor(Number(params.timeoutMs ?? 3000)));
   const channel = "assistant/window/request";
+  const log = (message: string) => params.onLog?.(message);
 
   const handler = (eventOrSender: any, payloadOrArg?: unknown, ...restArgs: unknown[]) => {
     // Поддержка двух форматов:
     // 1. Тестовый мок: (e: { senderId?: number }, payload: unknown)
-    // 2. Реальный Electron: (event, payload, ...args) где event.sender.id содержит senderId
-    
+    // 2. Реальный Electron: (event, payload, ...args), где event.sender.id содержит senderId
+
     let payload: unknown;
     let from: number;
-    
+
     // Проверяем, является ли первый аргумент объектом с senderId (тестовый мок)
     if (eventOrSender && typeof eventOrSender === "object" && "senderId" in eventOrSender && payloadOrArg !== undefined) {
       // Формат тестового мока: (e: { senderId }, payload)
@@ -71,35 +73,29 @@ export function installElectronIpcRequestBridge(params: {
       // Формат реального Electron: (event, payload, ...args)
       // payload идет как второй аргумент (или первый, если event не содержит sender)
       payload = payloadOrArg ?? (restArgs.length > 0 ? restArgs[0] : undefined);
-      
+
       // Получаем senderId из event.sender.id или event.senderId
-      from = Number(
-        (eventOrSender as any)?.sender?.id ?? 
-        (eventOrSender as any)?.senderId ?? 
-        (eventOrSender as any)?.id ?? 
-        0
-      );
+      from = Number((eventOrSender as any)?.sender?.id ?? (eventOrSender as any)?.senderId ?? (eventOrSender as any)?.id ?? 0);
     }
-    
-    // Логирование для диагностики
-    console.log(`[Assistant] windowBridge: получено событие, eventOrSender:`, eventOrSender);
-    console.log(`[Assistant] windowBridge: payloadOrArg:`, payloadOrArg, `restArgs:`, restArgs);
-    console.log(`[Assistant] windowBridge: expectedSenderId: ${senderId}, from: ${from}`);
-    console.log(`[Assistant] windowBridge: payload:`, payload);
-    
+
+    // Диагностика — только через onLog (без console).
+    log("windowBridge: событие получено");
+    log(`windowBridge: expectedSenderId=${senderId}, from=${from}`);
+
     if (!Number.isFinite(from) || from !== senderId) {
-      console.log(`[Assistant] windowBridge: сообщение отклонено (from: ${from}, expected: ${senderId})`);
+      log(`windowBridge: сообщение отклонено (from=${from}, expected=${senderId})`);
       return;
     }
 
     if (!payload) {
-      console.log(`[Assistant] windowBridge: payload отсутствует, игнорирую`);
+      log("windowBridge: payload отсутствует");
       return;
     }
 
-    console.log(`[Assistant] windowBridge: сообщение принято, парсинг payload...`);
+    log("windowBridge: сообщение принято");
     const parsed = WindowRequestSchema.safeParse(payload);
     if (!parsed.success) {
+      log("windowBridge: payload невалиден");
       const badId = typeof (payload as any)?.id === "string" ? String((payload as any).id) : "";
       if (badId) {
         const resp: WindowResponse = {
@@ -110,7 +106,7 @@ export function installElectronIpcRequestBridge(params: {
         try {
           ipc.sendTo(from, "assistant/window/response", resp);
         } catch {
-          // ignore
+          // Игнорируем ошибки отправки ответа.
         }
       }
       return;
@@ -122,7 +118,7 @@ export function installElectronIpcRequestBridge(params: {
     try {
       ipc.sendTo(from, "assistant/window/response", okResp);
     } catch {
-      // ignore
+      // Игнорируем ошибки отправки подтверждения.
     }
 
     void Promise.race([
@@ -137,7 +133,7 @@ export function installElectronIpcRequestBridge(params: {
       try {
         ipc.sendTo(from, "assistant/window/response", resp);
       } catch {
-        // ignore
+        // Игнорируем ошибки отправки ответа об ошибке.
       }
     });
   };
@@ -147,7 +143,7 @@ export function installElectronIpcRequestBridge(params: {
     try {
       ipc.removeListener(channel, handler);
     } catch {
-      // ignore
+      // Игнорируем ошибки снятия слушателя.
     }
   };
 }
@@ -160,7 +156,7 @@ export function pushRecordingStats(params: { win: BrowserWindowLike; stats: Reco
   try {
     ipc.sendTo(wcId, "assistant/recording/stats", stats);
   } catch {
-    // ignore
+    // Игнорируем ошибки отправки статистики.
   }
 }
 
@@ -177,21 +173,22 @@ export function pushRecordingViz(params: { win: BrowserWindowLike; viz: Recordin
   }
 }
 
-export function pushTestMessage(params: { win: BrowserWindowLike; message: string }): void {
+export function pushTestMessage(params: { win: BrowserWindowLike; message: string; onLog?: (message: string) => void }): void {
   const { win, message } = params;
   const ipc = tryGetIpcRenderer();
   const wcId = Number(win.webContents?.id);
-  console.log(`[Assistant] pushTestMessage: отправка "${message}" в webContents id: ${wcId}, ipc доступен: ${!!ipc}`);
+  const log = params.onLog;
+  log?.(`pushTestMessage: отправка "${message}" в webContents id: ${wcId}, ipc доступен: ${!!ipc}`);
   if (!ipc || !Number.isFinite(wcId)) {
-    console.warn(`[Assistant] pushTestMessage: не могу отправить (ipc: ${!!ipc}, wcId: ${wcId})`);
+    log?.(`pushTestMessage: не могу отправить (ipc=${!!ipc}, wcId=${wcId})`);
     return;
   }
   try {
     const payload = { message, ts: Date.now() };
-    console.log(`[Assistant] pushTestMessage: отправляю payload:`, payload);
+    log?.("pushTestMessage: отправляю payload");
     ipc.sendTo(wcId, "assistant/test/message", payload);
-    console.log(`[Assistant] pushTestMessage: сообщение отправлено`);
+    log?.("pushTestMessage: сообщение отправлено");
   } catch (e) {
-    console.error(`[Assistant] pushTestMessage: ошибка при отправке:`, e);
+    log?.(`pushTestMessage: ошибка при отправке: ${e}`);
   }
 }

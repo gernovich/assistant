@@ -76,7 +76,7 @@ export default class AssistantPlugin extends Plugin {
     const manifestId = this.manifest.id;
     const requireMainFilename = require.main?.filename;
     const requireMainDirname = requireMainFilename ? pathModule.dirname(requireMainFilename) : null;
-    
+
     console.log("[Assistant] main.ts: Диагностика путей для preload скрипта:");
     console.log(`[Assistant]   __dirname: ${__dirnameValue}`);
     console.log(`[Assistant]   require.main?.filename: ${requireMainFilename || "undefined"}`);

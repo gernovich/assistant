@@ -8,7 +8,8 @@ export type RecordingWindowHtmlParams = {
   autoSeconds: number;
   lockedLabel: string;
   meta: Array<{ key: string; startMs: number; endMs: number }>;
-  hostWebContentsId?: number;
+  debugEnabled: boolean;
+  cspConnectSrc: string[];
 };
 
 /**
@@ -24,14 +25,16 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
   const autoSeconds = String(Number(p.autoSeconds || 0));
   const lockedLabel = String(p.lockedLabel || "");
   const meta = p.meta ?? [];
-  const hostId = Number.isFinite(Number(p.hostWebContentsId)) ? Math.floor(Number(p.hostWebContentsId)) : 0;
-
+  const debugEnabled = p.debugEnabled ? "true" : "false";
+  const cspConnectSrc = Array.isArray(p.cspConnectSrc) && p.cspConnectSrc.length
+    ? p.cspConnectSrc.join(" ")
+    : "'none'";
   // ВАЖНО: HTML/JS ниже перенесён из `src/recording/recordingDialog.ts` 1:1 по смыслу.
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ws://127.0.0.1:* ws://localhost:*;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ${cspConnectSrc};" />
   <style>
     :root { color-scheme: dark; }
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background: rgba(0,0,0,0); }
@@ -48,7 +51,6 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     canvas.viz{
       position:absolute; inset: auto auto auto 0;
       width:100%; height:250px;
-      bottom: 0px;
       bottom: 0;
       opacity:0.35;
       z-index:0;
@@ -223,8 +225,42 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     </div>
   </div>
   <script>
-    // WindowTransport (renderer<->renderer) через preload window.__assistantTransport.
+    // Транспорт WindowTransport (рендер↔рендер) через preload-скрипт window.__assistantTransport.
     const transport = window.__assistantTransport;
+    const debugEnabled = ${debugEnabled};
+    function sendDiag(kind, payload){
+      try{
+        if(!debugEnabled) return;
+        if(!transport || !transport.send) return;
+        transport.send({ type: "recording/diag", payload: { kind: kind, ...payload } });
+      }catch{}
+    }
+    try{
+      if(transport && transport.onReady){
+        transport.onReady(() => {
+          const rect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+          sendDiag("window-ready", { at: Date.now(), canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) } });
+        });
+      } else {
+        setTimeout(() => {
+          const rect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+          sendDiag("window-ready", { at: Date.now(), canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) } });
+        }, 200);
+      }
+    }catch{}
+    setInterval(() => {
+      try{
+        if(!debugEnabled) return;
+        if(!state.recording || state.paused) return;
+        const rect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+        sendDiag("tick", {
+          at: Date.now(),
+          points: state.ampPoints.length,
+          ampTarget: Number(state.ampTarget || 0),
+          canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) },
+        });
+      }catch{}
+    }, 1000);
     (function(){
       const pending = new Map();
       function randId(){
@@ -246,17 +282,23 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
           const id = randId();
           const req = { id: id, ts: Date.now(), action: action };
           if(!(transport && transport.send && transport.isReady && transport.isReady())){
-            return Promise.reject("assistant transport not available");
+            return Promise.reject("транспорт недоступен");
           }
           transport.send({ type: "window/request", payload: req });
-          const p = new Promise((resolve,reject)=>pending.set(id,{resolve,reject}));
+          const p = new Promise((resolve,reject)=>{
+            const t = setTimeout(() => {
+              pending.delete(String(id));
+              reject("timeout");
+            }, 2500);
+            pending.set(id, { resolve, reject, t });
+          });
           return p;
         }catch{
           return Promise.resolve();
         }
       };
 
-      // Transport: route responses.
+      // Транспорт: маршрутизация ответов.
       try{
         if(transport && transport.onMessage){
           transport.onMessage(function(msg){
@@ -294,14 +336,18 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       foundPeople: 0,
       nextChunkInMs: 0,
       // история амплитуды за последние ~10 секунд (новое справа)
-      // points: [{t, v}] где t=Date.now(), v=0..1
+      // точки: [{t, v}] где t=Date.now(), v=0..1
       ampPoints: [],
       ampMaxLen: 800,
       vizWindowMs: 10_000,
-      // входной уровень (приходит из main) и плавная интерполяция в rAF
+      // входной уровень (приходит из основного процесса) и плавная интерполяция в rAF
       ampTarget: 0,
       ampSmooth: 0,
       ampLastFillAtMs: 0,
+      vizDebugLastAtMs: 0,
+      drawDebugLastAtMs: 0,
+      drawTimer: 0,
+      pauseStartedAtMs: 0,
     };
     const modeSel = document.getElementById('modeSel');
     const occurrenceSel = document.getElementById('occurrenceSel');
@@ -319,7 +365,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     const protocolRow = document.getElementById('protocolRow');
     const protocolTitleEl = document.getElementById('protocolTitle');
     const canvas = document.getElementById('viz');
-    const ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+    let ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
     const statusTextEl = document.getElementById('statusText');
     const filesTextEl = document.getElementById('filesText');
     const foundTextEl = document.getElementById('foundText');
@@ -332,11 +378,20 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       if(eventSel) eventSel.value = "";
       if(protocolSel) protocolSel.value = "";
       state.eventSummary = "";
-      // Сбрасываем осциллограмму (после стопа/idle она должна быть пустой)
+      // Сбрасываем осциллограмму (после стопа/простоя она должна быть пустой)
       state.ampPoints = [];
       state.ampTarget = 0;
       state.ampSmooth = 0;
       state.ampLastFillAtMs = Date.now();
+      state.pauseStartedAtMs = 0;
+    }
+
+    function resetVizState(){
+      state.ampPoints = [];
+      state.ampTarget = 0;
+      state.ampSmooth = 0;
+      state.ampLastFillAtMs = Date.now();
+      state.pauseStartedAtMs = 0;
     }
 
     function resizeCanvas(){
@@ -416,7 +471,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         if(pauseBtn) pauseBtn.style.display = "none";
       }
 
-      // Третье состояние: переключение (start/stop) — блокируем действия и показываем лоадер.
+      // Третье состояние: переключение (старт/стоп) — блокируем действия и показываем лоадер.
       if(state.switching){
         recBtn.disabled = true;
         recBtn.classList.add('loading');
@@ -433,7 +488,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         if(closeBtn) closeBtn.disabled = false;
       }
 
-      // текст статуса (слева в footer, в один ряд с кнопками)
+      // текст статуса (слева в футере, в один ряд с кнопками)
       let statusText = "";
       if(state.switching){
         statusText = (state.switchingKind === "stop") ? "Останавливаю…" : "Запускаю…";
@@ -491,6 +546,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     recBtn.addEventListener('click', () => {
       if(state.switching) return;
       if(!state.recording){
+        const wasRecording = state.recording;
         const mode = String(state.mode || "manual_new");
         const occurrenceKey = (mode === "occurrence_new" && occurrenceSel) ? (occurrenceSel.value || "") : "";
         const eventSummary = (mode === "event_new" && eventSel) ? (eventSel.value || "") : "";
@@ -499,7 +555,14 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         if(mode === "event_new" && !eventSummary) { render(); return; }
         if(mode === "continue_existing" && !protocolFilePath) { render(); return; }
         const payload = { mode, occurrenceKey, eventSummary, protocolFilePath };
-        sendAction({ kind: "recording.start", payload: payload });
+        sendAction({ kind: "recording.start", payload: payload }).catch(() => {
+          state.switching = false;
+          state.switchingKind = "";
+          state.switchingSinceMs = 0;
+          state.recording = wasRecording;
+          state.paused = false;
+          render();
+        });
         state.recording = true;
         state.paused = false;
         state.switching = true;
@@ -509,12 +572,23 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         render();
         return;
       }
-      sendAction({ kind: "recording.stop" });
-      // STOP может занимать время (дописывание файла). Не сбрасываем UI сразу — покажем лоадер до idle.
+      const wasRecording = state.recording;
+      const wasPaused = state.paused;
+      sendAction({ kind: "recording.stop" }).catch(() => {
+        state.switching = false;
+        state.switchingKind = "";
+        state.switchingSinceMs = 0;
+        state.recording = wasRecording;
+        state.paused = wasPaused;
+        render();
+      });
+      // Стоп может занимать время (дописывание файла). Не сбрасываем интерфейс сразу — покажем лоадер до простоя.
       state.switching = true;
       state.switchingKind = "stop";
       state.switchingSinceMs = Date.now();
       state.paused = false;
+      resetVizState();
+      stopDrawLoop();
       render();
     });
 
@@ -523,23 +597,26 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         if(state.switching) return;
         if(!state.recording) return;
         if(!state.paused){
-          sendAction({ kind: "recording.pause" });
+          sendAction({ kind: "recording.pause" }).catch(() => {
+            state.paused = false;
+            render();
+          });
           state.paused = true;
           render();
           return;
         }
-        sendAction({ kind: "recording.resume" });
+        sendAction({ kind: "recording.resume" }).catch(() => {
+          state.paused = true;
+          render();
+        });
         state.paused = false;
         render();
       });
     }
 
-    // Закрытие во время записи должно показывать анимацию "стоп" (finalize может быть не мгновенным).
+    // Закрытие во время записи должно показывать анимацию "стоп" (финализация может быть не мгновенной).
     if(closeBtn){
       closeBtn.addEventListener('click', () => {
-        console.log('[Assistant] Recording: кнопка закрыть нажата');
-        console.log('[Assistant] Recording: transport:', transport ? 'есть' : 'нет');
-        
         // Если идет запись, сначала останавливаем её (визуально показываем "стоп")
         if(state.recording && !state.switching){
           state.switching = true;
@@ -548,15 +625,13 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
           state.paused = false;
           render();
         }
-        // Отправляем действие закрытия (окно закроется на стороне main процесса)
-        sendAction({ kind: "close" }).catch((err) => {
-          console.error('[Assistant] Recording: ошибка при отправке действия close:', err);
+        // Отправляем действие закрытия (окно закроется на стороне основного процесса)
+        sendAction({ kind: "close" }).catch(() => {
           // Если IPC не работает, пытаемся закрыть окно напрямую через window.close()
           // Это может не сработать в Electron, но попробуем
           try {
             window.close();
           } catch (e) {
-            console.error('[Assistant] Recording: не удалось закрыть окно:', e);
           }
         });
       });
@@ -584,16 +659,30 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     if(eventSel) eventSel.addEventListener('change', () => { state.eventSummary = String(eventSel.value || ""); state.autoLeftMs = 0; armAutoIfNeeded(); render(); });
     if(protocolSel) protocolSel.addEventListener('change', () => { state.autoLeftMs = 0; armAutoIfNeeded(); render(); });
 
+    function startDrawLoop(){
+      if(state.drawTimer) return;
+      draw();
+      state.drawTimer = window.setInterval(() => {
+        draw();
+      }, 33);
+    }
+    function stopDrawLoop(){
+      if(!state.drawTimer) return;
+      window.clearInterval(state.drawTimer);
+      state.drawTimer = 0;
+    }
+
     window.__assistantRecordingUpdate = (s) => {
       const nextStatus = String(s?.status ?? "idle");
       // Сбрасываем в начальное состояние только при переходе active -> idle (после stop),
-      // иначе пользовательский выбор "режима" будет сбрасываться каждую секунду (stats timer).
+      // иначе пользовательский выбор "режима" будет сбрасываться каждую секунду (таймер статистики).
       if(nextStatus === "idle" && state.lastStatus !== "idle"){
-        // stop завершён
+        // стоп завершён
         state.switching = false;
         state.switchingKind = "";
         state.switchingSinceMs = 0;
         resetToInitial();
+        stopDrawLoop();
         state.recording = false;
         state.paused = false;
         state.filesTotal = 0;
@@ -621,7 +710,32 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       state.nextChunkInMs = Number(s.nextChunkInMs || 0);
       state.recording = (s.status === "recording" || s.status === "paused");
       state.paused = (s.status === "paused");
-      // start завершён (или resume)
+      if(s.status === "recording" && state.lastStatus === "idle"){
+        resetVizState();
+      }
+      if(s.status === "recording"){
+        if(state.lastStatus === "paused" && state.pauseStartedAtMs){
+          const delta = Date.now() - state.pauseStartedAtMs;
+          if(delta > 0){
+            for(let i=0;i<state.ampPoints.length;i++){
+              const p = state.ampPoints[i];
+              if(p && typeof p.t === "number") p.t += delta;
+            }
+            state.ampLastFillAtMs = (state.ampLastFillAtMs || Date.now()) + delta;
+          }
+          state.pauseStartedAtMs = 0;
+        }
+        startDrawLoop();
+      } else {
+        if(state.lastStatus === "recording" && s.status === "paused"){
+          state.pauseStartedAtMs = Date.now();
+        }
+        if(s.status === "paused" && !state.pauseStartedAtMs){
+          state.pauseStartedAtMs = Date.now();
+        }
+        stopDrawLoop();
+      }
+      // Старт завершён (или продолжение)
       if(state.switching && state.switchingKind === "start" && (nextStatus === "recording" || nextStatus === "paused")){
         state.switching = false;
         state.switchingKind = "";
@@ -633,14 +747,29 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     };
 
     window.__assistantRecordingVizUpdate = (dto) => {
+      if(state.switchingKind === "stop") return;
+      if(!state.recording || state.paused) return;
       const v = Number(dto && dto.amp01);
       if(!Number.isFinite(v)) return;
-      // Важно: не пишем точки прямо здесь. Апдейты из main могут приходить редко (или пачками),
-      // что визуально даёт “квадраты”. Вместо этого сохраняем target, а точки наполняем равномерно в rAF.
+      // Важно: не пишем точки прямо здесь. Апдейты из основного процесса могут приходить редко (или пачками),
+      // что визуально даёт “квадраты”. Вместо этого сохраняем цель, а точки наполняем равномерно в rAF.
       state.ampTarget = Math.max(0, Math.min(1, v));
+
+      // Диагностика доставки: раз в ~1с отправляем сигнал обратно в хост.
+      try{
+        const now = Date.now();
+        if(debugEnabled && transport && transport.send && (now - (state.vizDebugLastAtMs || 0)) > 1000){
+          state.vizDebugLastAtMs = now;
+          const rect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+          transport.send({
+            type: "recording/viz-debug",
+            payload: { amp01: Number(v), canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) }, at: now },
+          });
+        }
+      }catch{}
     };
 
-    // Transport push: stats/viz without executeJavaScript.
+    // Отправка через транспорт: stats/viz без executeJavaScript.
     try{
       if(transport && transport.onMessage){
         transport.onMessage(function(msg){
@@ -650,6 +779,14 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
             }
             if(msg && msg.type === "recording/viz"){
               window.__assistantRecordingVizUpdate && window.__assistantRecordingVizUpdate(msg.payload);
+            }
+            if(msg && msg.type === "recording/viz-clear"){
+              state.ampPoints = [];
+              state.ampTarget = 0;
+              state.ampSmooth = 0;
+              state.ampLastFillAtMs = Date.now();
+              state.pauseStartedAtMs = 0;
+              stopDrawLoop();
             }
           }catch{}
         });
@@ -663,7 +800,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       if(!lastAt) lastAt = now;
       // если мы “проспали” (например окно подвисло) — не догоняем бесконечно, просто перескочим.
       if(now - lastAt > horizon) lastAt = now - horizon;
-      // Наполняем примерно 30fps, чтобы не грузить CPU/DOM.
+      // Наполняем примерно 30 fps, чтобы не грузить CPU/DOM.
       const stepMs = 33;
       for(let t = lastAt + stepMs; t <= now; t += stepMs){
         // Сглаживание (инерция): чтобы “пачки” апдейтов не выглядели дергано.
@@ -678,7 +815,15 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     }
 
     function draw(){
-      if(!ctx || !canvas) return;
+      if(!state.recording || state.paused) return;
+      if(!canvas) return;
+      if(!ctx && canvas.getContext){
+        try{ ctx = canvas.getContext('2d'); }catch{}
+      }
+      if(!ctx){
+        sendDiag("draw-no-ctx", { at: Date.now() });
+        return;
+      }
       // Если canvas поймал размер 1x1 (часто при show:false) — пробуем пересчитать.
       if(canvas.width <= 2 || canvas.height <= 2) resizeCanvas();
       const dpr = window.devicePixelRatio || 1;
@@ -688,24 +833,27 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       const ptsAll = state.ampPoints;
       const now = Date.now();
       fillVizPoints(now);
-      if(!ptsAll || ptsAll.length < 2) { requestAnimationFrame(draw); return; }
+      if(!ptsAll || ptsAll.length < 2) { return; }
 
       // рисуем только справа от кнопки записи (как в макете)
-      const btnRect = recBtn.getBoundingClientRect();
-      const canvasRect = canvas.getBoundingClientRect();
+      const btnRect = recBtn && recBtn.getBoundingClientRect ? recBtn.getBoundingClientRect() : null;
+      const canvasRect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { left: 0, width: 0, height: 0 };
       // Старт ровно от правого края кнопки (без дополнительного "воздуха"),
       // чтобы диаграмма визуально "выходила" из кнопки.
-      const startXcss = Math.max(0, (btnRect.right - canvasRect.left));
-      const startX = Math.floor(startXcss * dpr);
+      let startXcss = btnRect ? Math.max(0, (btnRect.right - canvasRect.left)) : 0;
+      let startX = Math.floor(startXcss * dpr);
       const endX = w;
+      if (!Number.isFinite(startX) || startX < 0) startX = 0;
+      // Если кнопка оказалась почти у правой границы (или вне canvas) — рисуем от 0, иначе график будет невидим.
+      if (endX - startX < 8) startX = 0;
       const drawW = Math.max(1, endX - startX);
 
       const mid = Math.floor(h * 0.52);
-      const ampScale = h * 0.34;
+      const ampScale = h * 0.45;
 
       ctx.save();
       // Инвертируем ось времени: "звук исходит из кнопки" (новое слева, старое уезжает вправо)
-      // Рисуем сплошной заливкой (filled area), без контура.
+      // Рисуем сплошной заливкой, без контура.
       const windowMs = Math.max(1000, Number(state.vizWindowMs || 10_000));
       const points = [];
       // Берём только последние N секунд. Новое (age=0) рисуем у кнопки.
@@ -721,7 +869,24 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         const x = startX + Math.floor(t * drawW);
         points.push({ x, v });
       }
-      if(points.length < 2){ requestAnimationFrame(draw); return; }
+      const nowDiag = Date.now();
+      if(!state.drawDebugLastAtMs || (nowDiag - state.drawDebugLastAtMs) > 1000){
+        state.drawDebugLastAtMs = nowDiag;
+        sendDiag("draw", { points: points.length, ampTarget: Number(state.ampTarget || 0), canvas: { w: Math.round(canvasRect.width||0), h: Math.round(canvasRect.height||0) } });
+      }
+      if(points.length < 2){
+        if(state.ampTarget > 0.005){
+          const p = { x: startX + Math.floor(drawW * 0.02), v: Math.pow(Math.max(0, Math.min(1, state.ampTarget)), 0.55) };
+          ctx.globalAlpha = 0.95;
+          ctx.strokeStyle = "rgba(255,255,255,0.55)";
+          ctx.lineWidth = Math.max(1, Math.floor(1.2 * dpr));
+          ctx.beginPath();
+          ctx.moveTo(p.x, mid - p.v * ampScale);
+          ctx.lineTo(p.x, mid + p.v * ampScale);
+          ctx.stroke();
+        }
+        return;
+      }
 
       ctx.globalAlpha = 0.9;
       ctx.fillStyle = "rgba(255,255,255,0.22)";
@@ -740,14 +905,22 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       ctx.closePath();
       ctx.fill();
 
+      ctx.lineWidth = Math.max(1, Math.floor(1.1 * dpr));
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.beginPath();
+      for(let i=0;i<points.length;i++){
+        const p = points[i];
+        const y = mid - p.v * ampScale;
+        if(i===0) ctx.moveTo(p.x, y); else ctx.lineTo(p.x, y);
+      }
+      ctx.stroke();
+
       ctx.restore();
 
-      requestAnimationFrame(draw);
     }
-    requestAnimationFrame(draw);
 
     setInterval(() => {
-      // fail-safe: если переключение зависло — не блокируем UI навсегда
+      // Резерв: если переключение зависло — не блокируем интерфейс навсегда
       if(state.switching && state.switchingSinceMs && (Date.now() - state.switchingSinceMs) > 15000){
         state.switching = false;
         state.switchingKind = "";
@@ -773,10 +946,10 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       render();
     }, 1000);
 
-    // init
+    // инициализация
     resetToInitial();
     state.lastStatus = "idle";
-    // Если диалог открыт из напоминания/повестки (lockDefaultEvent) — предвыбираем occurrence.
+    // Если диалог открыт из напоминания/повестки (lockDefaultEvent) — предвыбираем экземпляр (occurrence).
     if(state.lockDefaultEvent && defaultOccurrenceKey && occurrenceSel){
       state.mode = "occurrence_new";
       if(modeSel) modeSel.value = "occurrence_new";

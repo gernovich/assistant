@@ -41,12 +41,12 @@ export function openTestDialog(params: {
 
   const BrowserWindow = electron?.BrowserWindow ?? electron?.remote?.BrowserWindow;
   if (!BrowserWindow) {
-    console.error("[Assistant] TestDialog: BrowserWindow недоступен");
+    console.error("[Assistant] TestDialog: окно BrowserWindow недоступно");
     return null;
   }
   const ipcRenderer = (electron as any)?.ipcRenderer;
 
-  // Host webContentsId (Obsidian renderer)
+  // hostWebContentsId (рендер Obsidian)
   let hostWebContentsId = 0;
   try {
     if ((electron as any)?.remote?.getCurrentWebContents) {
@@ -65,28 +65,22 @@ export function openTestDialog(params: {
     }
 
     if (hostWebContentsId === 0) {
-      console.warn("[Assistant] TestDialog: не удалось определить hostWebContentsId");
+      console.warn("[Assistant] TestDialog: не удалось определить `hostWebContentsId`");
     }
   } catch (e) {
     console.warn(`[Assistant] TestDialog: ошибка при определении hostWebContentsId: ${e}`);
     hostWebContentsId = 0;
   }
 
-  const html = buildTestDialogHtml({
-    hostWebContentsId,
-  });
-
-  const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-
   const preloadPath = pluginDirPath ? path.join(pluginDirPath, "bridge-preload.cjs") : undefined;
   if (preloadPath) {
     const exists = fs.existsSync(preloadPath);
     console.log(`[Assistant] TestDialog: preload path: ${preloadPath} (exists: ${exists})`);
     if (!exists) {
-      console.warn("[Assistant] TestDialog: preload file не найден, __assistantElectron не будет доступен");
+      console.warn("[Assistant] TestDialog: preload‑файл не найден, __assistantElectron не будет доступен");
     }
   } else {
-    console.warn("[Assistant] TestDialog: pluginDirPath не задан, preload не будет подключен");
+    console.warn("[Assistant] TestDialog: `pluginDirPath` не задан, preload не будет подключен");
   }
 
   const win = new BrowserWindow({
@@ -104,16 +98,21 @@ export function openTestDialog(params: {
     },
   });
 
-  void win.loadURL(url);
-
   const transport: WindowTransport = params.transportRegistry
     ? params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
     : createDialogTransport();
 
   transport.attach();
   transport.onReady(() => {
-    console.log("[Assistant] TestDialog: transport готов");
+    console.log("[Assistant] TestDialog: транспорт готов");
   });
+
+  const html = buildTestDialogHtml({
+    hostWebContentsId,
+    cspConnectSrc: transport.getCspConnectSrc() ?? [],
+  });
+  const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  void win.loadURL(url);
   const unSub = installWindowTransportRequestBridge({
     transport,
     timeoutMs: 2000,
@@ -132,7 +131,7 @@ export function openTestDialog(params: {
         win.close();
       }
     } catch {
-      // ignore
+      // Игнорируем ошибки загрузки.
     }
     testDialogWindow = null;
   };
@@ -147,11 +146,11 @@ export function openTestDialog(params: {
       const payload: WindowTransportMessage = { type: "test/message", payload: { message, ts: Date.now() } };
       transport.send(payload);
     } catch (e) {
-      console.error("[Assistant] TestDialog: ошибка при отправке через transport:", e);
+      console.error("[Assistant] TestDialog: ошибка при отправке через транспорт:", e);
     }
   };
 
-  // Cleanup
+  // Очистка ресурсов.
   let cleanupCalled = false;
   const doCleanup = () => {
     if (cleanupCalled) return;
@@ -160,7 +159,7 @@ export function openTestDialog(params: {
       unSub();
       transport.close();
     } catch (e) {
-      console.warn(`[Assistant] TestDialog: ошибка при cleanup: ${e}`);
+      console.warn(`[Assistant] TestDialog: ошибка при очистке: ${e}`);
     }
   };
 
@@ -177,7 +176,7 @@ export function openTestDialog(params: {
     try {
       win.show();
     } catch {
-      // ignore
+      // Игнорируем ошибки показа окна.
     }
   });
 
@@ -191,7 +190,7 @@ export function openTestDialog(params: {
       win.webContents.send("assistant/transport/config", config);
       configSent = true;
     } catch {
-      // ignore
+      // Игнорируем ошибки отправки конфигурации.
     }
   };
 

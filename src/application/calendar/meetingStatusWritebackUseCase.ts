@@ -98,8 +98,8 @@ export class MeetingStatusWritebackUseCase {
     } catch (e) {
       const msg = String((e as unknown) ?? "неизвестная ошибка");
       if (opts.silent) {
-        this.deps.log.warn("RSVP: apply status from meeting note: ошибка", { error: e, message: msg, file: file.path });
-        return err({ code: APP_ERROR.CALDAV_WRITEBACK, message: "Не удалось применить status из заметки встречи", cause: msg });
+        this.deps.log.warn("RSVP: применить статус из заметки встречи: ошибка", { error: e, message: msg, file: file.path });
+        return err({ code: APP_ERROR.CALDAV_WRITEBACK, message: "Не удалось применить статус из заметки встречи", cause: msg });
       }
 
       // Если не можем применить сейчас (например нет сети) — кладём в outbox.
@@ -118,7 +118,7 @@ export class MeetingStatusWritebackUseCase {
           kind: "set_event_partstat",
           payload: { calendarId, uid, start, partstat },
         });
-        this.deps.log.warn("Outbox: enqueue from meeting note status (offline)", {
+        this.deps.log.warn("Офлайн-очередь: добавление из статуса заметки встречи (офлайн)", {
           calendarId,
           uid,
           start,
@@ -130,7 +130,7 @@ export class MeetingStatusWritebackUseCase {
         return ok({ outcome: "enqueued" });
       } catch (e2) {
         const msg2 = String((e2 as unknown) ?? "неизвестная ошибка");
-        this.deps.log.warn("Outbox: enqueue from meeting note status: ошибка", {
+        this.deps.log.warn("Офлайн-очередь: добавление из статуса заметки встречи: ошибка", {
           error: e,
           message: msg,
           enqueueError: e2,

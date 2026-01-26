@@ -115,7 +115,7 @@ async function exchangeGoogleCodeForTokens(params: {
         );
       }
     } catch {
-      // ignore JSON parse errors
+      // Игнорируем ошибки парсинга JSON.
     }
     return await Promise.reject(`Google OAuth: обмен кода на токены не удался: HTTP ${res.status}: ${reason}`);
   }

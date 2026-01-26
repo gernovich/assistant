@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
+import type { TransportConfig, WindowTransport } from "../src/presentation/electronWindow/transport/windowTransport";
 
 // ВАЖНО: electronWindowReminder внутри функции делает `require("electron")`,
 // поэтому мокаем модуль ДО импорта tested module.
@@ -60,23 +61,100 @@ const electronMock = {
   },
 };
 
+const { MockTransport, existsSyncMock } = vi.hoisted(() => {
+  const existsSyncMock = vi.fn((_path: string) => true);
+  class MockTransport implements WindowTransport {
+    attach(): void {
+      // no-op
+    }
+    isReady(): boolean {
+      return true;
+    }
+    onReady(cb: () => void): () => void {
+      cb();
+      return () => undefined;
+    }
+    send(): void {
+      // no-op
+    }
+    onMessage(): () => void {
+      return () => undefined;
+    }
+    close(): void {
+      // no-op
+    }
+    getConfig(): TransportConfig | null {
+      return { type: "ws", url: "ws://127.0.0.1:0/assistant-dialog" };
+    }
+    getCspConnectSrc(): string[] | null {
+      return ["ws://127.0.0.1:*"];
+    }
+  }
+  return { MockTransport, existsSyncMock };
+});
+
+vi.mock("../src/presentation/electronWindow/transport/transportFactory", () => ({
+  createDialogTransport: () => new MockTransport(),
+}));
+
+vi.mock("node:fs", () => ({
+  existsSync: (path: string) => existsSyncMock(path),
+}));
+
 // Модуль `electron` отсутствует в vitest-окружении, поэтому используем fallback-хук из кода:
 // (globalThis as any).__assistantElectronMock
 Object.defineProperty(globalThis as any, "__assistantElectronMock", { value: electronMock, configurable: true });
 
-// IPC mock for windowBridge.ts: (globalThis as any).__assistantElectronIpcMock
-const ipcHandlers = new Map<string, Handler>();
-const ipcMock = {
-  on: (channel: string, cb: Handler) => {
-    ipcHandlers.set(String(channel), cb);
-  },
-  removeListener: (channel: string, cb: Handler) => {
-    const ch = String(channel);
-    if (ipcHandlers.get(ch) === cb) ipcHandlers.delete(ch);
-  },
-  sendTo: vi.fn(),
-};
-Object.defineProperty(globalThis as any, "__assistantElectronIpcMock", { value: ipcMock, configurable: true });
+class FakeTransport implements WindowTransport {
+  public sent: any[] = [];
+  private readyCbs: Array<() => void> = [];
+  private messageCbs: Array<(payload: unknown) => void> = [];
+
+  attach(): void {
+    // no-op
+  }
+
+  isReady(): boolean {
+    return true;
+  }
+
+  onReady(cb: () => void): () => void {
+    this.readyCbs.push(cb);
+    cb();
+    return () => {
+      const i = this.readyCbs.indexOf(cb);
+      if (i >= 0) this.readyCbs.splice(i, 1);
+    };
+  }
+
+  send(payload: unknown): void {
+    this.sent.push(payload);
+  }
+
+  onMessage(cb: (payload: unknown) => void): () => void {
+    this.messageCbs.push(cb);
+    return () => {
+      const i = this.messageCbs.indexOf(cb);
+      if (i >= 0) this.messageCbs.splice(i, 1);
+    };
+  }
+
+  close(): void {
+    // no-op
+  }
+
+  getConfig(): TransportConfig | null {
+    return { type: "ws", url: "ws://127.0.0.1:12345/assistant-dialog" };
+  }
+
+  getCspConnectSrc(): string[] | null {
+    return ["ws://127.0.0.1:*"];
+  }
+
+  emit(payload: unknown): void {
+    for (const cb of this.messageCbs) cb(payload);
+  }
+}
 
 function cal(id: string) {
   return { id, name: id, type: "ics_url", config: { id, name: id, type: "ics_url", enabled: true } } as any;
@@ -86,8 +164,8 @@ describe("electronWindowReminder", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     createdWindows.length = 0;
-    ipcHandlers.clear();
-    ipcMock.sendTo.mockReset();
+    existsSyncMock.mockReset();
+    existsSyncMock.mockReturnValue(true);
   });
 
   it("создаёт окно и грузит data-url с ожидаемыми кнопками", async () => {
@@ -103,11 +181,14 @@ describe("electronWindowReminder", () => {
       end: new Date("2026-01-01T11:00:00.000Z"),
     };
 
+    const onLog = vi.fn();
+    existsSyncMock.mockReturnValue(false);
     showElectronReminderWindow({
       ev,
       kind: "before",
       minutesBefore: 5,
       actions: {},
+      onLog,
     });
 
     const w = createdWindows[0];
@@ -117,8 +198,15 @@ describe("electronWindowReminder", () => {
 
     const decoded = decodeURIComponent(String(w.loadedUrl).split(",").slice(1).join(","));
     expect(decoded).toContain("Ассистент: Напоминание");
-    expect(decoded).toContain("assistant/window/request");
+    expect(decoded).toContain("window/request");
+    expect(decoded).toContain("window/response");
     expect(decoded).toContain("Через 02:00:00");
+    expect(onLog).toHaveBeenCalledWith(
+      `Напоминание: preload файл не найден: /home/gernovich/projects/_tests/assistant/src/notifications/bridge-preload.cjs`,
+    );
+    expect(onLog).toHaveBeenCalledWith(
+      `Напоминание: pluginDirPath: не передан, __dirname: /home/gernovich/projects/_tests/assistant/src/notifications`,
+    );
 
     vi.useRealTimers();
   });
@@ -158,49 +246,51 @@ describe("electronWindowReminder", () => {
       end: new Date("2026-01-01T11:00:00.000Z"),
     };
 
+    const transport = new FakeTransport();
+    const transportRegistry = { createDialogTransport: () => transport } as any;
     showElectronReminderWindow({
       ev,
       kind: "before",
       minutesBefore: 5,
       actions: { createProtocol, startRecording, meetingCancelled },
+      transportRegistry,
     });
     const w = createdWindows[0];
     expect(w).toBeTruthy();
 
-    const handler = ipcHandlers.get("assistant/window/request");
-    expect(handler).toBeTypeOf("function");
-
     // start recording
-    handler!({ senderId: w.webContents.id } as any, { id: "r1", ts: 1, action: { kind: "reminder.startRecording" } });
+    transport.emit({ type: "window/request", payload: { id: "r1", ts: 1, action: { kind: "reminder.startRecording" } } });
     await Promise.resolve();
     expect(startRecording).toHaveBeenCalledTimes(1);
     expect(w.close).toHaveBeenCalled();
 
     // Следующий запуск: "Создать протокол"
+    const transport2 = new FakeTransport();
+    const transportRegistry2 = { createDialogTransport: () => transport2 } as any;
     showElectronReminderWindow({
       ev,
       kind: "before",
       minutesBefore: 5,
       actions: { createProtocol, startRecording, meetingCancelled },
+      transportRegistry: transportRegistry2,
     });
     const wProto = createdWindows[1];
-    const handler2 = ipcHandlers.get("assistant/window/request");
-    expect(handler2).toBeTypeOf("function");
-    handler2!({ senderId: wProto.webContents.id } as any, { id: "r2", ts: 2, action: { kind: "reminder.createProtocol" } });
+    transport2.emit({ type: "window/request", payload: { id: "r2", ts: 2, action: { kind: "reminder.createProtocol" } } });
     await Promise.resolve();
     expect(createProtocol).toHaveBeenCalledTimes(1);
 
     // Следующий запуск: "Встреча отменена"
+    const transport3 = new FakeTransport();
+    const transportRegistry3 = { createDialogTransport: () => transport3 } as any;
     showElectronReminderWindow({
       ev,
       kind: "before",
       minutesBefore: 5,
       actions: { createProtocol, startRecording, meetingCancelled },
+      transportRegistry: transportRegistry3,
     });
     const w2 = createdWindows[2];
-    const handler3 = ipcHandlers.get("assistant/window/request");
-    expect(handler3).toBeTypeOf("function");
-    handler3!({ senderId: w2.webContents.id } as any, { id: "r3", ts: 3, action: { kind: "reminder.meetingCancelled" } });
+    transport3.emit({ type: "window/request", payload: { id: "r3", ts: 3, action: { kind: "reminder.meetingCancelled" } } });
     await Promise.resolve();
     expect(meetingCancelled).toHaveBeenCalledTimes(1);
 
@@ -296,15 +386,15 @@ describe("electronWindowReminder", () => {
     const startRecording = vi.fn(async () => undefined);
     const ev = { calendar: cal("c"), id: "u", summary: "M", start: new Date("2026-01-01T10:00:00.000Z") };
 
-    showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: { startRecording } });
+    const transport = new FakeTransport();
+    const transportRegistry = { createDialogTransport: () => transport } as any;
+    showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: { startRecording }, transportRegistry });
     const w = createdWindows[0];
     w.close.mockImplementation(() => {
       throw new Error("cannot close");
     });
 
-    const handler = ipcHandlers.get("assistant/window/request");
-    expect(handler).toBeTypeOf("function");
-    handler!({ senderId: w.webContents.id } as any, { id: "r1", ts: 1, action: { kind: "reminder.startRecording" } });
+    transport.emit({ type: "window/request", payload: { id: "r1", ts: 1, action: { kind: "reminder.startRecording" } } });
     await Promise.resolve();
     expect(startRecording).toHaveBeenCalledTimes(1);
     expect(w.close).toHaveBeenCalled();
@@ -326,15 +416,15 @@ describe("electronWindowReminder", () => {
     vi.useRealTimers();
   });
 
-  it("ipc: игнорирует запросы от другого senderId", async () => {
+  it("transport: игнорирует некорректный payload", async () => {
     const { showElectronReminderWindow } = await import("../src/notifications/electronWindowReminder");
     const ev = { calendar: cal("c"), id: "u", summary: "M", start: new Date(Date.now() + 60_000) };
 
-    showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: {} });
+    const transport = new FakeTransport();
+    const transportRegistry = { createDialogTransport: () => transport } as any;
+    showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: {}, transportRegistry });
     const w = createdWindows[0];
-    const handler = ipcHandlers.get("assistant/window/request");
-    expect(handler).toBeTypeOf("function");
-    handler!({ senderId: w.webContents.id + 999 } as any, { id: "x", ts: 1, action: { kind: "close" } });
+    transport.emit({ type: "window/request", payload: { id: "x", ts: "bad", action: { kind: "close" } } });
     await Promise.resolve();
     expect(w.close).not.toHaveBeenCalled();
   });
@@ -393,15 +483,15 @@ describe("electronWindowReminder", () => {
     vi.useRealTimers();
   });
 
-  it("ipc: не падает и не закрывает окно на невалидный payload", async () => {
+  it("transport: не падает и не закрывает окно на невалидный payload", async () => {
     const { showElectronReminderWindow } = await import("../src/notifications/electronWindowReminder");
     const ev = { calendar: cal("c"), id: "u", summary: "M", start: new Date(Date.now() + 60_000) };
 
-    showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: {} });
+    const transport = new FakeTransport();
+    const transportRegistry = { createDialogTransport: () => transport } as any;
+    showElectronReminderWindow({ ev, kind: "before", minutesBefore: 5, actions: {}, transportRegistry });
     const w = createdWindows[0];
-    const handler = ipcHandlers.get("assistant/window/request");
-    expect(handler).toBeTypeOf("function");
-    handler!({ senderId: w.webContents.id } as any, { id: "bad", ts: "nope", action: { kind: "close" } });
+    transport.emit({ type: "window/request", payload: { id: "bad", ts: "nope", action: { kind: "close" } } });
     await Promise.resolve();
     expect(w.close).not.toHaveBeenCalled();
   });

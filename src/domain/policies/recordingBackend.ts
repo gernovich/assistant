@@ -1,7 +1,7 @@
 import type { RecordingBackendId } from "../../application/recording/recordingUseCase";
 
 /**
- * Policy: нормализация backend id из настроек (включая legacy значения).
+ * Политика: нормализация backend id из настроек (включая legacy значения).
  */
 export function recordingBackendFromSettings(raw: unknown): RecordingBackendId {
   const v = String(raw ?? "");

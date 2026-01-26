@@ -1,5 +1,5 @@
 /**
- * Policy: экранирование HTML (для вставки строк в `<option>`/текст).
+ * Политика: экранирование HTML (для вставки строк в `<option>`/текст).
  */
 export function escHtml(s: string): string {
   return String(s ?? "")

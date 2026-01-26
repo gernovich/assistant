@@ -1,14 +1,14 @@
 /**
  * Минимальные порты Obsidian для DIP (чтобы контроллеры/юзкейсы не тянули `App/Plugin/Notice` напрямую).
  *
- * Важно: типы intentionally structural — реальные объекты Obsidian подходят “как есть”.
+ * Важно: типы намеренно структурные — реальные объекты Obsidian подходят “как есть”.
  */
 
 export type NoticePort = { show: (message: string) => void };
 
 export type VaultPort = {
-  // `any` intentional: это structural port, чтобы реальные типы Obsidian были присваиваемы без
-  // проблем контравариантности (ts strictFunctionTypes).
+  // `any` намеренно: это структурный порт, чтобы реальные типы Obsidian были присваиваемы без
+  // проблем контравариантности (ts `strictFunctionTypes`).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getAbstractFileByPath: (path: string) => any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,7 +39,7 @@ export type MetadataCachePort = {
 
 export type PluginPort = {
   addRibbonIcon: (icon: string, title: string, callback: (evt: MouseEvent) => unknown) => HTMLElement;
-  // Команды / views тоже часть инфраструктурного API Obsidian. Держим структурно и “широко”.
+  // Команды / представления тоже часть инфраструктурного API Obsidian. Держим структурно и “широко”.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   addCommand: (cmd: any) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

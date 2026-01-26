@@ -17,8 +17,8 @@ export type RecordingDialogUseCaseDeps = {
 
   warnLinuxNativeDepsOnOpen: () => void;
 
-  createProtocolFromEvent: (ev: Event) => Promise<string>; // returns protocol file path
-  createEmptyProtocolAndOpen: () => Promise<string>; // returns protocol file path
+  createProtocolFromEvent: (ev: Event) => Promise<string>; // возвращает путь файла протокола
+  createEmptyProtocolAndOpen: () => Promise<string>; // возвращает путь файла протокола
   openProtocolByPath: (protocolFilePath: string) => Promise<void>;
 
   dialogFactory: (params: {
@@ -31,6 +31,7 @@ export type RecordingDialogUseCaseDeps = {
     onCreateProtocol: (ev: Event) => Promise<string | null | undefined>;
     onCreateEmptyProtocol: () => Promise<string | null | undefined>;
     onOpenProtocol: (protocolFilePath: string) => Promise<void>;
+    onClosed: () => void;
     onLog: (m: string) => void;
   }) => RecordingDialogLike;
 
@@ -45,7 +46,7 @@ export class RecordingDialogUseCase {
   constructor(private readonly deps: RecordingDialogUseCaseDeps) {}
 
   openResult(preferredEvent?: Event): Result<{ opened: boolean; skipped: boolean }> {
-    // Ранний фидбек: если выбран Linux Native и не хватает зависимостей — покажем Notice сразу при открытии окна.
+    // Ранний сигнал: если выбран "Linux Native" и не хватает зависимостей — покажем уведомление сразу при открытии окна.
     // Если всё ок — молчим.
     this.deps.warnLinuxNativeDepsOnOpen();
 
@@ -54,7 +55,7 @@ export class RecordingDialogUseCase {
 
     const preferredKey = preferredEvent ? makeEventKey(preferredEvent.calendar.id, preferredEvent.id) : undefined;
 
-    // Guard: не открываем окно повторно “в спам” (например если таймер/клик сработали одновременно).
+    // Защита: не открываем окно повторно “в спам” (например если таймер/клик сработали одновременно).
     const key = String(preferredKey ?? "");
     const nowMs = this.deps.now().getTime();
     if (this.lastOpen && this.lastOpen.eventKey === key && nowMs - this.lastOpen.atMs < 30_000) {
@@ -91,6 +92,11 @@ export class RecordingDialogUseCase {
       onOpenProtocol: async (p) => {
         await this.deps.openProtocolByPath(String(p || ""));
       },
+      onClosed: () => {
+        if (this.lastOpen && this.lastOpen.eventKey === key) {
+          this.lastOpen = undefined;
+        }
+      },
       onLog: (m) => this.deps.log.info(m),
     });
 
@@ -98,6 +104,7 @@ export class RecordingDialogUseCase {
       dlg.open();
       return ok({ opened: true, skipped: false });
     } catch (e) {
+      this.lastOpen = undefined;
       const msg = String((e as unknown) ?? "неизвестная ошибка");
       const code = msg.includes("BrowserWindow") ? "E_ELECTRON_UNAVAILABLE" : "E_INTERNAL";
       return err({
@@ -108,7 +115,7 @@ export class RecordingDialogUseCase {
     }
   }
 
-  /** Backward-compat API: не бросает исключения и сохраняет UX (notice + лог). */
+  /** Обратная совместимость: не бросает исключения и сохраняет пользовательский опыт (уведомление + лог). */
   open(preferredEvent?: Event): void {
     const r = this.openResult(preferredEvent);
     if (!r.ok) {

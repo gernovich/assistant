@@ -34,7 +34,7 @@ export class SyncService {
     const t0 = Date.now();
     const enabledCalendars = settings.calendars.filter((c) => c.enabled);
     const log = this.log.scoped("Sync", { opId });
-    log.info("refreshCalendarsAndSync: старт", {
+    log.info("обновление календарей и синхронизация: старт", {
       enabledCalendars: enabledCalendars.length,
       enabledCalendarIds: enabledCalendars.map((c) => c.id),
     });
@@ -43,7 +43,7 @@ export class SyncService {
     const rr = this.calendarService.getRefreshResult();
     const events = rr.events;
 
-    // Offline-first UX: если календарь не обновился, но у нас есть lastGood — продолжаем показывать кэш.
+    // Оффлайн‑режим: если календарь не обновился, но у нас есть `lastGood` — продолжаем показывать кэш.
     // В логе должно быть явно видно, что данные устарели.
     const status = rr.perCalendar;
     const calNameById = new Map(settings.calendars.map((c) => [c.id, c.name]));
@@ -60,7 +60,7 @@ export class SyncService {
     }
 
     // Не создаем прошедшие встречи при фоновом/ручном обновлении.
-    // Прошедшие встречи создаются по клику (on-demand) через openEvent().
+    // Прошедшие встречи создаются по клику (по запросу) через openEvent().
     const now = Date.now();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -76,13 +76,13 @@ export class SyncService {
       return notPast && notTooFar;
     });
 
-    // Встречи могут быть повторяющимися (RRULE) => в списке могут быть несколько occurrences с одним uid.
-    // Для заметок в vault мы держим 1 файл на id (UID), поэтому синкаем только ближайшую upcoming встречу по (calendar.id, id).
+    // Встречи могут быть повторяющимися (RRULE) => в списке могут быть несколько экземпляров с одним UID.
+    // Для заметок в хранилище (vault) мы держим 1 файл на id (UID), поэтому синхронизируем только ближайшую будущую встречу по (calendar.id, id).
     const uniqueForNotes = pickEarliestPerKey(eventsForNotes);
     try {
       await this.eventNoteService.syncEvents(uniqueForNotes);
     } catch (e) {
-      log.error("syncEvents: ошибка", { error: e, eventsForNotes: uniqueForNotes.length });
+      log.error("синхронизация встреч: ошибка", { error: e, eventsForNotes: uniqueForNotes.length });
       throw e;
     }
 
@@ -90,30 +90,30 @@ export class SyncService {
       await this.ensurePeopleCardsFromEvents(uniqueForNotes);
     } catch (e) {
       // Не валим весь цикл: карточки людей — вспомогательная функция.
-      log.warn("ensurePeopleCardsFromEvents: ошибка (пропускаю)", { error: e });
+      log.warn("карточки людей из встреч: ошибка (пропускаю)", { error: e });
     }
 
     try {
       this.notificationScheduler.schedule(events);
     } catch (e) {
-      log.warn("scheduleNotifications: ошибка (пропускаю)", { error: e });
+      log.warn("планирование уведомлений: ошибка (пропускаю)", { error: e });
     }
 
     const durationMs = Date.now() - t0;
     if (staleCalendars.length > 0) {
-      log.warn("refreshCalendarsAndSync: завершено со stale календарями", {
+      log.warn("обновление календарей и синхронизация: завершено с устаревшими календарями", {
         durationMs,
         events: events.length,
         stale: staleCalendars,
       });
     } else if (errors.length > 0) {
-      log.warn("refreshCalendarsAndSync: завершено с ошибками", {
+      log.warn("обновление календарей и синхронизация: завершено с ошибками", {
         durationMs,
         events: events.length,
         errors: errors.map((e) => ({ calendarId: e.calendarId, name: e.name, error: e.error, cause: e.cause })),
       });
     } else {
-      log.info("refreshCalendarsAndSync: ok", {
+      log.info("обновление календарей и синхронизация: успех", {
         durationMs,
         events: events.length,
         notesSynced: uniqueForNotes.length,
@@ -159,7 +159,7 @@ export class SyncService {
       try {
         await this.personNoteService.ensureByEmail({ email });
       } catch {
-        // не валим sync из-за одной “битой” карточки
+        // не валим синхронизацию из-за одной “битой” карточки
       }
     }
   }

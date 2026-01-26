@@ -71,22 +71,22 @@ export class LinuxFfmpegBackend {
     try {
       new Notice("Ассистент: Linux Native — не найден ffmpeg (установите ffmpeg)");
     } catch {
-      // ignore
+      // Игнорируем ошибки показа Notice.
     }
-    return await Promise.reject("ffmpeg not found");
+    return await Promise.reject("ffmpeg не найден");
   }
 
   private async guessPulseMicSource(): Promise<string[]> {
-    // Авто-детект источника микрофона (default source) для PulseAudio/PipeWire-Pulse.
+    // Авто-детект источника микрофона (источник по умолчанию) для PulseAudio/PipeWire-Pulse.
     const candidates: string[] = [];
     if (await commandExists("pactl")) {
       const info = await execShell("pactl info 2>/dev/null");
       if (this.settings.debug?.enabled) {
-      this.params.log.info("Linux Native: pactl info (для mic)", {
-        ok: info.ok,
-        stdout: trimForLog(info.stdout, 900),
-        stderr: trimForLog(info.stderr, 300),
-      });
+        this.params.log.info("Linux Native: pactl info (для микрофона)", {
+          ok: info.ok,
+          stdout: trimForLog(info.stdout, 900),
+          stderr: trimForLog(info.stderr, 300),
+        });
       }
       const srcInfo = parsePactlDefaultSourceFromInfo(info.stdout);
       const next = buildPulseMicCandidates({ defaultSourceFromInfo: srcInfo });
@@ -105,21 +105,21 @@ export class LinuxFfmpegBackend {
   }
 
   private async guessPulseMonitorSource(): Promise<string[]> {
-    // Пока оставляем прежние алиасы (как fallback), чтобы не менять поведение.
-    // Точный выбор monitor-кандидатов исторически зависит от pactl parsing и эвристик;
-    // этот кусок будет выделен отдельным policy/адаптером позже.
+    // Пока оставляем прежние алиасы (как резерв), чтобы не менять поведение.
+    // Точный выбор monitor-кандидатов исторически зависит от парсинга pactl и эвристик;
+    // этот кусок будет выделен отдельной политикой/адаптером позже.
     const out: string[] = [];
     if (!(await commandExists("pactl"))) return ["@DEFAULT_MONITOR@", "default.monitor"];
 
-    // Базовый путь: оставляем прежние алиасы, но логируем sources (для диагностики).
+    // Базовый путь: оставляем прежние алиасы, но логируем источники (для диагностики).
     try {
       const srcList = await execShell("pactl list short sources 2>/dev/null");
       if (this.settings.debug?.enabled) {
-      this.params.log.info("Linux Native: pactl list short sources", {
-        ok: srcList.ok,
-        stdout: trimForLog(srcList.stdout, 1200),
-        stderr: trimForLog(srcList.stderr, 400),
-      });
+        this.params.log.info("Linux Native: pactl list short sources (источники)", {
+          ok: srcList.ok,
+          stdout: trimForLog(srcList.stdout, 1200),
+          stderr: trimForLog(srcList.stderr, 400),
+        });
       }
       // На этом инкременте сохраняем прежний порядок алиасов (важно для совместимости),
       // добавляя только дефолтные, если удастся их угадать.
@@ -154,10 +154,10 @@ export class LinuxFfmpegBackend {
     const micCandidates = await this.guessPulseMicSource();
     const monitorCandidates = await this.guessPulseMonitorSource();
     if (this.settings.debug?.enabled) {
-    this.params.log.info("Linux Native: кандидаты источников", {
-      micCandidates,
-      monitorCandidates: monitorCandidates.slice(0, 30),
-    });
+      this.params.log.info("Linux Native: кандидаты источников", {
+        micCandidates,
+        monitorCandidates: monitorCandidates.slice(0, 30),
+      });
     }
 
     const trySpawn = async (micName: string, monitorName: string | null): Promise<import("child_process").ChildProcess | null> => {
@@ -174,12 +174,12 @@ export class LinuxFfmpegBackend {
       });
 
       if (this.settings.debug?.enabled) {
-      this.params.log.info("Linux Native: ffmpeg spawn", {
-        micName,
-        monitorName,
-        out: tmpPath,
-        args: args.join(" "),
-      });
+        this.params.log.info("Linux Native: запуск ffmpeg", {
+          micName,
+          monitorName,
+          out: tmpPath,
+          args: args.join(" "),
+        });
       }
 
       const proc = spawn("ffmpeg", args, { stdio: ["pipe", wantViz ? "pipe" : "ignore", "pipe"] });
@@ -197,15 +197,15 @@ export class LinuxFfmpegBackend {
         const stopAt = Number(session.native.stopRequestedAtMs ?? 0);
         const isLikelyStop = stopAt > 0 && Date.now() - stopAt < 15_000;
         const payload = { code, signal, stderrTail: trimForLog(session.native.stderrTail, 1600) };
-        if (isLikelyStop) this.params.log.info("Linux Native: ffmpeg exit (likely stop)", payload);
-        else this.params.log.warn("Linux Native: ffmpeg exit", payload);
+        if (isLikelyStop) this.params.log.info("Linux Native: ffmpeg завершился (похоже на стоп)", payload);
+        else this.params.log.warn("Linux Native: ffmpeg завершился", payload);
       });
 
       proc.stderr?.on("data", (buf: Buffer) => {
         const s = String(buf ?? "");
         session.native.stderrTail = appendRollingText({ prev: session.native.stderrTail, chunk: s, maxChars: 2000 });
 
-        // Fallback визуализации: парсим ebur128 из stderr.
+        // Резерв визуализации: парсим ebur128 из stderr.
         try {
           session.native.vizBuf = appendRollingText({ prev: String(session.native.vizBuf ?? ""), chunk: s, maxChars: 8000 });
           const { lines, remainder } = splitLinesKeepRemainder(session.native.vizBuf);
@@ -232,7 +232,7 @@ export class LinuxFfmpegBackend {
           const last = Number(session.native.lastVizParseErrAtMs ?? 0);
           if (now - last > 5000) {
             session.native.lastVizParseErrAtMs = now;
-            this.params.log.warn("Linux Native: ошибка парсинга метрик уровня из ffmpeg stderr", {
+            this.params.log.warn("Linux Native: ошибка парсинга метрик уровня из stderr ffmpeg", {
               error: e,
               stderrTail: trimForLog(session.native.stderrTail, 900),
             });
@@ -282,7 +282,7 @@ export class LinuxFfmpegBackend {
         waitMs(300).then(() => false),
       ]);
       if (exitedQuickly) {
-        this.params.log.warn("Linux Native: ffmpeg упал сразу (невалидный источник/маршрутизация?)", {
+        this.params.log.warn("Linux Native: ffmpeg завершился сразу (невалидный источник/маршрутизация?)", {
           micName,
           monitorName,
           stderrTail: trimForLog(session.native.stderrTail, 1200),
@@ -290,7 +290,7 @@ export class LinuxFfmpegBackend {
         try {
           proc.kill("SIGKILL");
         } catch (e) {
-          this.params.log.warn("Linux Native: не удалось прибить ffmpeg (SIGKILL) после быстрого exit", { error: e });
+          this.params.log.warn("Linux Native: не удалось остановить ffmpeg (SIGKILL) после быстрого выхода", { error: e });
         }
         return null;
       }
@@ -313,9 +313,9 @@ export class LinuxFfmpegBackend {
       try {
         new Notice("Ассистент: Linux Native — не удалось подключить системный звук (monitor). Проверьте PipeWire/Pulse monitor-источник.");
       } catch {
-        // ignore
+        // Игнорируем ошибки показа Notice.
       }
-      this.params.log.error("Linux Native: не удалось стартовать ffmpeg с monitor", {
+      this.params.log.error("Linux Native: не удалось стартовать ffmpeg с monitor-источником", {
         micCandidates,
         monitorCandidates: monitorCandidates.slice(0, 20),
         stderrTail: trimForLog(session.native.stderrTail, 1600),
@@ -334,11 +334,11 @@ export class LinuxFfmpegBackend {
 
     const waitExit = new Promise<void>((resolve) => {
       proc.once("close", (code: number | null, signal: NodeJS.Signals | null) => {
-        this.params.log.info("Linux Native: ffmpeg close", { code, signal });
+        this.params.log.info("Linux Native: ffmpeg закрыт", { code, signal });
         resolve();
       });
       proc.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
-        this.params.log.info("Linux Native: ffmpeg exit (stop)", { code, signal });
+        this.params.log.info("Linux Native: ffmpeg завершился (стоп)", { code, signal });
         resolve();
       });
     });
@@ -383,9 +383,9 @@ export class LinuxFfmpegBackend {
       try {
         try {
           const st = await fs.stat(tmpPath);
-          this.params.log.info("Linux Native: tmp file stat", { tmpPath, size: st.size });
+          this.params.log.info("Linux Native: размер временного файла", { tmpPath, size: st.size });
         } catch (e) {
-          this.params.log.error("Linux Native: tmp file отсутствует (ffmpeg не создал выход?)", {
+          this.params.log.error("Linux Native: временный файл отсутствует (ffmpeg не создал выход?)", {
             tmpPath,
             error: e,
             stderrTail: trimForLog(session.native.stderrTail, 1600),
@@ -403,7 +403,7 @@ export class LinuxFfmpegBackend {
         await this.params.writeBinary(path, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
         this.params.onFileSaved?.(path);
       } catch (e) {
-        this.params.log.error("Linux Native: ошибка финализации файла (read/save/append)", { error: e, tmpPath });
+        this.params.log.error("Linux Native: ошибка финализации файла (чтение/сохранение/добавление)", { error: e, tmpPath });
       } finally {
         try {
           await fs.rm(tmpPath, { force: true });

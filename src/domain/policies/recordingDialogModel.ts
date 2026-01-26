@@ -16,7 +16,7 @@ export type RecordingDialogModel = {
 };
 
 /**
- * Policy: подготовить данные (без HTML) для recording dialog.
+ * Политика: подготовить данные (без HTML) для диалога записи.
  *
  * Правила:
  * - показываем только будущие occurrences (start > now), но включаем “preferred” если он залочен, даже если уже не будущий
@@ -47,7 +47,7 @@ export function buildRecordingDialogModelPolicy(params: {
     const key = params.keyOfEvent(ev);
     const label = params.labelOfEvent(ev);
     const startMs = ev.start.getTime();
-    const endMs = ev.end?.getTime() ?? startMs + 60 * 60_000; // fallback 1h
+    const endMs = ev.end?.getTime() ?? startMs + 60 * 60_000; // резерв: 1 час
     return { key, label, startMs, endMs };
   });
 

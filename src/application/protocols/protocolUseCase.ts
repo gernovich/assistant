@@ -63,7 +63,7 @@ export class ProtocolUseCase {
    * - иначе: создаём файл встречи (если надо), создаём протокол, открываем и линкуем во встречу
    */
   async createOrOpenFromEventResult(ev: Event): Promise<Result<VaultFileLike>> {
-    // Важно: не используем throw — возвращаем Result на границе Application.
+    // Важно: не используем throw — возвращаем Result на границе слоя приложения.
     const r = await this.createOrOpenFromEventResultInternal(ev);
     return r;
   }
@@ -91,12 +91,12 @@ export class ProtocolUseCase {
     }
   }
 
-  /** Backward-compatible wrapper: не бросаем исключения наружу. */
+  /** Обратная совместимость: не бросаем исключения наружу. */
   async createOrOpenFromEvent(ev: Event): Promise<VaultFileLike> {
     const r = await this.createOrOpenFromEventResult(ev);
     if (!r.ok) {
-      // В старом API вернуть нечего — возвращаем “пустой” dummy через исключение нельзя.
-      // Возвращаем promise reject без throw (и без падения UI, т.к. вызовы обычно fire-and-forget).
+      // В старом API вернуть нечего — возвращаем “пустую” заглушку через исключение нельзя.
+      // Возвращаем Promise.reject без throw (и без падения интерфейса, т.к. вызовы обычно без ожидания).
       return await Promise.reject(r.error.message);
     }
     return r.value;

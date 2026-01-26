@@ -123,4 +123,34 @@ describe("RecordingDialogUseCase", () => {
     uc.open(ev);
     expect(dlgOpen).toHaveBeenCalledTimes(2);
   });
+
+  it("разрешает повторное открытие сразу после закрытия окна", () => {
+    const dlgOpen = vi.fn();
+    let onClosed: (() => void) | undefined;
+    const dialogFactory = vi.fn().mockImplementation((p) => {
+      onClosed = p.onClosed;
+      return { open: dlgOpen };
+    });
+
+    let now = new Date("2020-01-01T10:00:00.000Z");
+    const uc = new RecordingDialogUseCase({
+      getSettings: () => structuredClone(DEFAULT_SETTINGS),
+      getEvents: () => [makeEvent()],
+      getRecordingsProtocolsList: () => [],
+      warnLinuxNativeDepsOnOpen: vi.fn(),
+      createProtocolFromEvent: async () => "p.md",
+      createEmptyProtocolAndOpen: async () => "p2.md",
+      openProtocolByPath: async () => undefined,
+      dialogFactory,
+      notice: vi.fn(),
+      log: { info: vi.fn(), error: vi.fn() },
+      now: () => now,
+    });
+
+    const ev = makeEvent();
+    uc.open(ev);
+    onClosed?.();
+    uc.open(ev);
+    expect(dlgOpen).toHaveBeenCalledTimes(2);
+  });
 });

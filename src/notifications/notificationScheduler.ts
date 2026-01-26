@@ -7,15 +7,19 @@ import type { TransportRegistry } from "../presentation/electronWindow/transport
 /**
  * Планировщик уведомлений по событиям календаря.
  *
- * Делает MVP-расписание через `setTimeout` и поддерживает несколько способов доставки:
+ * Делает упрощённое расписание через `setTimeout` и поддерживает несколько способов доставки:
  * - Obsidian Notice
  * - `notify-send` (Linux)
  * - popup окно через `yad` (Linux)
  */
 export class NotificationScheduler {
+  /** Текущие настройки уведомлений. */
   private settings: AssistantSettings;
+  /** Активные таймеры уведомлений. */
   private timers: number[] = [];
+  /** Логгер для диагностики. */
   private onLog?: (message: string) => void;
+  /** Абсолютный путь к директории плагина (для preload скрипта). */
   private pluginDirPath?: string | null;
 
   /**
@@ -57,8 +61,9 @@ export class NotificationScheduler {
 
     const now = Date.now();
     const minutesBefore = Math.max(0, this.settings.notifications.minutesBefore);
+    this.onLog?.(`Расписание: план уведомлений (events=${events.length}, minutesBefore=${minutesBefore})`);
 
-    // MVP: планируем только ближайшие события (в горизонте), чтобы не плодить сотни таймеров.
+    // Упрощение: планируем только ближайшие события (в горизонте), чтобы не плодить сотни таймеров.
     const horizonMs = NOTIFICATIONS_HORIZON_HOURS * MS_PER_HOUR;
     const until = now + horizonMs;
 
@@ -88,18 +93,20 @@ export class NotificationScheduler {
     }
   }
 
+  /** Показать уведомление в режиме отладки (без ожидания таймера). */
   debugShowReminder(ev: Event) {
     const minutesBefore = Math.max(0, this.settings.notifications.minutesBefore);
     const msg = `Через ${minutesBefore} мин: ${formatEvent(ev)}`;
     void this.showGlobal(ev, msg, "before", true);
   }
 
+  /** Показать уведомление любым доступным способом. */
   private async showGlobal(ev: Event, msg: string, kind: "before" | "start", isDebug = false) {
     const prefix = isDebug ? "DEBUG уведомление" : "Показано уведомление";
     this.onLog?.(`${prefix}: ${msg}`);
     try {
       // UX: если встреча началась и включена авто‑запись — сразу открываем диктофон (там будет countdown/auto-REC).
-      // Чтобы не плодить два окна, в этом режиме пропускаем reminder window.
+      // Чтобы не плодить два окна, в этом режиме пропускаем окно напоминания.
       if (kind === "start" && this.settings.recording.autoStartEnabled && this.actions?.startRecording) {
         try {
           await this.actions.startRecording(ev);
@@ -107,7 +114,7 @@ export class NotificationScheduler {
           return;
         } catch (e) {
           this.onLog?.(`Авто запись: ошибка открытия диктофона (${String((e as unknown) ?? "неизвестно")}), показываю обычное уведомление`);
-          // fallback to reminder window below
+          // Возвращаемся к обычному окну напоминания ниже.
         }
       }
 
@@ -119,20 +126,22 @@ export class NotificationScheduler {
         actions: this.actions,
         pluginDirPath: this.pluginDirPath,
         transportRegistry: this.transportRegistry,
+        onLog: this.onLog,
       });
-      this.onLog?.(`NotificationScheduler: showElectronReminderWindow вернул: ${ok}`);
+      this.onLog?.(`Планировщик уведомлений: showElectronReminderWindow вернул: ${ok}`);
       if (!ok) {
-        this.onLog?.("electron_window: недоступен (нет BrowserWindow), fallback на Notice");
+        this.onLog?.("electron_window: недоступен (нет BrowserWindow), фолбек на Notice");
         new Notice(msg);
       }
     } catch (e) {
-      // Safety: если BrowserWindow недоступен (тесты/необычное окружение) — хотя бы Notice внутри Obsidian.
-      this.onLog?.(`electron_window: ошибка (${String((e as unknown) ?? "неизвестно")}), fallback на Notice`);
+      // Защита: если BrowserWindow недоступен (тесты/необычное окружение) — хотя бы Notice внутри Obsidian.
+      this.onLog?.(`electron_window: ошибка (${String((e as unknown) ?? "неизвестно")}), фолбек на Notice`);
       new Notice(msg);
     }
   }
 }
 
+/** Форматирует краткое описание события для уведомления. */
 function formatEvent(ev: Event): string {
   const t = ev.allDay ? "весь день" : ev.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${t} — ${ev.summary}`;

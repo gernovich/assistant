@@ -1,5 +1,5 @@
 /**
- * Policy: выбор файла карточки встречи (meeting note) без vault I/O.
+ * Политика: выбор файла карточки встречи (meeting note) без vault I/O.
  *
  * Зачем: отделить "решение" (eventKey vs legacy sid vs create/rename) от выполнения
  * (vault.read/modify/rename/createUniqueMarkdownFile) в `EventNoteService`.

@@ -38,7 +38,7 @@ export class RsvpUseCase {
     } catch (e) {
       const dto = toAppErrorDto(e, { code: APP_ERROR.CALDAV_WRITEBACK, message: "Ассистент: не удалось изменить статус в календаре" });
       this.deps.notice(dto.message);
-      this.deps.log.error("RSVP: setMyPartstat: ошибка", {
+      this.deps.log.error("RSVP: установка статуса: ошибка", {
         code: dto.code,
         error: e,
         cause: dto.cause,

@@ -101,12 +101,12 @@ export class CalendarService {
       );
     if (!this.providers.rsvpWriter?.setMyPartstat)
       return await Promise.reject(
-        new AppError({ code: APP_ERROR.INTERNAL, message: "Ассистент: write-back недоступен (нет CalDAV провайдера)" }),
+        new AppError({ code: APP_ERROR.INTERNAL, message: "Ассистент: обратная запись недоступна (нет CalDAV провайдера)" }),
       );
     try {
       await this.providers.rsvpWriter.setMyPartstat(cal, ev, partstat);
     } catch (e) {
-      // Нормализуем диагностику write-back для UI/use-cases
+      // Нормализуем диагностику обратной записи для UI/use-case'ов
       const dto = toAppErrorDto(e, { code: APP_ERROR.CALDAV_WRITEBACK, message: "Ассистент: не удалось изменить статус в календаре" });
       return await Promise.reject(new AppError(dto));
     }

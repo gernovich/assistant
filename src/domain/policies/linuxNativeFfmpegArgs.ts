@@ -1,5 +1,5 @@
 /**
- * Policy: сборка аргументов ffmpeg для Linux Native записи (PulseAudio/PipeWire-Pulse).
+ * Политика: сборка аргументов ffmpeg для Linux Native записи (PulseAudio/PipeWire-Pulse).
  *
  * Чистая функция: только формирует args.
  */

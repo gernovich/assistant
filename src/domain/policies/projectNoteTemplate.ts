@@ -1,5 +1,5 @@
 /**
- * Policy: шаблон карточки проекта (markdown).
+ * Политика: шаблон карточки проекта (markdown).
  */
 export function renderProjectCardMarkdown(params: {
   id: string;

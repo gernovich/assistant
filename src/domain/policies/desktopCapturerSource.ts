@@ -1,5 +1,5 @@
 /**
- * Policy: выбор desktopCapturer source (эвристика по имени окна/экрана).
+ * Политика: выбор desktopCapturer source (эвристика по имени окна/экрана).
  */
 
 export type DesktopCapturerSourceLike = { id?: unknown; name?: unknown };

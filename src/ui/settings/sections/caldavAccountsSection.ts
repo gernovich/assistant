@@ -70,7 +70,7 @@ export function renderCaldavAccountsSection(params: {
 
     const authMethod = acc.authMethod ?? "basic";
 
-    // Статус “готовности” (помогает понять, почему discovery/sync не работают).
+    // Статус “готовности” (помогает понять, почему обнаружение/синхронизация не работают).
     const readiness = getCaldavAccountReadiness(acc);
     const status = createSettingsNotice({
       containerEl: accBlock,
@@ -101,8 +101,8 @@ export function renderCaldavAccountsSection(params: {
 
       noticeAddDescLine(warn, "Быстрый доступ:");
       noticeAddLinks(warn, [
-        { text: "Пароли приложений (App passwords, прямая ссылка)", href: "https://myaccount.google.com/apppasswords" },
-        { text: "Раздел безопасности Google аккаунта (Security)", href: "https://myaccount.google.com/security" },
+        { text: "Пароли приложений (прямая ссылка)", href: "https://myaccount.google.com/apppasswords" },
+        { text: "Раздел безопасности Google аккаунта", href: "https://myaccount.google.com/security" },
       ]);
 
       noticeAddDescLine(warn, "Пошагово:");
@@ -121,8 +121,8 @@ export function renderCaldavAccountsSection(params: {
     }
 
     if (authMethod === "google_oauth") {
-      // Google CalDAV v2: serverUrl должен быть корнем /caldav/v2/ (без email).
-      // Дальше discovery сам найдёт principal/homeUrl и calendars (/.../events/).
+      // Google CalDAV v2: `serverUrl` должен быть корнем /caldav/v2/ (без email).
+      // Дальше обнаружение само найдёт `principal/homeUrl` и календари (/.../events/).
       const root = GOOGLE_CALDAV_SERVER_URL;
       if (root !== acc.serverUrl) {
         void plugin.caldavAccounts.updateAccount(acc.id, { authMethod: "google_oauth", serverUrl: root });

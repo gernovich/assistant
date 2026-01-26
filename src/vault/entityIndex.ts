@@ -7,11 +7,11 @@ import { parseFrontmatterMap, splitFrontmatter } from "../domain/policies/frontm
  *
  * Зачем:
  * - убрать дублирование в ProtocolIndex/PersonIndex/ProjectIndex;
- * - зафиксировать семантику backward-compat: если `assistant_type` отсутствует, можем считать файл сущностью по папке.
+ * - зафиксировать семантику обратной совместимости: если `assistant_type` отсутствует, можем считать файл сущностью по папке.
  *
  * Важно:
- * - индекс intentionally “лёгкий”: основа — `vault.getMarkdownFiles()` + `metadataCache.frontmatter`.
- * - для отдельных use-cases (например findByEmail) есть async fallback на чтение файла (см. `readAssistantTypeFromMd` и `readJsonStringArrayFromMd`).
+ * - индекс намеренно “лёгкий”: основа — `vault.getMarkdownFiles()` + `metadataCache.frontmatter`.
+ * - для отдельных сценариев (например findByEmail) есть async‑резерв на чтение файла (см. `readAssistantTypeFromMd` и `readJsonStringArrayFromMd`).
  */
 export class EntityIndex {
   constructor(
@@ -25,7 +25,7 @@ export class EntityIndex {
     root: string;
     limit: number;
     assistantType: "protocol" | "person" | "project" | "calendar_event";
-    /** Backward-compat: если assistant_type отсутствует, считаем сущностью по папке. */
+    /** Обратная совместимость: если assistant_type отсутствует, считаем сущностью по папке. */
     allowMissingAssistantType?: boolean;
   }): Array<{ path: string; label: string }> {
     const dirPrefix = normalizeDirPrefix(params.root);
@@ -64,7 +64,7 @@ export class EntityIndex {
     return [];
   }
 
-  /** Async fallback: чтение `assistant_type` из md (если metadataCache ещё не прогрелся). */
+  /** Async‑резерв: чтение `assistant_type` из md (если metadataCache ещё не прогрелся). */
   async readAssistantTypeFromMd(file: unknown): Promise<string> {
     try {
       const md = await this.deps.vault.read(file as any);
@@ -77,7 +77,7 @@ export class EntityIndex {
     }
   }
 
-  /** Async fallback: чтение json-строкового массива из md (например `emails: ["a"]`). */
+  /** Async‑резерв: чтение json-строкового массива из md (например `emails: ["a"]`). */
   async readJsonStringArrayFromMd(file: unknown, key: string): Promise<string[]> {
     try {
       const md = await this.deps.vault.read(file as any);

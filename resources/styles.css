@@ -115,7 +115,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-
 /* Assistant settings */
 .assistant-settings__notice {
   margin: var(--assistant-space-s) 0 var(--assistant-space-m);
@@ -230,15 +229,15 @@
   gap: 6px;
   margin-top: 16px;
   padding: 12px;
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
-  background: rgba(0,0,0,0.3);
+  background: rgba(0, 0, 0, 0.3);
   min-height: 200px;
   max-height: 400px;
   overflow-y: auto;
   font-family: "Courier New", monospace;
   font-size: 12px;
-  color: rgba(255,255,255,0.85);
+  color: rgba(255, 255, 255, 0.85);
   white-space: pre-wrap;
   word-wrap: break-word;
   user-select: text;

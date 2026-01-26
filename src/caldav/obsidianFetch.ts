@@ -8,7 +8,7 @@ let originalFetch: typeof fetch | null = null;
  * Патчит глобальный `fetch`, чтобы маршрутизировать http(s) запросы через Obsidian `requestUrl`
  * (без CORS-ограничений). Это критично для CalDAV внутри Obsidian/Electron.
  *
- * Для не-http(s) URL оставляем fallback на оригинальный fetch.
+ * Для не-http(s) URL оставляем резерв на оригинальный fetch.
  */
 export function ensureObsidianFetchInstalled(): void {
   if (installed) return;

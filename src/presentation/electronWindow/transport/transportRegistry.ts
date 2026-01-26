@@ -19,5 +19,5 @@ export class TransportRegistry {
     return transport.getConfig();
   }
 
-  // No electron access needed for WS transport.
+  // Для WS-транспорта не нужен доступ к Electron API.
 }

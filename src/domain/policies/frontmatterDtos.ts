@@ -5,7 +5,7 @@ import { err, ok, type Result } from "../../shared/result";
 import { APP_ERROR } from "../../shared/appErrorCodes";
 
 /**
- * Policy: типизированные парсеры frontmatter -> DTO.
+ * Политика: типизированные парсеры frontmatter -> DTO.
  *
  * Важно:
  * - `parseFrontmatterMap` читает только плоские `key: value` строки.

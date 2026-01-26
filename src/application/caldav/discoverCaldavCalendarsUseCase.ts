@@ -27,7 +27,7 @@ export class DiscoverCaldavCalendarsUseCase {
       const short = raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
       return err({
         code: "E_CALDAV_DISCOVERY",
-        message: `Ассистент: CalDAV discovery ошибка: ${short}. Подробности в логе.`,
+        message: `Ассистент: ошибка обнаружения CalDAV: ${short}. Подробности в логе.`,
         cause: raw,
         details: { accountId: id },
       });
@@ -35,16 +35,16 @@ export class DiscoverCaldavCalendarsUseCase {
   }
 
   /**
-   * Backward-compat API для UI: не бросает исключения.
+   * Обратная совместимость для UI: не бросает исключения.
    * При ошибке пишет в лог/notice и возвращает `[]`.
    */
   async execute(accountId: string): Promise<Array<{ displayName: string; url: string; color?: string }>> {
     const r = await this.executeResult(accountId);
     if (!r.ok) {
       if (r.error.code === "E_CALDAV_DISCOVERY") {
-        this.deps.log.error("CalDAV: discovery ошибка", { code: r.error.code, error: r.error.cause, details: r.error.details });
+        this.deps.log.error("CalDAV: обнаружение: ошибка", { code: r.error.code, error: r.error.cause, details: r.error.details });
       } else {
-        this.deps.log.warn("CalDAV: discovery: validation error", { code: r.error.code, details: r.error.details });
+        this.deps.log.warn("CalDAV: обнаружение: ошибка валидации", { code: r.error.code, details: r.error.details });
       }
       this.deps.notice(r.error.message);
       return [];

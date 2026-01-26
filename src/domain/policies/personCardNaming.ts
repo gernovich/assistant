@@ -1,5 +1,5 @@
 /**
- * Policy: базовое имя файла карточки человека (до sanitize/unique).
+ * Политика: базовое имя файла карточки человека (до sanitize/unique).
  */
 export function personCardBaseName(params: { displayName?: string; email?: string }): string {
   const dn = String(params.displayName ?? "").trim();

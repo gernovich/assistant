@@ -1,5 +1,5 @@
 /**
- * Policy: сортировка списка протоколов "последние сверху".
+ * Политика: сортировка списка протоколов "последние сверху".
  * Элементы без `start` уходят в конец.
  */
 export function sortProtocolInfosNewestFirst<T extends { start?: Date }>(items: T[]): T[] {

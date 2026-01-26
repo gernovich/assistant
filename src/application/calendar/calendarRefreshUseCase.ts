@@ -38,7 +38,7 @@ export class CalendarRefreshUseCase {
     const r = await this.refreshAllResult();
     if (!r.ok) {
       this.deps.notice(r.error.message);
-      this.deps.log.error("Календарь: refreshAll: ошибка", { code: r.error.code, error: r.error.cause });
+      this.deps.log.error("Календарь: обновление всех: ошибка", { code: r.error.code, error: r.error.cause });
     }
   }
 
@@ -64,13 +64,18 @@ export class CalendarRefreshUseCase {
     const r = await this.refreshOneResult(calendarId);
     if (!r.ok) {
       this.deps.notice(r.error.message);
-      this.deps.log.error("Календарь: refreshOne: ошибка", { code: r.error.code, error: r.error.cause, calendarId });
+      this.deps.log.error("Календарь: обновление одного: ошибка", { code: r.error.code, error: r.error.cause, calendarId });
       return;
     }
 
     for (const e of r.value.errors) {
-      this.deps.log.warn("Календарь: refreshOne: ошибка", { calendarId: e.calendarId, name: e.name, error: e.error, cause: e.cause });
+      this.deps.log.warn("Календарь: обновление одного: ошибка", {
+        calendarId: e.calendarId,
+        name: e.name,
+        error: e.error,
+        cause: e.cause,
+      });
     }
-    if (r.value.errors.length === 0) this.deps.log.info("Календарь: refreshOne: ok", { calendarId });
+    if (r.value.errors.length === 0) this.deps.log.info("Календарь: обновление одного: успех", { calendarId });
   }
 }

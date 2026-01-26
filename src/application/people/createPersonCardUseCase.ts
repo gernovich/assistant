@@ -27,7 +27,7 @@ export class CreatePersonCardUseCase {
   async createAndOpen(params?: { displayName?: string }): Promise<void> {
     const r = await this.createAndOpenResult(params);
     if (!r.ok) {
-      this.deps.log.warn("People: create person card: ошибка", { code: r.error.code, error: r.error.cause });
+      this.deps.log.warn("Люди: создание карточки человека: ошибка", { code: r.error.code, error: r.error.cause });
       this.deps.notice(r.error.message);
     }
   }

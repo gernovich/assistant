@@ -2,13 +2,23 @@ import type { WindowTransport, TransportMessage, Unsubscribe, TransportAttachTar
 
 type MessageChannelMainLike = new () => { port1: any; port2: any };
 
+/**
+ * Транспорт на базе MessageChannelMain для связи с окном.
+ */
 export class MessageChannelTransport implements WindowTransport {
+  /** Имя канала для передачи MessagePort. */
   private channelName: string;
+  /** Порт отправки/приёма (main). */
   private readonly port1: any;
+  /** Порт передачи в окно. */
   private readonly port2: any;
+  /** webContents окна диалога. */
   private webContents: any;
+  /** Флаг готовности порта. */
   private ready = false;
+  /** Коллбеки ожидания готовности. */
   private waiters = new Set<() => void>();
+  /** Очередь сообщений до готовности порта. */
   private pending: TransportMessage[] = [];
 
   constructor(params: { messageChannelMain: MessageChannelMainLike; webContents?: any; channelName?: string }) {
@@ -21,6 +31,7 @@ export class MessageChannelTransport implements WindowTransport {
     this.port1.start?.();
   }
 
+  /** Прикрепляет транспорт к окну и передаёт MessagePort. */
   attach(params?: TransportAttachTarget): void {
     const target = params?.target as { webContents?: any; channelName?: string } | undefined;
     if (target?.webContents) {
@@ -41,7 +52,7 @@ export class MessageChannelTransport implements WindowTransport {
             try {
               this.port1.postMessage(payload);
             } catch {
-              // ignore
+              // Игнорируем ошибки отправки.
             }
           }
         }
@@ -49,7 +60,7 @@ export class MessageChannelTransport implements WindowTransport {
           try {
             cb();
           } catch {
-            // ignore
+            // Игнорируем ошибки коллбеков готовности.
           }
         }
       } catch {
@@ -70,7 +81,7 @@ export class MessageChannelTransport implements WindowTransport {
     try {
       this.port1.postMessage(payload);
     } catch {
-      // ignore
+      // Игнорируем ошибки отправки в порт.
     }
   }
 
@@ -81,7 +92,7 @@ export class MessageChannelTransport implements WindowTransport {
       try {
         this.port1.removeListener?.("message", handler);
       } catch {
-        // ignore
+        // Игнорируем ошибки отписки.
       }
     };
   }
@@ -101,7 +112,7 @@ export class MessageChannelTransport implements WindowTransport {
     try {
       this.port1.close?.();
     } catch {
-      // ignore
+      // Игнорируем ошибки закрытия порта.
     }
   }
 

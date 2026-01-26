@@ -138,8 +138,8 @@ export class RecordingUseCase {
     const startedAtMs = this.deps.nowMs();
     const backend = this.deps.backends[params.backend];
 
-    // Важно: папка для записей должна существовать до старта backend'а,
-    // иначе быстрый dataavailable может попытаться сохранить файл раньше createFolder().
+    // Важно: папка для записей должна существовать до старта бэкенда,
+    // иначе быстрый `dataavailable` может попытаться сохранить файл раньше `createFolder()`.
     await this.deps.ensureRecordingsDir(params.recordingsDir);
 
     const handle = await backend.startSession({
@@ -227,12 +227,12 @@ export class RecordingUseCase {
     try {
       this.deps.backends[s.backend].setPaused?.(s.handle, true);
     } catch {
-      // ignore
+      // Игнорируем ошибки переключения паузы в бэкенде.
     }
     try {
       if (s.chunkTimer) this.deps.clearInterval(s.chunkTimer);
     } catch {
-      // ignore
+      // Игнорируем ошибки остановки таймера чанков.
     }
     s.chunkTimer = undefined;
     s.lastChunkAtMs = this.deps.nowMs();
@@ -252,7 +252,7 @@ export class RecordingUseCase {
     try {
       this.deps.backends[s.backend].setPaused?.(s.handle, false);
     } catch {
-      // ignore
+      // Игнорируем ошибки переключения паузы в бэкенде.
     }
     s.chunkTimer = this.deps.setInterval(() => {
       if (!this.session || this.session !== s) return;
@@ -274,7 +274,7 @@ export class RecordingUseCase {
       try {
         if (s.chunkTimer) this.deps.clearInterval(s.chunkTimer);
       } catch {
-        // ignore
+        // Игнорируем ошибки остановки таймера чанков.
       }
       s.chunkTimer = undefined;
 
@@ -289,7 +289,7 @@ export class RecordingUseCase {
       try {
         await Promise.allSettled(Array.from(s.pendingProtocolWrites));
       } catch {
-        // ignore
+        // Игнорируем ошибки ожидания завершения записи в протокол.
       }
 
       try {

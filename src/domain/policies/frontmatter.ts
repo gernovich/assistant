@@ -1,5 +1,5 @@
 /**
- * Policy: работа с YAML frontmatter в md-файлах.
+ * Политика: работа с YAML frontmatter в md-файлах.
  *
  * Ограничения:
  * - рассчитано на “плоские” ключи `key: value`

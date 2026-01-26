@@ -23,19 +23,19 @@ export function redactUrlForLog(url: string): string {
   if (!raw) return raw;
 
   try {
-    // URL() требует абсолютный URL; для относительных просто вывалимся в fallback.
+    // `URL()` требует абсолютный URL; для относительных просто вывалимся в резерв.
     const u = new URL(raw);
-    // Важно: не итерируем searchParams “вживую” во время set(), чтобы не терять элементы.
+    // Важно: не итерируем `searchParams` “вживую” во время `set()`, чтобы не терять элементы.
     for (const k of Array.from(u.searchParams.keys())) {
       if (SENSITIVE_KEYS.has(k.toLowerCase())) u.searchParams.set(k, "***");
     }
     if (u.hash) {
-      // fragment иногда содержит токены (особенно implicit flow). Маскируем грубо.
+      // Фрагмент иногда содержит токены (особенно при неявном потоке). Маскируем грубо.
       u.hash = "#***";
     }
     return u.toString();
   } catch {
-    // Fallback для относительных/нестандартных строк: точечно маскируем параметры вида key=value.
+    // Резерв для относительных/нестандартных строк: точечно маскируем параметры вида key=value.
     return raw
       .replace(
         /([?#&](?:access_token|refresh_token|id_token|token|code|client_secret|password|pass|api[_-]?key|key)=)([^&#\s]+)/gi,
@@ -75,7 +75,8 @@ export function redactSecretsInStringForLog(input: string): string {
   out = out.replace(/(\baccess_token\b\s*[:=]\s*)([^\s,;&#]+)/gi, "$1***");
   out = out.replace(/(\bpassword\b\s*[:=]\s*)([^\s,;&#]+)/gi, "$1***");
 
-  // Fragment иногда содержит токены (implicit flow). Маскируем грубо.
+  // Фрагмент иногда содержит токены (неявный поток). Маскируем грубо.
+  // Фрагмент иногда содержит токены (неявный поток). Маскируем грубо.
   out = out.replace(/(#)([^\s]+)/g, "$1***");
   return out;
 }

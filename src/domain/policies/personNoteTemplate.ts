@@ -1,5 +1,5 @@
 /**
- * Policy: шаблон карточки человека (markdown).
+ * Политика: шаблон карточки человека (markdown).
  */
 export function renderPersonCardMarkdown(params: {
   id: string;

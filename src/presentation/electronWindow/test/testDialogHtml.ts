@@ -1,5 +1,6 @@
 export type TestDialogHtmlParams = {
   hostWebContentsId?: number;
+  cspConnectSrc: string[];
 };
 
 /**
@@ -9,12 +10,15 @@ export function buildTestDialogHtml(p: TestDialogHtmlParams): string {
   const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   const hostId = Number.isFinite(Number(p.hostWebContentsId)) ? Math.floor(Number(p.hostWebContentsId)) : 0;
+  const cspConnectSrc = Array.isArray(p.cspConnectSrc) && p.cspConnectSrc.length
+    ? p.cspConnectSrc.join(" ")
+    : "'none'";
 
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ws://127.0.0.1:* ws://localhost:*;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ${cspConnectSrc};" />
   <style>
     :root { color-scheme: dark; }
     body {
@@ -128,7 +132,7 @@ export function buildTestDialogHtml(p: TestDialogHtmlParams): string {
         console.log('[TestDialog] sendMessage вызван, action:', action);
         
         if (!transport || typeof transport.send !== 'function' || !transport.isReady()) {
-          const err = 'ERROR: transport еще не готов';
+          const err = 'ОШИБКА: транспорт еще не готов';
           console.error('[TestDialog]', err);
           addLog(err, 'sent');
           return;
@@ -141,13 +145,13 @@ export function buildTestDialogHtml(p: TestDialogHtmlParams): string {
         };
         
         addLog('test_transport_send: ' + JSON.stringify(action), 'sent');
-        console.log('[TestDialog] отправляю сообщение через transport:', message);
+        console.log('[TestDialog] отправляю сообщение через транспорт:', message);
         
         try {
           transport.send({ type: 'window/request', payload: message });
-          console.log('[TestDialog] сообщение отправлено через transport');
+          console.log('[TestDialog] сообщение отправлено через транспорт');
         } catch (e) {
-          const err = 'ERROR при отправке через transport: ' + String(e);
+          const err = 'ОШИБКА при отправке через транспорт: ' + String(e);
           console.error('[TestDialog]', err, e);
           addLog(err, 'sent');
         }
@@ -177,14 +181,14 @@ export function buildTestDialogHtml(p: TestDialogHtmlParams): string {
             }
           } catch (e) {
             console.error('[TestDialog] ошибка при обработке сообщения:', e);
-            addLog('ERROR при обработке сообщения: ' + String(e), 'received');
+            addLog('ОШИБКА при обработке сообщения: ' + String(e), 'received');
           }
         });
         transport.onReady(() => {
           addLog('test_transport_ready', 'received');
         });
       } else {
-        const warn = 'WARNING: window.__assistantTransport недоступен';
+        const warn = 'ПРЕДУПРЕЖДЕНИЕ: window.__assistantTransport недоступен';
         console.warn('[TestDialog]', warn);
         addLog(warn, 'sent');
       }

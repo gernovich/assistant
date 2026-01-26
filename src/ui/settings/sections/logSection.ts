@@ -7,7 +7,7 @@ export function renderLogSection(params: { containerEl: HTMLElement; plugin: Ass
 
   containerEl.createEl("h3", { text: "Лог" });
 
-  // Лог в файлы пишется вне vault (в .obsidian/plugins/assistant/logs), поэтому настройки папки/включения не нужны.
+  // Лог в файлы пишется вне хранилища (vault) (в .obsidian/plugins/assistant/logs), поэтому настройки папки/включения не нужны.
 
   new Setting(containerEl)
     .setName("Размер лога (строк)")

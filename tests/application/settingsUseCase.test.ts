@@ -39,7 +39,7 @@ describe("SettingsUseCase", () => {
 
     // Важно: сохраняем порядок “ядро” → ensure → UI/планирование → таймеры/иконки/права.
     expect(calls).toEqual([
-      "info:Настройки: сохранить+применить (start)",
+      "info:Настройки: сохранить+применить (старт)",
       "saveData",
       "applyCoreSettings",
       "ensureVaultStructure",
@@ -48,7 +48,7 @@ describe("SettingsUseCase", () => {
       "setupAutoRefreshTimer",
       "updateRibbonIcons",
       "applyRecordingMediaPermissions",
-      "info:Настройки: сохранены и применены (ok)",
+      "info:Настройки: сохранены и применены (успех)",
     ]);
   });
 
@@ -82,7 +82,7 @@ describe("SettingsUseCase", () => {
 
     await uc.saveAndApply(s);
 
-    expect(calls).toContain("warn:Не удалось обновить папки/.base (проверьте права vault)");
+    expect(calls).toContain("warn:Не удалось обновить папки/.base (проверьте права хранилища)");
     expect(calls).toContain("updateOpenViews");
     expect(calls).toContain("rescheduleNotifications");
   });
@@ -121,6 +121,6 @@ describe("SettingsUseCase", () => {
     expect(r.error.code).toBe("E_SETTINGS");
     expect(r.error.cause).toContain("db down");
 
-    expect(calls).toEqual(["info:Настройки: сохранить+применить (start)", "saveData", "error:Настройки: сохранить+применить (ошибка)"]);
+    expect(calls).toEqual(["info:Настройки: сохранить+применить (старт)", "saveData", "error:Настройки: сохранить+применить (ошибка)"]);
   });
 });

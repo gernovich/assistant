@@ -4,13 +4,24 @@ import type { AddressInfo } from "node:net";
 
 type WebSocketLike = WebSocket;
 
+/**
+ * Транспорт на базе WebSocket-сервера внутри процесса.
+ * Окно подключается по URL, полученному через getConfig().
+ */
 export class WebSocketTransport implements WindowTransport {
+  /** Экземпляр WebSocket-сервера. */
   private wss: WebSocketServer | null = null;
+  /** Текущее соединение с окном. */
   private socket: WebSocketLike | null = null;
+  /** Коллбеки входящих сообщений. */
   private messageCallbacks: Set<(data: unknown) => void> = new Set();
+  /** Коллбеки готовности транспорта. */
   private readyCallbacks: Set<() => void> = new Set();
+  /** Флаг готовности транспорта. */
   private _isReady = false;
+  /** Очередь сообщений до установки соединения. */
   private sendQueue: string[] = [];
+  /** Конфигурация для preload-скрипта. */
   private config: { type: "ws"; url: string } | null = null;
 
   constructor(
@@ -22,6 +33,7 @@ export class WebSocketTransport implements WindowTransport {
     },
   ) {}
 
+  /** Инициализирует WebSocket-сервер и готовит конфигурацию транспорта. */
   attach(params?: TransportAttachTarget): void {
     if (this.wss) return;
     const target = params?.target;
@@ -35,7 +47,7 @@ export class WebSocketTransport implements WindowTransport {
           path: url.pathname,
         };
       } catch {
-        // ignore
+        // Игнорируем ошибки разбора URL.
       }
     }
 
@@ -50,7 +62,7 @@ export class WebSocketTransport implements WindowTransport {
           try {
             cb(payload);
           } catch (e) {
-            console.error("[WebSocketTransport] Error in message callback:", e);
+            console.error("[WebSocketTransport] Ошибка в коллбеке сообщения:", e);
           }
         }
       });
@@ -72,22 +84,23 @@ export class WebSocketTransport implements WindowTransport {
         try {
           cb();
         } catch (e) {
-          console.error("[WebSocketTransport] Error in ready callback:", e);
+          console.error("[WebSocketTransport] Ошибка в коллбеке готовности:", e);
         }
       }
       if (this.config?.url) {
-        console.log(`[WebSocketTransport] listening on ${this.config.url}`);
+        console.log(`[WebSocketTransport] слушаем ${this.config.url}`);
       }
     });
 
     this.wss.on("error", (err) => {
-      console.error("[WebSocketTransport] server error:", err);
+      console.error("[WebSocketTransport] Ошибка сервера:", err);
     });
   }
 
+  /** Отправляет сообщение в окно (через WebSocket). */
   send(payload: unknown): void {
     if (!this._isReady) {
-      console.warn("[WebSocketTransport] Attempted to send when not ready.");
+      console.warn("[WebSocketTransport] Попытка отправки до готовности.");
       return;
     }
     const message = JSON.stringify(payload ?? null);
@@ -115,12 +128,13 @@ export class WebSocketTransport implements WindowTransport {
     return this._isReady;
   }
 
+  /** Закрывает соединения и освобождает ресурсы. */
   close(): void {
     if (this.socket) {
       try {
         this.socket.close();
       } catch {
-        // ignore
+        // Игнорируем ошибки закрытия сокета.
       }
       this.socket = null;
     }
@@ -128,7 +142,7 @@ export class WebSocketTransport implements WindowTransport {
       try {
         this.wss.close();
       } catch {
-        // ignore
+        // Игнорируем ошибки закрытия сервера.
       }
       this.wss = null;
     }
@@ -139,6 +153,7 @@ export class WebSocketTransport implements WindowTransport {
     this.readyCallbacks.clear();
   }
 
+  /** Кладёт сообщение в очередь, ограничивая размер. */
   private enqueue(message: string): void {
     const maxQueue = this.params.maxQueue ?? 100;
     if (this.sendQueue.length >= maxQueue) {
@@ -147,6 +162,7 @@ export class WebSocketTransport implements WindowTransport {
     this.sendQueue.push(message);
   }
 
+  /** Отправляет накопленную очередь сообщений. */
   private flushQueue(): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     while (this.sendQueue.length > 0) {
@@ -157,6 +173,7 @@ export class WebSocketTransport implements WindowTransport {
     }
   }
 
+  /** Безопасно парсит JSON из WebSocket-пакета. */
   private tryParse(data: WebSocket.RawData): unknown {
     try {
       const text = data?.toString();
@@ -166,7 +183,28 @@ export class WebSocketTransport implements WindowTransport {
     }
   }
 
+  /** Возвращает конфигурацию для preload-скрипта окна. */
   getConfig(): { type: "ws"; url: string } | null {
     return this.config;
+  }
+
+  /** Разрешённые источники для connect-src в CSP окна. */
+  getCspConnectSrc(): string[] | null {
+    if (this.config?.url) {
+      try {
+        const url = new URL(this.config.url);
+        const host = url.hostname || "127.0.0.1";
+        const port = url.port || "*";
+        return [`ws://${host}:${port}`];
+      } catch {
+        // Игнорируем ошибки разбора URL.
+      }
+    }
+    const host = this.params.host || "127.0.0.1";
+    const port = this.params.port > 0 ? String(this.params.port) : "*";
+    if (host === "127.0.0.1") {
+      return [`ws://${host}:${port}`, "ws://localhost:*"];
+    }
+    return [`ws://${host}:${port}`];
   }
 }

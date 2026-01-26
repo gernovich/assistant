@@ -1,5 +1,5 @@
 /**
- * Policy: выбор mimeType для MediaRecorder.
+ * Политика: выбор mimeType для MediaRecorder.
  *
  * Чистая функция: `isSupported` передаётся извне.
  */
@@ -8,7 +8,7 @@ export function pickMediaRecorderMimeType(params: { isSupported: (mime: string) 
     "audio/ogg;codecs=opus",
     "audio/ogg",
     // webm/opus часто хуже дружит с длительностью/seek в некоторых плеерах Obsidian,
-    // поэтому предпочитаем ogg, но оставляем webm как fallback.
+    // поэтому предпочитаем ogg, но оставляем webm как резерв.
     "audio/webm;codecs=opus",
     "audio/webm",
   ];
@@ -16,7 +16,7 @@ export function pickMediaRecorderMimeType(params: { isSupported: (mime: string) 
     try {
       if (params.isSupported(t)) return t;
     } catch {
-      // ignore
+      // Игнорируем ошибки проверки поддержки mimeType.
     }
   }
   return "";

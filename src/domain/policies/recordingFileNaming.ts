@@ -1,5 +1,5 @@
 /**
- * Policy: именование файлов записи (prefix/timestamp/filename).
+ * Политика: именование файлов записи (prefix/timestamp/filename).
  */
 
 export function recordingFilePrefixFromEventKey(eventKey?: string): string {

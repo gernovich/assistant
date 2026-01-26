@@ -1,5 +1,5 @@
 /**
- * Policy: безопасное сокращение текста для логов (truncate).
+ * Политика: безопасное сокращение текста для логов (truncate).
  */
 export function trimForLogPolicy(value: unknown, maxChars = 1200): string {
   const text = String(value ?? "");

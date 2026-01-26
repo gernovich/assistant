@@ -74,7 +74,7 @@ export class EventNoteService implements MeetingNoteRepository {
   }
 
   // Ранее тут была локальная метка “план участия”.
-  // Концепция убрана: теперь статус управляется напрямую в календаре (CalDAV write-back).
+  // Концепция убрана: теперь статус управляется напрямую в календаре (обратная запись CalDAV).
 
   /**
    * Найти файл встречи по “стабильному ключу” встречи (`calendarId:eventId`).
@@ -89,7 +89,7 @@ export class EventNoteService implements MeetingNoteRepository {
     const direct = index.get(key);
     if (direct) return direct;
 
-    // Фоллбек: индекс мог быть пуст/устаревшим (metadataCache не готов сразу).
+    // Резерв: индекс мог быть пуст/устаревшим (metadataCache не готов сразу).
     // Перестраиваем по metadataCache и пробуем ещё раз.
     this.eventKeyIndex = this.buildEventKeyIndex();
     this.eventKeyIndexLoaded = true;
@@ -203,7 +203,7 @@ export class EventNoteService implements MeetingNoteRepository {
 
     const existingBySid = sidIndex.get(sid) ?? this.findEventFileByStableId(sid);
 
-    // Decision: pure policy (без vault I/O)
+    // Решение: чистая политика (без vault I/O).
     const decision = decideMeetingNoteFile({
       targetPath: target,
       existingByEventKeyPath: existingByKey?.path,
@@ -212,7 +212,7 @@ export class EventNoteService implements MeetingNoteRepository {
 
     if (decision.kind === "use_eventKey") {
       if (!existingByKey) {
-        // Invariant violation: индекс говорит "use_eventKey", но файла нет.
+        // Нарушение инварианта: индекс говорит "use_eventKey", но файла нет.
         // Не падаем — деградируем в create_new.
         const pretty = meetingNoteBaseName({ summary: ev.summary, sanitizeFileName, maxLen: 80 });
         const content = renderEventFile(ev, includeUserSections);
@@ -228,7 +228,7 @@ export class EventNoteService implements MeetingNoteRepository {
 
     if (decision.kind === "use_legacy_sid") {
       if (!existingBySid) {
-        // Invariant violation: индекс говорит "use_legacy_sid", но файла нет.
+        // Нарушение инварианта: индекс говорит "use_legacy_sid", но файла нет.
         // Не падаем — деградируем в create_new.
         const pretty = meetingNoteBaseName({ summary: ev.summary, sanitizeFileName, maxLen: 80 });
         const content = renderEventFile(ev, includeUserSections);
@@ -258,14 +258,15 @@ export class EventNoteService implements MeetingNoteRepository {
       await this.vault.rename(file, targetPath);
       return file;
     } catch {
-      // Если rename не удался (коллизия/права) — остаёмся на текущем пути.
+      // Если переименование не удалось (коллизия/права) — остаёмся на текущем пути.
       return file;
     }
   }
 
   /**
-   * Build index of existing event notes in eventsDir: stableId (sid) -> file
-   * This avoids O(N vault files) scans per event during syncEvents().
+   * Построить индекс существующих заметок встреч в eventsDir: stableId (sid) -> file.
+   *
+   * Это избавляет от O(N) сканирования vault-файлов на каждое событие в syncEvents().
    */
   private buildStableIdIndex(): Map<string, TFile> {
     const dirPrefix = normalizePath(this.eventsDir) + "/";
@@ -304,13 +305,13 @@ export class EventNoteService implements MeetingNoteRepository {
     if (this.eventKeyIndexLoaded) return this.eventKeyIndex;
     this.eventKeyIndexLoaded = true;
 
-    // 1) Пытаемся загрузить persistent cache.
+    // 1) Пытаемся загрузить постоянный кэш.
     if (this.indexCache) {
       try {
         const loaded = await this.indexCache.load(this.vault, this.eventsDir);
         this.eventKeyIndex = loaded;
       } catch {
-        // ignore
+        // Игнорируем ошибки загрузки кэша.
       }
     }
 

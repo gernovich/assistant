@@ -1,5 +1,5 @@
 /**
- * Policy: rolling-буфер для текста (append + truncate).
+ * Политика: rolling-буфер для текста (append + truncate).
  */
 export function appendRollingText(params: { prev: string; chunk: string; maxChars: number }): string {
   const prev = String(params.prev ?? "");
@@ -11,7 +11,7 @@ export function appendRollingText(params: { prev: string; chunk: string; maxChar
 }
 
 /**
- * Policy: split по CR/LF, оставляя последний неполный хвост в remainder.
+ * Политика: split по CR/LF, оставляя последний неполный хвост в remainder.
  * Полезно для стримов, где строки могут приходить через '\r' без '\n'.
  */
 export function splitLinesKeepRemainder(buf: string): { lines: string[]; remainder: string } {

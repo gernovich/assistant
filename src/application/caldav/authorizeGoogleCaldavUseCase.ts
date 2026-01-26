@@ -88,14 +88,14 @@ export class AuthorizeGoogleCaldavUseCase {
     const r = await this.executeResult(accountId);
     if (!r.ok) {
       if (r.error.code === "E_CALDAV_AUTH") {
-        this.deps.log.error("CalDAV: Google OAuth ошибка", { code: r.error.code, error: r.error.cause, details: r.error.details });
+        this.deps.log.error("CalDAV: Google OAuth: ошибка", { code: r.error.code, error: r.error.cause, details: r.error.details });
       } else {
-        this.deps.log.warn("CalDAV: Google OAuth: validation error", { code: r.error.code, details: r.error.details });
+        this.deps.log.warn("CalDAV: Google OAuth: ошибка валидации", { code: r.error.code, details: r.error.details });
       }
       this.deps.notice(r.error.message);
       return;
     }
-    this.deps.log.info("CalDAV: Google OAuth ok (refresh_token сохранён)", { account: r.value.accountName });
-    this.deps.notice("Ассистент: Google OAuth OK");
+    this.deps.log.info("CalDAV: Google OAuth: успех (refresh_token сохранён)", { account: r.value.accountName });
+    this.deps.notice("Ассистент: Google OAuth успешно");
   }
 }

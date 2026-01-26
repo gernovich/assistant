@@ -2,7 +2,7 @@ import type { Event } from "../../types";
 import { stripMarkdownExtension } from "./wikiLink";
 
 /**
- * Policy: шаблон протокола (markdown).
+ * Политика: шаблон протокола (markdown).
  *
  * Чистая функция: всё “инфраструктурное” (escape/keys) — через параметры.
  */

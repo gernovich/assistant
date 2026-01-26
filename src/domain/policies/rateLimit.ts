@@ -1,5 +1,5 @@
 /**
- * Policy: простая проверка rate-limit (не чаще intervalMs).
+ * Политика: простая проверка rate-limit (не чаще intervalMs).
  */
 export function shouldEmitByInterval(params: { nowMs: number; lastAtMs: number; intervalMs: number }): boolean {
   const now = Number(params.nowMs) || 0;

@@ -2,7 +2,7 @@
  * Контракты взаимодействия между окнами Electron (BrowserWindow) и кодом плагина.
  *
  * Важно: этот файл фиксирует типизированный контракт и не зависит от транспорта.
- * Транспорт: Electron IPC (renderer<->renderer) через `ipcRenderer.sendTo`.
+ * Транспорт: Electron IPC (рендер↔рендер) через `ipcRenderer.sendTo`.
  */
 
 export type IpcChannel =
@@ -21,20 +21,20 @@ export type IpcEnvelope<TChannel extends IpcChannel, TPayload> = {
   payload: TPayload;
 };
 
-// Actions (окно -> приложение)
+// Действия (окно -> приложение)
 export type WindowAction =
   | { kind: "close" }
-  // reminder window
+  // окно напоминания
   | { kind: "reminder.startRecording" }
   | { kind: "reminder.createProtocol" }
   | { kind: "reminder.meetingCancelled" }
-  // recording window
+  // окно записи
   | { kind: "recording.start"; payload: RecordingStartPayload }
   | { kind: "recording.stop" }
   | { kind: "recording.pause" }
   | { kind: "recording.resume" }
   | { kind: "recording.openProtocol"; protocolFilePath: string }
-  // test dialog
+  // тестовый диалог
   | { kind: "test.dialogOne" }
   | { kind: "test.dialogTwo" }
   | { kind: "test.dialogThree" };
@@ -48,7 +48,7 @@ export type RecordingStartPayload = {
 
 export type WindowActionEvent = IpcEnvelope<"assistant/window/action", WindowAction>;
 
-// Request/response (окно -> приложение -> окно)
+// Запрос/ответ (окно -> приложение -> окно)
 export type WindowRequest = {
   id: string;
   ts: number;
@@ -60,7 +60,7 @@ export type WindowResponse = { id: string; ok: true } | { id: string; ok: false;
 export type WindowRequestEvent = IpcEnvelope<"assistant/window/request", WindowRequest>;
 export type WindowResponseEvent = IpcEnvelope<"assistant/window/response", WindowResponse>;
 
-// Push (приложение -> окно)
+// Пуш (приложение -> окно)
 export type RecordingStatsDto = {
   status: "idle" | "recording" | "paused";
   startedAtMs?: number;
@@ -77,10 +77,11 @@ export type RecordingStatsDto = {
 
 export type RecordingVizDto = { amp01: number };
 
-// Transport envelope (transport-agnostic)
+// Конверт транспорта (не зависит от реализации)
 export type WindowTransportMessage =
   | { type: "window/request"; payload: WindowRequest }
   | { type: "window/response"; payload: WindowResponse }
   | { type: "recording/stats"; payload: RecordingStatsDto }
   | { type: "recording/viz"; payload: RecordingVizDto }
+  | { type: "recording/viz-clear"; payload: {} }
   | { type: "test/message"; payload: { message: string; ts: number } };

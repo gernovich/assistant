@@ -96,7 +96,7 @@ export class ElectronMediaRecorderBackend {
       try {
         for (const t of stream.getVideoTracks()) t.stop();
       } catch {
-        // ignore
+        // Игнорируем ошибки остановки видео-треков.
       }
       return stream;
     } catch {
@@ -137,7 +137,7 @@ export class ElectronMediaRecorderBackend {
           await this.params.writeBinary(path, buf);
           this.params.onFileSaved?.(path);
         } catch (err) {
-          this.params.log.error("Recording: ошибка сохранения файла из MediaRecorder", { error: String((err as unknown) ?? "") });
+          this.params.log.error("Запись: ошибка сохранения файла из MediaRecorder", { error: String((err as unknown) ?? "") });
         }
       })();
 
@@ -180,20 +180,20 @@ export class ElectronMediaRecorderBackend {
           const amp01 = amp01FromTimeDomainRmsPolicy(rms, 2.2);
           this.params.getOnViz()?.(amp01);
         } catch {
-          // ignore
+          // Игнорируем ошибки расчёта визуализации.
         }
       };
 
       session.vizSample = sample;
       session.vizTimer = window.setInterval(sample, 50);
     } catch {
-      // ignore
+      // Игнорируем ошибки настройки анализатора.
     }
   }
 
   async startSession(session: ElectronSession): Promise<void> {
-    // В текущем поведении используем mic-only (как было в RecordingService).
-    // Desktop/system audio захват оставлен как опциональный метод на будущее.
+    // В текущем поведении используем только микрофон (как было в RecordingService).
+    // Захват звука рабочего стола/системного оставлен как опциональный метод на будущее.
     const { stream: mediaStream, inputStreams } = await this.getMicStreamForElectron();
     session.mediaStream = mediaStream;
     session.inputStreams = inputStreams;
@@ -230,13 +230,13 @@ export class ElectronMediaRecorderBackend {
         r.stop();
         await Promise.race([Promise.all([stopP, dataP]).then(() => undefined), stopP, waitMs(1500)]);
       } catch {
-        // ignore
+        // Игнорируем ошибки остановки MediaRecorder.
       }
     }
     try {
       await Promise.allSettled(Array.from(session.pendingWrites));
     } catch {
-      // ignore
+      // Игнорируем ошибки ожидания сохранения файлов.
     }
   }
 
@@ -244,7 +244,7 @@ export class ElectronMediaRecorderBackend {
     try {
       void session.audioCtx?.close?.();
     } catch {
-      // ignore
+      // Игнорируем ошибки закрытия AudioContext.
     }
     try {
       for (const st of session.inputStreams) {
@@ -252,7 +252,7 @@ export class ElectronMediaRecorderBackend {
       }
       for (const t of session.mediaStream.getTracks()) t.stop();
     } catch {
-      // ignore
+      // Игнорируем ошибки остановки треков.
     }
   }
 }

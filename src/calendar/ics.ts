@@ -320,7 +320,7 @@ function parseOrganizer(org?: { value: string; params: Record<string, string> })
 }
 
 function isAllDay(v: string, params?: Record<string, string>): boolean {
-  // VALUE=DATE -> “весь день”, иначе fallback на эвристику YYYYMMDD.
+  // VALUE=DATE -> “весь день”, иначе резерв на эвристику YYYYMMDD.
   if (String(params?.VALUE ?? "").toUpperCase() === "DATE") return true;
   return /^\d{8}$/.test(v);
 }

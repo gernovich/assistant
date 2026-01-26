@@ -67,7 +67,7 @@ export class OutboxApplyUseCase {
           remaining.push(it);
           errors.push({
             id: it.id,
-            error: { code: APP_ERROR.VALIDATION, message: "Outbox payload: invalid start", details: { startIso } },
+            error: { code: APP_ERROR.VALIDATION, message: "Офлайн-очередь: некорректный start", details: { startIso } },
           });
           continue;
         }
@@ -75,7 +75,7 @@ export class OutboxApplyUseCase {
           remaining.push(it);
           errors.push({
             id: it.id,
-            error: { code: APP_ERROR.VALIDATION, message: "Outbox payload: invalid partstat", details: { partstat } },
+            error: { code: APP_ERROR.VALIDATION, message: "Офлайн-очередь: некорректный partstat", details: { partstat } },
           });
           continue;
         }
@@ -85,7 +85,7 @@ export class OutboxApplyUseCase {
         applied++;
       } catch (e) {
         const msg = String((e as unknown) ?? "неизвестная ошибка");
-        this.deps.log.warn("Outbox: не удалось применить действие", {
+        this.deps.log.warn("Офлайн-очередь: не удалось применить действие", {
           id: it.id,
           error: e,
           message: msg,
@@ -97,7 +97,7 @@ export class OutboxApplyUseCase {
         remaining.push(it);
         errors.push({
           id: it.id,
-          error: { code: APP_ERROR.CALDAV_WRITEBACK, message: "Не удалось применить действие outbox", cause: msg },
+          error: { code: APP_ERROR.CALDAV_WRITEBACK, message: "Не удалось применить действие офлайн-очереди", cause: msg },
         });
       }
     }
@@ -115,7 +115,7 @@ export class OutboxApplyUseCase {
     const r = await this.executeResult();
     if (!r.ok) {
       this.deps.notice("Ассистент: не удалось применить офлайн-очередь (подробности в логе)");
-      this.deps.log.warn("Outbox: applyAll: ошибка", { code: r.error.code, error: r.error.cause });
+      this.deps.log.warn("Офлайн-очередь: применить все: ошибка", { code: r.error.code, error: r.error.cause });
       return { applied: 0, remaining: 0 };
     }
     if (r.value.applied === 0 && r.value.remaining === 0) {

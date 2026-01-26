@@ -9,7 +9,7 @@ export type LogController = {
 };
 
 /**
- * Presentation controller for LogView.
+ * Контроллер представления для LogView.
  *
  * Зачем: LogView должен быть "тонким" и не знать про LogService/LogFileWriter напрямую.
  */
@@ -41,12 +41,11 @@ export class DefaultLogController implements LogController {
     try {
       await this.deps.clearTodayFile();
     } catch {
-      // ignore
+      // Игнорируем ошибки очистки файла.
     }
   }
 
   openAgenda(): void | Promise<void> {
     return this.deps.openAgenda();
   }
-
 }

@@ -33,8 +33,8 @@ export class CaldavProvider implements CalendarProvider {
    *    Google может возвращать 0 calendar objects без явного exception. Поэтому при objects.length === 0
    *    делаем PROPFIND на calendarUrl и выдаём явную ошибку, если URL не живой.
    *
-   * 5) Obsidian/Electron network: tsdav использует fetch. В Obsidian стандартный fetch/cross-fetch может
-   *    давать "TypeError: Failed to fetch" (CORS/transport). Мы устанавливаем fetch через
+   * 5) Сеть Obsidian/Electron: tsdav использует fetch. В Obsidian стандартный fetch/cross-fetch может
+   *    давать ошибку "TypeError: Failed to fetch" (CORS/transport). Мы устанавливаем fetch через
    *    Obsidian `requestUrl` (см. ensureObsidianFetchInstalled + alias cross-fetch в esbuild).
    *
    * 6) Google Basic auth: в ряде доменов/политик может не работать даже с app-password.
@@ -65,7 +65,7 @@ export class CaldavProvider implements CalendarProvider {
 
     const client = await this.getOrLoginClient(account);
 
-    // Для "Повестки" важно видеть встречи "сегодня" даже если refresh был после того, как они уже начались/закончились.
+    // Для "Повестки" важно видеть встречи "сегодня", даже если обновление было после того, как они уже начались/закончились.
     // Поэтому берём диапазон не от `now`, а от начала локального дня (с небольшим запасом на границу суток).
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -85,7 +85,7 @@ export class CaldavProvider implements CalendarProvider {
     });
 
     // tsdav иногда возвращает [] без исключения, если calendar.url неправильный (404) —
-    // например, если в URL сохранилась опечатка или устаревший discovery-URL.
+    // например, если в URL сохранилась опечатка или устаревший URL обнаружения.
     // Проверяем "живость" calendarUrl, чтобы не молчать с events=0.
     if (objects.length === 0) {
       const probe = await client.propfind({
@@ -119,7 +119,7 @@ export class CaldavProvider implements CalendarProvider {
         ...parseIcs(runtimeCalendar, text, {
           now: new Date(),
           horizonDays: CALENDAR_EVENTS_HORIZON_DAYS,
-          // Если пользователь не задал email явно, для CalDAV логин аккаунта — хороший дефолт.
+          // Если пользователь не задал email явно, для CalDAV логин аккаунта — хороший вариант по умолчанию.
           myEmail: (this.settings.calendar.myEmail || account.username).trim(),
         }),
       );
@@ -128,7 +128,7 @@ export class CaldavProvider implements CalendarProvider {
   }
 
   /**
-   * Изменить мой PARTSTAT в календаре (CalDAV write-back).
+   * Изменить мой PARTSTAT в календаре (обратная запись CalDAV).
    *
    * Ограничения MVP:
    * - работает только если в VEVENT есть ATTENDEE для текущего пользователя (email аккаунта/настроек)
@@ -203,7 +203,7 @@ export class CaldavProvider implements CalendarProvider {
       return await Promise.reject(
         new AppError({
           code: APP_ERROR.CALDAV_WRITEBACK,
-          message: `Ассистент: CalDAV write-back не удался (HTTP ${res.status} ${res.statusText})`,
+          message: `Ассистент: обратная запись CalDAV не удалась (HTTP ${res.status} ${res.statusText})`,
           cause: txt ? String(txt) : undefined,
         }),
       );
@@ -256,8 +256,8 @@ export class CaldavProvider implements CalendarProvider {
       }
     }
 
-    // Google CalDAV: иногда PROPFIND-based discovery возвращает 0 календарей (особенности сервера/политик).
-    // Практичный fallback: основной календарь обычно живёт по /events/.
+    // Google CalDAV: иногда обнаружение на основе PROPFIND возвращает 0 календарей (особенности сервера/политик).
+    // Практичный резерв: основной календарь обычно живёт по /events/.
     if (cals.length === 0 && (account.authMethod ?? "basic") === "google_oauth" && isGoogleCaldavServerUrl(account.serverUrl)) {
       return [
         {
@@ -329,7 +329,7 @@ export class CaldavProvider implements CalendarProvider {
       serverUrl: account.serverUrl,
       credentials: {
         username: account.username,
-        // ВАЖНО (UX): не модифицируем пароль автоматически.
+        // ВАЖНО (пользовательский опыт): не модифицируем пароль автоматически.
         // Если Google показывает пароль приложения с пробелами — ожидаем ввод без пробелов (есть подсказка в настройках).
         password: account.password,
       },
@@ -379,8 +379,8 @@ function findBestCalendarObject(objects: CalendarObject[], ev: Event, myEmails: 
   const uid = String(ev.id ?? "").trim();
   if (!uid) return null;
 
-  // Occurrence: если у события есть recurrenceId — стараемся матчитить именно override по RECURRENCE-ID.
-  // Это важно для write-back по конкретной дате повторяющейся встречи.
+  // Экземпляр: если у события есть recurrenceId — стараемся матчитить именно переопределение по RECURRENCE-ID.
+  // Это важно для обратной записи статуса по конкретной дате повторяющейся встречи.
   const wantRecurrenceIdRaw = String(ev.recurrence?.recurrenceId ?? "").trim();
   const wantRecurrenceMs = wantRecurrenceIdRaw ? parseIcsDateMs(wantRecurrenceIdRaw) : null;
 
@@ -396,8 +396,8 @@ function findBestCalendarObject(objects: CalendarObject[], ev: Event, myEmails: 
       if (!dt) continue;
       const dtMs = parseIcsDateMs(dt);
       if (dtMs == null) continue;
-      // Ищем VEVENT с совпадающим DTSTART (обычно это override-экземпляр или отдельный object).
-      // Если совпадения нет, fallback на master (по UID) тоже допустим, но с меньшим приоритетом.
+      // Ищем VEVENT с совпадающим DTSTART (обычно это экземпляр переопределения или отдельный объект).
+      // Если совпадения нет, резерв на основной (по UID) тоже допустим, но с меньшим приоритетом.
       const sameStart = dtMs === startMs;
       const hasMe = hasAttendeeForAnyEmail(b, myEmails);
       let score = (sameStart ? 10 : 0) + (hasMe ? 2 : 0) + (text.length > 0 ? 1 : 0);
@@ -406,7 +406,7 @@ function findBestCalendarObject(objects: CalendarObject[], ev: Event, myEmails: 
         const rid = getIcsProp(b, "RECURRENCE-ID");
         const ridMs = rid ? parseIcsDateMs(rid) : null;
         if (ridMs != null && ridMs === wantRecurrenceMs) score += 100;
-        else if (ridMs == null) score -= 10; // master пенализируем, если ждём override
+        else if (ridMs == null) score -= 10; // основной штрафуем, если ждём переопределение
       }
 
       if (!best || score > best.score) best = { obj, score };

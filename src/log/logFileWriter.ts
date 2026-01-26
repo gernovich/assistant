@@ -101,11 +101,11 @@ export class LogFileWriter {
     await fs.mkdir(this.logsDirPath, { recursive: true });
     await ensureFileExists(filePath, "");
 
-    // Файл вне vault — открываем внешним способом (в debug UI).
+    // Файл вне хранилища (vault) — открываем внешним способом (в debug-интерфейсе).
     if (this.openExternal) {
       this.openExternal(filePath);
     } else {
-      // Фолбек: попытаемся использовать electron shell, если доступен.
+      // Резерв: попытаемся использовать shell Electron, если доступен.
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const electron = require("electron") as { shell?: { openPath?: (p: string) => Promise<string> } };
@@ -113,7 +113,7 @@ export class LogFileWriter {
           await electron.shell.openPath(filePath);
         }
       } catch {
-        // игнорируем
+        // Игнорируем ошибки открытия файла.
       }
     }
   }
@@ -155,7 +155,7 @@ export class LogFileWriter {
         }
       }
     } catch {
-      // игнорируем: папка может отсутствовать или быть недоступна
+      // Игнорируем: папка может отсутствовать или быть недоступна.
     }
   }
 }
@@ -200,4 +200,4 @@ function formatEntry(e: LogEntry): string {
   }
 }
 
-// Лог теперь пишется вне vault, поэтому ensureFile/vault utils не используются.
+// Лог теперь пишется вне хранилища (vault), поэтому утилиты ensureFile/vault не используются.

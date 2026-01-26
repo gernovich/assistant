@@ -1,6 +1,7 @@
 export type ReminderWindowHtmlParams = {
   kind: "before" | "start";
   hostWebContentsId?: number;
+  cspConnectSrc: string[];
 
   initialStatusLine: string;
   initialTitleLine: string;
@@ -22,12 +23,15 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
 
   const minutesBefore = Number.isFinite(Number(p.minutesBefore)) ? Math.max(0, Number(p.minutesBefore)) : 0;
   const hostId = Number.isFinite(Number(p.hostWebContentsId)) ? Math.floor(Number(p.hostWebContentsId)) : 0;
+  const cspConnectSrc = Array.isArray(p.cspConnectSrc) && p.cspConnectSrc.length
+    ? p.cspConnectSrc.join(" ")
+    : "'none'";
 
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ws://127.0.0.1:* ws://localhost:*;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src ${cspConnectSrc};" />
   <style>
     :root { color-scheme: dark; }
     body {
@@ -105,7 +109,7 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
     </div>
   </div>
   <script>
-    // WindowTransport (renderer<->renderer) через preload window.__assistantTransport.
+    // Транспорт WindowTransport (рендер↔рендер) через preload window.__assistantTransport.
     (function(){
       const pending = new Map();
       const transport = window.__assistantTransport;
@@ -127,7 +131,7 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
           const id = randId();
           const req = { id: id, ts: Date.now(), action: action };
           if(!(transport && transport.send && transport.isReady && transport.isReady())){
-            return Promise.reject("assistant transport not available");
+            return Promise.reject("транспорт недоступен");
           }
           transport.send({ type: "window/request", payload: req });
           const p = new Promise((resolve,reject)=>pending.set(id,{resolve,reject}));
@@ -137,7 +141,7 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
         }
       };
 
-      // Transport: route responses.
+      // Транспорт: маршрутизация ответов.
       try{
         if(transport && transport.onMessage){
           transport.onMessage(function(msg){
@@ -260,7 +264,7 @@ export function buildReminderWindowHtml(p: ReminderWindowHtmlParams): string {
         });
       }
     } catch {
-      // Если скрипт упал/заблокирован — остаются сервер-сайд тексты (headline/details).
+      // Если скрипт упал/заблокирован — остаются тексты с сервера (заголовок/детали).
     }
   </script>
 </body>

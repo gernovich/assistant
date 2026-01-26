@@ -83,4 +83,10 @@ export interface WindowTransport {
    * Нужен для передачи диалогу (через preload) без знания реализации.
    */
   getConfig(): TransportConfig | null;
+
+  /**
+   * Возвращает список разрешённых источников для connect-src в CSP окна.
+   * UI получает их, не зная реализации транспорта.
+   */
+  getCspConnectSrc(): string[] | null;
 }

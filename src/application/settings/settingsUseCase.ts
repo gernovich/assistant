@@ -29,7 +29,7 @@ export class SettingsUseCase {
 
   async saveAndApplyResult(settings: AssistantSettings): Promise<Result<void>> {
     const summary = this.deps.getSettingsSummaryForLog(settings);
-    this.deps.log.info("Настройки: сохранить+применить (start)", { settings: summary });
+    this.deps.log.info("Настройки: сохранить+применить (старт)", { settings: summary });
 
     try {
       await this.deps.saveData(settings);
@@ -49,7 +49,7 @@ export class SettingsUseCase {
     } catch (e) {
       void e;
       // Поведение совместимо с прошлым `main.ts`: не ломаем сохранение настроек из-за папок/.base.
-      this.deps.log.warn("Не удалось обновить папки/.base (проверьте права vault)");
+      this.deps.log.warn("Не удалось обновить папки/.base (проверьте права хранилища)");
     }
 
     this.deps.updateOpenViews(settings);
@@ -59,12 +59,12 @@ export class SettingsUseCase {
     this.deps.updateRibbonIcons();
     this.deps.applyRecordingMediaPermissions();
 
-    this.deps.log.info("Настройки: сохранены и применены (ok)", { settings: this.deps.getSettingsSummaryForLog(settings) });
+    this.deps.log.info("Настройки: сохранены и применены (успех)", { settings: this.deps.getSettingsSummaryForLog(settings) });
     return ok(undefined);
   }
 
   /**
-   * Backward-compatible wrapper: не бросаем исключения наружу.
+   * Обратная совместимость: не бросаем исключения наружу.
    * Ошибка уже залогирована внутри `saveAndApplyResult`.
    */
   async saveAndApply(settings: AssistantSettings): Promise<void> {

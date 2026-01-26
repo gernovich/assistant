@@ -1,7 +1,7 @@
 import type { AssistantSettings, Event } from "../../types";
 import { normalizeEmail } from "./normalizeEmail";
 
-/** Policy: парсинг списка email из строки настроек (разделители: `,`, `;`, пробелы). */
+/** Политика: парсинг списка email из строки настроек (разделители: `,`, `;`, пробелы). */
 export function splitEmailsPolicy(raw: string): string[] {
   return String(raw ?? "")
     .split(/[,\s;]+/g)
@@ -10,7 +10,7 @@ export function splitEmailsPolicy(raw: string): string[] {
 }
 
 /**
- * Policy: определить “мои email” для RSVP по событию.
+ * Политика: определить “мои email” для RSVP по событию.
  *
  * 1) берём `settings.calendar.myEmail`
  * 2) если пусто и календарь CalDAV — берём `account.username`
@@ -25,7 +25,7 @@ export function myEmailsForEventPolicy(settings: AssistantSettings, ev: Event): 
   return splitEmailsPolicy(raw);
 }
 
-/** Policy: проверка, что среди ATTENDEE есть хотя бы один из “моих email”. */
+/** Политика: проверка, что среди ATTENDEE есть хотя бы один из “моих email”. */
 export function hasMyAttendeePolicy(ev: Event, myEmails: string[]): boolean {
   if (!myEmails.length) return false;
   const a = ev.attendees ?? [];

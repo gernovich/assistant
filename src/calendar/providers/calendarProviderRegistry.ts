@@ -3,7 +3,7 @@ import { CaldavProvider } from "./caldavProvider";
 import type { CalendarProvider } from "./calendarProvider";
 import { IcsUrlProvider } from "./icsUrlProvider";
 
-/** Интерфейс для write-back RSVP (только CalDAV сейчас). */
+/** Интерфейс для обратной записи RSVP (только CalDAV сейчас). */
 export interface CalendarRsvpWriter {
   setMyPartstat(cal: CalendarConfig, ev: Event, partstat: NonNullable<Event["status"]>): Promise<void>;
   setSettings?(settings: AssistantSettings): void;
@@ -12,7 +12,7 @@ export interface CalendarRsvpWriter {
 export interface CalendarProviderRegistry {
   get(type: CalendarConfig["type"]): CalendarProvider | undefined;
   setSettings(settings: AssistantSettings): void;
-  /** Write-back (может быть undefined, если нет провайдера записи). */
+  /** Обратная запись (может быть undefined, если нет провайдера записи). */
   rsvpWriter?: CalendarRsvpWriter;
 }
 
@@ -35,7 +35,7 @@ export function createDefaultCalendarProviderRegistry(settings: AssistantSetting
       try {
         (caldav as unknown as CalendarRsvpWriter).setSettings?.(s);
       } catch {
-        // ignore
+        // Игнорируем ошибки обновления настроек CalDAV.
       }
     },
     rsvpWriter: caldav as unknown as CalendarRsvpWriter,

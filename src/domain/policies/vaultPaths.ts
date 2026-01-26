@@ -1,4 +1,4 @@
-/** Policy: дефолтные директории ассистента в vault. */
+/** Политика: дефолтные директории ассистента в vault. */
 export const VAULT_ROOT = "Ассистент";
 export const VAULT_PROJECTS_DIR = `${VAULT_ROOT}/Проекты`;
 export const VAULT_PEOPLE_DIR = `${VAULT_ROOT}/Люди`;

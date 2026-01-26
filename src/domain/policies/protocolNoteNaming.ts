@@ -1,5 +1,5 @@
 /**
- * Policy: человекочитаемые имена протоколов.
+ * Политика: человекочитаемые имена протоколов.
  */
 export function formatRuDayMonth(d: Date): string {
   return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "long" });

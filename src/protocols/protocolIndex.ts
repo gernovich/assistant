@@ -21,7 +21,7 @@ export class ProtocolIndex {
   }
 
   listRecent(params: { protocolsRoot: string; limit: number }): Array<{ path: string; label: string }> {
-    // NOTE: backward-compat semantics preserved via `allowMissingAssistantType=true`.
+    // Примечание: обратная совместимость сохраняется через `allowMissingAssistantType=true`.
     return this.getEntityIndex().listRecentByType({
       root: params.protocolsRoot,
       limit: params.limit,

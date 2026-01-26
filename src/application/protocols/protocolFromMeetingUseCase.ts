@@ -38,7 +38,7 @@ export class ProtocolFromMeetingUseCase {
       const mr = parseMeetingNoteFromMd(text, { fileBasename: file.basename });
       if (!mr.ok) {
         // Не ломаем создание протокола: просто не создаём связь, но логируем.
-        this.deps.log.warn("Протокол: не удалось распарсить карточку встречи (frontmatter)", {
+        this.deps.log.warn("Протокол: не удалось распарсить карточку встречи (фронтматтер)", {
           code: mr.error.code,
           error: mr.error.message,
         });

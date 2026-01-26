@@ -66,11 +66,11 @@ function applySettingsCommandMutate(s: AssistantSettings, cmd: SettingsCommand, 
         acc.oauth.refreshToken = "";
       }
 
-      // Backward-compatible UX: если выбрали Google OAuth и serverUrl пустой — подставим root.
+      // Обратная совместимость по пользовательскому опыту: если выбрали Google OAuth и serverUrl пустой — подставим корень.
       if ((acc.authMethod ?? "basic") === "google_oauth" && !String(acc.serverUrl ?? "").trim()) {
         acc.serverUrl = GOOGLE_CALDAV_SERVER_URL;
       }
-      // Google root фиксируем (как и раньше в UI): если authMethod=google_oauth — ставим root.
+      // Google‑корень фиксируем (как и раньше в интерфейсе): если authMethod=google_oauth — ставим корень.
       if ((acc.authMethod ?? "basic") === "google_oauth") {
         acc.serverUrl = GOOGLE_CALDAV_SERVER_URL;
       }

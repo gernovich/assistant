@@ -17,14 +17,14 @@ export function handleReminderWindowAction(action: WindowAction, h: ReminderWind
       return h.createProtocol();
     case "reminder.meetingCancelled":
       return h.meetingCancelled();
-    // ignore: recording window actions are not for reminder window
+    // Игнорируем: действия окна записи не относятся к напоминанию
     case "recording.start":
     case "recording.stop":
     case "recording.pause":
     case "recording.resume":
     case "recording.openProtocol":
       return;
-    // ignore: test dialog actions are not for reminder window
+    // Игнорируем: действия тестового диалога не относятся к напоминанию
     case "test.dialogOne":
     case "test.dialogTwo":
     case "test.dialogThree":
@@ -59,12 +59,12 @@ export function handleRecordingWindowAction(action: WindowAction, h: RecordingWi
       return h.resume();
     case "recording.openProtocol":
       return h.openProtocol(String(action.protocolFilePath ?? ""));
-    // ignore: reminder window actions are not for recording window
+    // Игнорируем: действия окна напоминания не относятся к записи
     case "reminder.startRecording":
     case "reminder.createProtocol":
     case "reminder.meetingCancelled":
       return;
-    // ignore: test dialog actions are not for reminder window
+    // Игнорируем: действия тестового диалога не относятся к записи
     case "test.dialogOne":
     case "test.dialogTwo":
     case "test.dialogThree":
@@ -86,7 +86,7 @@ export function handleTestDialogAction(action: WindowAction, h: TestDialogAction
     case "test.dialogTwo":
     case "test.dialogThree":
       return h.onMessage(action);
-    // ignore: other actions are not for test dialog
+    // Игнорируем: остальные действия не относятся к тестовому диалогу
     case "close":
     case "reminder.startRecording":
     case "reminder.createProtocol":

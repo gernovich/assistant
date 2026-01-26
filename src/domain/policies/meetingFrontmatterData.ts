@@ -27,7 +27,7 @@ export type MeetingFrontmatterData = {
 };
 
 /**
- * Policy: извлечь данные для frontmatter карточки встречи из Event.
+ * Политика: извлечь данные для frontmatter карточки встречи из Event.
  *
  * Чистая функция: без Obsidian/Vault. Использует только детерминированные преобразования.
  */

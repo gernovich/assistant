@@ -1,5 +1,5 @@
 import type { AssistantSettings, Event } from "../types";
-import type { RecordingStats } from "./recordingService";
+import type { RecordingStats, RecordingStatus } from "./recordingService";
 import { escHtml } from "../domain/policies/escHtml";
 import { buildRecordingDialogModelPolicy } from "../domain/policies/recordingDialogModel";
 import { installWindowTransportRequestBridge } from "../presentation/electronWindow/bridge/windowTransportBridge";
@@ -12,6 +12,7 @@ import type { RecordingController } from "../presentation/controllers/recordingC
 import { createDialogTransport } from "../presentation/electronWindow/transport/transportFactory";
 import type { WindowTransport } from "../presentation/electronWindow/transport/windowTransport";
 import type { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
+import { RecordingVizNormalizer } from "./recordingVizNormalizer";
 
 type ElectronLike = {
   remote?: { BrowserWindow?: any };
@@ -33,6 +34,8 @@ type RecordingDialogParams = {
   onCreateEmptyProtocol?: () => string | null | undefined | Promise<string | null | undefined>;
   /** Открыть протокол в редакторе (клик по протоколу в диалоге). */
   onOpenProtocol?: (protocolFilePath: string) => void | Promise<void>;
+  /** Сигнал закрытия окна (для оркестрации). */
+  onClosed?: () => void;
   recordingController: RecordingController;
   onLog?: (m: string) => void;
   /** Абсолютный путь к директории плагина (для preload скрипта). */
@@ -40,18 +43,30 @@ type RecordingDialogParams = {
   transportRegistry?: TransportRegistry;
 };
 
+/**
+ * Диалог диктофона (Electron-окно) для управления записью.
+ */
 export class RecordingDialog {
+  /** Текущее окно диктофона. */
   private win: any | null = null;
+  /** Таймер периодической отправки статистики. */
   private statsTimer?: number;
+  /** Таймер пакетной отправки визуализации. */
   private vizTimer?: number;
-  private latestAmp01: number | null = null;
+  /** Защита от одновременной отправки кадра визуализации. */
   private vizPushInFlight = false;
 
   constructor(private params: RecordingDialogParams) {}
 
+  /** Открывает окно диктофона и связывает transport с контроллером записи. */
   open(): void {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require("electron") as ElectronLike;
+    let electron: ElectronLike | undefined;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      electron = require("electron") as ElectronLike;
+    } catch {
+      electron = (globalThis as any).__assistantElectronMock as ElectronLike | undefined;
+    }
     const BrowserWindow = electron?.remote?.BrowserWindow ?? electron?.BrowserWindow;
     if (!BrowserWindow) {
       this.params.onLog?.("Запись: Electron BrowserWindow недоступен (окно диктофона не может быть открыто)");
@@ -66,19 +81,19 @@ export class RecordingDialog {
     const path = require("node:path") as typeof import("node:path");
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require("node:fs") as typeof import("node:fs");
-    
+
     let preloadPath: string;
     if (this.params.pluginDirPath) {
       // Используем явно переданный путь (рекомендуется)
       preloadPath = path.resolve(this.params.pluginDirPath, "bridge-preload.cjs");
     } else {
-      // Fallback на __dirname (может не работать в AppImage)
+      // Резерв на __dirname (может не работать в AppImage)
       preloadPath = path.join(__dirname, "bridge-preload.cjs");
     }
-    
+
     // Проверяем существование файла
     if (!fs.existsSync(preloadPath)) {
-      this.params.onLog?.(`Запись: WARNING - preload файл не найден: ${preloadPath}`);
+      this.params.onLog?.(`Запись: ПРЕДУПРЕЖДЕНИЕ - preload файл не найден: ${preloadPath}`);
       this.params.onLog?.(`Запись: pluginDirPath: ${this.params.pluginDirPath || "не передан"}, __dirname: ${__dirname}`);
     }
 
@@ -102,16 +117,17 @@ export class RecordingDialog {
       },
     });
     this.win = win;
+    this.params.onLog?.("WindowTransport: окно записи открыто");
 
     try {
       win.setAlwaysOnTop(true, "screen-saver");
     } catch {
-      // ignore
+      // Игнорируем ошибку — окно всё равно должно открыться.
     }
     try {
       win.setOpacity(0.96);
     } catch {
-      // ignore
+      // Игнорируем ошибку — прозрачность не критична.
     }
 
     try {
@@ -122,7 +138,7 @@ export class RecordingDialog {
         win.setPosition(x, y);
       }
     } catch {
-      // ignore
+      // Игнорируем ошибки позиционирования.
     }
 
     const nowMs = Date.now();
@@ -146,7 +162,7 @@ export class RecordingDialog {
       )
       .join("");
 
-    // Event: список встреч (без дат), сортируем по дате ближайшего occurrence (из будущих).
+    // Список встреч (без дат), сортируем по дате ближайшего occurrence (из будущих).
     const meetingOptions = [`<option value="">(не выбрано)</option>`]
       .concat(model.meetingNames.map((name) => `<option value="${escHtml(name)}">${escHtml(name)}</option>`))
       .join("");
@@ -159,68 +175,14 @@ export class RecordingDialog {
           .map((p) => `<option value="${escHtml(String(p.path))}">${escHtml(String(p.label || p.path))}</option>`),
       )
       .join("");
-    // Host webContentsId (Obsidian renderer), used by window preload to send IPC requests via sendTo(hostId,...)
-    // В Obsidian плагине код выполняется в renderer-процессе, поэтому используем ipcRenderer напрямую
-    // Проблема: в renderer-процессе нет прямого способа получить свой webContentsId без remote API
-    // Решение: используем несколько fallback методов для максимальной совместимости
-    let hostWebContentsId = 0;
-    try {
-      const ipcRenderer = (electron as any)?.ipcRenderer;
-      
-      // Способ 1: remote.getCurrentWebContents() (устарел в Electron 20+, но работает в старых версиях)
-      // Это основной способ для Electron < 20
-      if ((electron as any)?.remote?.getCurrentWebContents) {
-        const wc = (electron as any).remote.getCurrentWebContents();
-        if (wc?.id) {
-          hostWebContentsId = Number(wc.id);
-        }
-      }
-      
-      // Способ 2: ipcRenderer.senderId (может быть доступен в некоторых версиях Electron)
-      // В некоторых версиях ipcRenderer имеет свойство senderId
-      if (hostWebContentsId === 0 && ipcRenderer) {
-        // Попробуем получить ID через внутренние свойства ipcRenderer
-        // В некоторых версиях Electron ipcRenderer имеет _senderId или другие внутренние свойства
-        if (typeof (ipcRenderer as any).senderId === "number") {
-          hostWebContentsId = Number((ipcRenderer as any).senderId);
-        } else if (typeof (ipcRenderer as any)._senderId === "number") {
-          hostWebContentsId = Number((ipcRenderer as any)._senderId);
-        }
-      }
-      
-      // Способ 3: Используем webFrame для получения информации о текущем frame
-      // webFrame может дать доступ к некоторым свойствам текущего контекста
-      if (hostWebContentsId === 0) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const webFrame = require("electron").webFrame;
-          // webFrame не дает прямой доступ к webContentsId, но мы можем попробовать другие методы
-          // В некоторых версиях webFrame имеет доступ к webContents через внутренние свойства
-          if (webFrame && typeof (webFrame as any).top === "object") {
-            const topFrame = (webFrame as any).top;
-            if (topFrame && typeof (topFrame as any).webContentsId === "number") {
-              hostWebContentsId = Number((topFrame as any).webContentsId);
-            }
-          }
-        } catch {
-          // webFrame может быть недоступен
-        }
-      }
-      
-      // Если все способы не сработали, используем 0
-      // В этом случае IPC сообщения не будут работать, но окно откроется
-      // Это лучше, чем полный отказ от открытия окна
-      if (hostWebContentsId === 0) {
-        this.params.onLog?.("Запись: не удалось определить hostWebContentsId, IPC может не работать");
-        this.params.onLog?.(`Запись: remote доступен: ${!!(electron as any)?.remote}`);
-        this.params.onLog?.(`Запись: ipcRenderer доступен: ${!!ipcRenderer}`);
-      } else {
-        this.params.onLog?.(`Запись: hostWebContentsId определен: ${hostWebContentsId}`);
-      }
-    } catch (e) {
-      this.params.onLog?.(`Запись: ошибка при определении hostWebContentsId: ${e}`);
-      hostWebContentsId = 0;
-    }
+    const hostWebContentsId = 0;
+    const transport: WindowTransport = this.params.transportRegistry
+      ? this.params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
+      : createDialogTransport();
+    transport.attach();
+    transport.onReady(() => {
+      this.params.onLog?.("WindowTransport: транспорт окна записи готов");
+    });
 
     const html = buildRecordingWindowHtml({
       defaultOccurrenceKey: String(defaultKey || ""),
@@ -232,25 +194,27 @@ export class RecordingDialog {
       autoEnabled: Boolean(this.params.settings.recording.autoStartEnabled),
       autoSeconds: model.autoSeconds,
       meta: model.meta,
-      hostWebContentsId,
+      debugEnabled: Boolean(this.params.settings.debug?.enabled),
+      cspConnectSrc: transport.getCspConnectSrc() ?? [],
     });
 
     const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     void win.loadURL(url);
+
+    const vizNormalizer = new RecordingVizNormalizer({
+      outputIntervalMs: 33,
+      logIntervalMs: 1000,
+      onLog: (m) => this.params.onLog?.(m),
+    });
 
     const stopStatsTimer = () => {
       if (this.statsTimer) window.clearInterval(this.statsTimer);
       this.statsTimer = undefined;
       if (this.vizTimer) window.clearInterval(this.vizTimer);
       this.vizTimer = undefined;
-      this.latestAmp01 = null;
+      vizNormalizer.reset();
       this.vizPushInFlight = false;
     };
-
-    const transport: WindowTransport = this.params.transportRegistry
-      ? this.params.transportRegistry.createDialogTransport({ webContents: win.webContents, hostWebContentsId })
-      : createDialogTransport();
-    transport.attach();
 
     const pushStats = (stats: RecordingStats) => {
       const payload: WindowTransportMessage = { type: "recording/stats", payload: stats as any };
@@ -266,30 +230,65 @@ export class RecordingDialog {
         this.vizPushInFlight = false;
       }
     };
+    const pushVizClear = () => {
+      try {
+        const payload: WindowTransportMessage = { type: "recording/viz-clear", payload: {} };
+        transport.send(payload);
+      } catch {
+        // Игнорируем ошибки очистки визуализации.
+      }
+    };
+    const clearViz = () => {
+      vizNormalizer.reset();
+      pushViz(0);
+      pushVizClear();
+    };
 
     this.params.recordingController.setOnStats((s) => pushStats(s));
-    let lastVizLogAt = 0;
     this.params.recordingController.setOnViz((amp01) => {
-      // Важно: не вызываем executeJavaScript на каждый сэмпл — это легко забивает очередь и визуально даёт 1fps.
-      // Вместо этого сохраняем последнее значение, а в окно пушим батчом таймером (см. vizTimer ниже).
-      this.latestAmp01 = Number(amp01);
-      // Диагностика доставки в окно: раз в ~2 секунды пишем, что окно реально получает onViz callback.
-      const now = Date.now();
-      if (now - lastVizLogAt > 2000) {
-        lastVizLogAt = now;
-        try {
-          this.params.onLog?.(`Viz: amp01=${Number(amp01).toFixed(3)}`);
-        } catch {
-          // ignore
-        }
-      }
+      const st = this.params.recordingController.getStats();
+      if (st.status !== "recording") return;
+      vizNormalizer.push(Number(amp01), Date.now());
     });
     // Батч-пуш визуализации: 30fps, дропаем кадры если webContents занят.
+    let lastVizStatus: RecordingStatus = "idle";
+    let lastVizLogAtMs = 0;
     this.vizTimer = window.setInterval(() => {
       if (!this.win) return;
       if (this.vizPushInFlight) return;
-      const v = this.latestAmp01;
-      if (v == null || !Number.isFinite(v)) return;
+      const st = this.params.recordingController.getStats();
+      const status = st.status as RecordingStatus;
+      const now = Date.now();
+      if (status === "recording" && lastVizStatus === "idle") {
+        clearViz();
+      }
+      if (status === "paused" && lastVizStatus === "recording") {
+        vizNormalizer.pause(now);
+      }
+      if (status === "recording" && lastVizStatus === "paused") {
+        vizNormalizer.resume(now);
+      }
+      // Если запись на паузе — не сбрасываем буфер, просто не отправляем viz.
+      if (status === "paused") {
+        lastVizStatus = status;
+        return;
+      }
+      // Если запись завершена — сбрасываем буфер и очищаем визуализацию.
+      if (status === "idle") {
+        if (lastVizStatus !== "idle") {
+          clearViz();
+        }
+        lastVizStatus = status;
+        return;
+      }
+      lastVizStatus = status;
+
+      const v = vizNormalizer.pull(now);
+      if (v == null) return;
+      if (now - lastVizLogAtMs > 1000) {
+        lastVizLogAtMs = now;
+        this.params.onLog?.(`Визуализация: отправка viz в окно amp01=${Number(v).toFixed(3)}`);
+      }
       pushViz(v);
     }, 33);
     this.statsTimer = window.setInterval(() => pushStats(this.params.recordingController.getStats()), 1000);
@@ -301,7 +300,7 @@ export class RecordingDialog {
           this.win.close();
         }
       } catch {
-        // ignore
+        // Игнорируем ошибки закрытия.
       }
       this.win = null;
     };
@@ -318,7 +317,7 @@ export class RecordingDialog {
               }
             }
           } catch {
-            // ignore
+            // Игнорируем ошибки остановки записи при закрытии.
           } finally {
             close();
           }
@@ -377,6 +376,7 @@ export class RecordingDialog {
           }
         },
         stop: async () => {
+          clearViz();
           const res = await this.params.recordingController.stopResult();
           if (!res.ok) {
             this.params.onLog?.(`Запись: не удалось остановить: ${String(res.error.cause ?? res.error.message)}`);
@@ -400,13 +400,38 @@ export class RecordingDialog {
       });
     };
 
-    // Transport: Electron IPC sendTo.
+    // Транспорт: обмен сообщениями через WindowTransport.
     const unIpc = installWindowTransportRequestBridge({
       transport,
       timeoutMs: 2500,
       onRequest: async (req: WindowRequest) => {
         await onWindowAction(req.action);
       },
+    });
+    const unVizDebug = transport.onMessage((msg) => {
+      try {
+        const m = msg as { type?: string; payload?: any };
+        if (!m) return;
+        if (m.type === "recording/viz-debug") {
+          const amp01 = Number(m.payload?.amp01 ?? 0);
+          const w = Number(m.payload?.canvas?.w ?? 0);
+          const h = Number(m.payload?.canvas?.h ?? 0);
+          this.params.onLog?.(`Визуализация: окно получило amp01=${amp01.toFixed(3)} canvas=${w}x${h}`);
+          return;
+        }
+        if (m.type === "recording/diag") {
+          const kind = String(m.payload?.kind ?? "");
+          const w = Number(m.payload?.canvas?.w ?? 0);
+          const h = Number(m.payload?.canvas?.h ?? 0);
+          const points = Number(m.payload?.points ?? 0);
+          const ampTarget = Number(m.payload?.ampTarget ?? 0);
+          this.params.onLog?.(
+            `Визуализация: diag ${kind} canvas=${w}x${h} points=${points} ampTarget=${ampTarget.toFixed(3)}`,
+          );
+        }
+      } catch {
+        // Игнорируем ошибки диагностики.
+      }
     });
 
     let dialogLoaded = false;
@@ -419,7 +444,7 @@ export class RecordingDialog {
         win.webContents.send("assistant/transport/config", config);
         configSent = true;
       } catch {
-        // ignore
+        // Игнорируем ошибки отправки конфигурации.
       }
     };
     transport.onReady(() => trySendConfig());
@@ -428,8 +453,8 @@ export class RecordingDialog {
       trySendConfig();
     });
 
-    // Cleanup слушателей: добавляем в win.on("close") (до закрытия) и win.on("closed") (после закрытия)
-    // Это гарантирует cleanup даже если окно закрывается нестандартным способом
+    // Очистка слушателей: добавляем в win.on("close") (до закрытия) и win.on("closed") (после закрытия).
+    // Это гарантирует очистку даже если окно закрывается нестандартным способом.
     let cleanupCalled = false;
     const doCleanup = () => {
       if (cleanupCalled) return;
@@ -437,9 +462,11 @@ export class RecordingDialog {
       stopStatsTimer();
       try {
         unIpc();
+        unVizDebug();
         transport.close();
+        this.params.onLog?.("WindowTransport: окно записи закрыто");
       } catch (e) {
-        this.params.onLog?.(`Запись: ошибка при cleanup IPC: ${e}`);
+        this.params.onLog?.(`Запись: ошибка при очистке WindowTransport: ${e}`);
       }
     };
 
@@ -448,18 +475,23 @@ export class RecordingDialog {
     });
 
     win.on("close", () => {
-      // Cleanup до закрытия окна
+      // Очистка до закрытия окна.
       doCleanup();
     });
 
     win.on("closed", () => {
-      // Cleanup после закрытия окна (fallback)
+      // Очистка после закрытия окна (резерв).
       doCleanup();
+      try {
+        this.params.onClosed?.();
+      } catch {
+        // Игнорируем ошибки коллбека закрытия.
+      }
       try {
         const st = this.params.recordingController.getStats();
         if (st.status !== "idle") void this.params.recordingController.stopResult();
       } catch {
-        // ignore
+        // Игнорируем ошибки остановки записи после закрытия.
       }
       this.win = null;
     });

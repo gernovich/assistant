@@ -1,5 +1,5 @@
 /**
- * Policy: тайминги чанков записи (rotation).
+ * Политика: тайминги чанков записи (rotation).
  */
 
 export function shouldRotateChunkPolicy(params: { nowMs: number; lastChunkAtMs: number; chunkEveryMs: number }): boolean {

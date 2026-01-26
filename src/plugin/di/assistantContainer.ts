@@ -119,7 +119,7 @@ export function createAssistantContainer(params: {
   const calendarService = new CalendarService(c.resolve<AssistantSettings>("assistant.settings"), calendarProviderRegistry);
   c.register(CalendarService, { useValue: calendarService });
 
-  // Recording: use-case + facade + service
+  // Запись: use-case + facade + service
   c.register(RecordingUseCase, {
     useFactory: (cc) => {
       const app = cc.resolve<App>("obsidian.app");
@@ -253,13 +253,13 @@ export function createAssistantContainer(params: {
         sRef.get(),
         (m) => log.info(m),
         {
-        createProtocol: (ev) => actions.createProtocol(ev),
-        startRecording: async (ev) => {
-          await actions.startRecording(ev);
-        },
-        meetingCancelled: async (ev) => {
-          await actions.meetingCancelled(ev);
-        },
+          createProtocol: (ev) => actions.createProtocol(ev),
+          startRecording: async (ev) => {
+            await actions.startRecording(ev);
+          },
+          meetingCancelled: async (ev) => {
+            await actions.meetingCancelled(ev);
+          },
         },
         paths.pluginDirPath,
         cc.resolve(TransportRegistry),

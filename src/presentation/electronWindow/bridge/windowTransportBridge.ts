@@ -49,7 +49,7 @@ export function installWindowTransportRequestBridge(params: {
     try {
       unsub();
     } catch {
-      // ignore
+      // Игнорируем ошибки отписки.
     }
   };
 }

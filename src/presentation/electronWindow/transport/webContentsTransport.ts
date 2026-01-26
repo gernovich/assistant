@@ -9,10 +9,18 @@ type IpcRendererLike = {
   removeListener(channel: string, listener: (event: unknown, payload: unknown) => void): void;
 };
 
+/**
+ * Транспорт на базе webContents.send + ipcRenderer.on.
+ * Используется для связи основного окна и диалога через каналы.
+ */
 export class WebContentsTransport implements WindowTransport {
+  /** Коллбеки входящих сообщений. */
   private messageCallbacks: Set<(data: unknown) => void> = new Set();
+  /** Коллбеки готовности транспорта. */
   private readyCallbacks: Set<() => void> = new Set();
+  /** Флаг готовности транспорта. */
   private _isReady = false;
+  /** Карта отписок для слушателей. */
   private unsubscribeMap = new Map<(data: unknown) => void, () => void>();
 
   constructor(
@@ -25,6 +33,7 @@ export class WebContentsTransport implements WindowTransport {
     } = {},
   ) {}
 
+  /** Подключает транспорт к целевым объектам (webContents/ipcRenderer). */
   attach(params?: TransportAttachTarget): void {
     if (this._isReady) return;
     const target = params?.target as
@@ -39,7 +48,7 @@ export class WebContentsTransport implements WindowTransport {
       this.params = { ...this.params, ...target };
     }
     if (!this.params.webContents || !this.params.ipcRenderer) {
-      console.warn("[WebContentsTransport] attach without webContents/ipcRenderer.");
+      console.warn("[WebContentsTransport] подключение без webContents/ipcRenderer.");
       return;
     }
     this._isReady = true;
@@ -47,27 +56,29 @@ export class WebContentsTransport implements WindowTransport {
       try {
         cb();
       } catch (e) {
-        console.error("[WebContentsTransport] Error in ready callback:", e);
+        console.error("[WebContentsTransport] Ошибка в коллбеке готовности:", e);
       }
     }
   }
 
+  /** Отправляет сообщение в канал диалога. */
   send(payload: unknown): void {
     if (!this._isReady) {
-      console.warn("[WebContentsTransport] Attempted to send when not ready.");
+      console.warn("[WebContentsTransport] Попытка отправки до готовности.");
       return;
     }
     const channel = this.params.channelToDialog ?? "assistant/test/message";
     this.params.webContents.send(channel, payload);
   }
 
+  /** Подписывается на входящие сообщения. */
   onMessage(cb: (data: unknown) => void): () => void {
     this.messageCallbacks.add(cb);
     const handler = (_event: unknown, payload: unknown) => {
       try {
         cb(payload);
       } catch (e) {
-        console.error("[WebContentsTransport] Error in message callback:", e);
+        console.error("[WebContentsTransport] Ошибка в коллбеке сообщения:", e);
       }
     };
     const channel = this.params.channelFromDialog ?? "assistant/test/action";
@@ -93,6 +104,7 @@ export class WebContentsTransport implements WindowTransport {
     return this._isReady;
   }
 
+  /** Освобождает ресурсы транспорта. */
   close(): void {
     this._isReady = false;
     this.messageCallbacks.clear();
@@ -100,13 +112,14 @@ export class WebContentsTransport implements WindowTransport {
       try {
         unsub();
       } catch {
-        // ignore
+        // Игнорируем ошибки при отписке.
       }
     }
     this.unsubscribeMap.clear();
     this.readyCallbacks.clear();
   }
 
+  /** Возвращает конфигурацию для инициализации транспорта в preload. */
   getConfig(): { type: "webContents"; hostId: number; channelToDialog?: string; channelFromDialog?: string } | null {
     const hostId = Number(this.params.hostId ?? 0);
     if (!Number.isFinite(hostId) || hostId <= 0) return null;

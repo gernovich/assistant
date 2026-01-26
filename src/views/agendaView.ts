@@ -202,7 +202,10 @@ export class AgendaView extends ItemView {
         const nextWhen = `${next.start.toLocaleString(RU, { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
         const nextText = `Ближайшая: ${nextWhen} — ${next.summary || "(без названия)"}`;
         const nextAlert = this.createAlert(alertsContainer, "info", nextText);
-        const jump = nextAlert.createEl("button", { text: "Ближайшие", cls: "assistant-agenda__alert-action assistant-agenda__alert-action--outline" });
+        const jump = nextAlert.createEl("button", {
+          text: "Ближайшие",
+          cls: "assistant-agenda__alert-action assistant-agenda__alert-action--outline",
+        });
         jump.onclick = () => {
           this.dayOffset = diffDaysLocalDay(new Date(), next.start);
           this.render();

@@ -101,7 +101,7 @@ export class RecordingFacade {
     const filePrefix = recordingFilePrefixFromEventKey(params.eventKey);
     const mimeTypePref = this.deps.pickMimeTypePref();
 
-    this.deps.log.info("Recording: start()", {
+    this.deps.log.info("Запись: старт", {
       backend,
       chunkMinutes,
       processing: this.settings.recording.linuxNativeAudioProcessing ?? "normalize",
@@ -121,14 +121,17 @@ export class RecordingFacade {
   }
 
   async pause(): Promise<void> {
+    this.deps.log.info("Запись: пауза");
     await this.deps.useCase.pause();
   }
 
   async resume(): Promise<void> {
+    this.deps.log.info("Запись: сняли с паузы");
     await this.deps.useCase.resume();
   }
 
   async stop(): Promise<void> {
+    this.deps.log.info("Запись: стоп");
     await this.deps.useCase.stop();
   }
 }

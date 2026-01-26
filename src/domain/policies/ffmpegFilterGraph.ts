@@ -1,5 +1,5 @@
 /**
- * Policy: генерация ffmpeg filtergraph для Linux native записи (mic/monitor + normalize/voice).
+ * Политика: генерация ffmpeg filtergraph для Linux native записи (mic/monitor + normalize/voice).
  *
  * Чистая функция: возвращает строки фильтров, без выполнения команд.
  */

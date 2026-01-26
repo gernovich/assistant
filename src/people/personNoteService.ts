@@ -148,7 +148,7 @@ export class PersonNoteService implements PersonRepository {
         const anyMatch = emails.some((x) => normalizeEmail(String(x)) === email);
         if (anyMatch) return f as TFile;
       } catch {
-        // ignore read/parse errors for index fallback
+        // Игнорируем ошибки чтения/парсинга для резервного поиска по индексу.
       }
     }
     return null;
