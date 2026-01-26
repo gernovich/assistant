@@ -45,6 +45,10 @@ export class MockTransport implements WindowTransport {
     return null;
   }
 
+  getCspConnectSrc(): string[] | null {
+    return null;
+  }
+
   private emit(payload: TransportMessage): void {
     for (const cb of this.listeners) {
       cb(payload);

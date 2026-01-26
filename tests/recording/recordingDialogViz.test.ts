@@ -102,11 +102,11 @@ class MockTransport implements WindowTransport {
   close() {}
 
   getConfig(): TransportConfig | null {
-    return { type: "ws", url: "ws://127.0.0.1:1234/assistant-dialog" };
+    return { type: "messageChannel", channel: "assistant/message-channel-port/test" };
   }
 
   getCspConnectSrc(): string[] | null {
-    return ["ws://127.0.0.1:*"];
+    return null;
   }
 }
 

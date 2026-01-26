@@ -6,7 +6,7 @@ describe("reminderWindowHtml", () => {
     const html = buildReminderWindowHtml({
       kind: "before",
       hostWebContentsId: 123,
-      cspConnectSrc: ["ws://127.0.0.1:*"],
+      cspConnectSrc: null,
       initialStatusLine: "Через 00:10",
       initialTitleLine: "Meeting",
       detailsText: "Начало: ...",

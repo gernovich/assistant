@@ -14,7 +14,7 @@ describe("recordingWindowHtml", () => {
       lockedLabel: "x",
       meta: [],
       debugEnabled: false,
-      cspConnectSrc: ["ws://127.0.0.1:*"],
+      cspConnectSrc: null,
     });
 
     expect(html).toContain('transport.send({ type: "window/request", payload: req })');
@@ -33,7 +33,7 @@ describe("recordingWindowHtml", () => {
       lockedLabel: "x",
       meta: [],
       debugEnabled: false,
-      cspConnectSrc: ["ws://127.0.0.1:*"],
+      cspConnectSrc: null,
     });
 
     expect(html).toContain("resetVizState()");

@@ -268,10 +268,7 @@ export function createAssistantContainer(params: {
   });
 
   c.register(TransportRegistry, {
-    useFactory: (cc) =>
-      new TransportRegistry({
-        randomHex: cc.resolve<() => string>("assistant.randomHex"),
-      }),
+    useFactory: () => new TransportRegistry(),
   });
 
   /**

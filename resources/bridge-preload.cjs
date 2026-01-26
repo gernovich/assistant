@@ -2,7 +2,6 @@
 //
 // Goal: provide "real" IPC transport without document.title/executeJavaScript.
 // We use MessageChannel for renderer<->renderer communication (Electron 27.0.0+).
-// Legacy: ipcRenderer.sendTo() is deprecated, but kept for backward compatibility.
 //
 // Security: page itself stays without nodeIntegration; we expose a minimal API via contextBridge.
 
@@ -16,17 +15,9 @@ const pendingMessages = [];
 
 // Transport bridge (dialog side) — hides transport implementation from UI.
 let transportReady = false;
-let transportSocket = null;
-let transportUrl = null;
-let transportWsCtor = null;
-let transportMode = null; // "ws" | "messageChannel" | "webContents"
-let webContentsHostId = 0;
-let webContentsChannelToHost = "assistant/window/request";
-let webContentsChannelFromHost = "assistant/window/response";
-let webContentsListener = null;
+let transportMode = null; // "messageChannel"
 const transportReadyCallbacks = new Set();
 const transportMessageCallbacks = new Set();
-const transportQueue = [];
 
 function transportNotifyReady() {
   transportReady = true;
@@ -49,71 +40,8 @@ function transportNotifyMessage(payload) {
   }
 }
 
-function transportConnect(url) {
-  transportMode = "ws";
-  if (!url || url === transportUrl) return;
-  transportUrl = url;
-  if (transportSocket && typeof transportSocket.close === "function") {
-    try {
-      transportSocket.close();
-    } catch {
-      // ignore
-    }
-  }
-  transportReady = false;
-  if (!transportWsCtor) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      transportWsCtor = require("ws");
-    } catch {
-      transportWsCtor = null;
-    }
-  }
-  if (!transportWsCtor) {
-    try {
-      transportWsCtor = globalThis.WebSocket;
-    } catch {
-      transportWsCtor = null;
-    }
-  }
-  if (!transportWsCtor) {
-    console.warn("[Assistant] Transport: WebSocket ctor недоступен");
-    return;
-  }
-  try {
-    transportSocket = new transportWsCtor(url);
-  } catch (e) {
-    console.warn("[Assistant] Transport: не удалось создать WebSocket", e);
-    return;
-  }
-  transportSocket.addEventListener("open", () => {
-    transportNotifyReady();
-    while (transportQueue.length > 0 && transportSocket && transportSocket.readyState === 1) {
-      const msg = transportQueue.shift();
-      if (msg) {
-        transportSocket.send(msg);
-      }
-    }
-  });
-  transportSocket.addEventListener("message", (evt) => {
-    try {
-      const data = JSON.parse(String(evt?.data ?? ""));
-      transportNotifyMessage(data);
-    } catch {
-      // ignore
-    }
-  });
-  transportSocket.addEventListener("close", () => {
-    transportReady = false;
-  });
-}
-
 ipcRenderer.on("assistant/transport/config", (_event, config) => {
   try {
-    if (config && config.type === "ws" && typeof config.url === "string") {
-      transportConnect(config.url);
-      return;
-    }
     if (config && config.type === "messageChannel") {
       transportMode = "messageChannel";
       if (messagePort) {
@@ -121,30 +49,6 @@ ipcRenderer.on("assistant/transport/config", (_event, config) => {
       } else {
         transportReady = false;
       }
-      return;
-    }
-    if (config && config.type === "webContents") {
-      transportMode = "webContents";
-      webContentsHostId = Number(config.hostId ?? 0);
-      if (!Number.isFinite(webContentsHostId) || webContentsHostId <= 0) {
-        console.warn("[Assistant] Transport: webContents requires hostId");
-        transportReady = false;
-        return;
-      }
-      webContentsChannelToHost = String(config.channelToDialog || "assistant/window/request");
-      webContentsChannelFromHost = String(config.channelFromDialog || "assistant/window/response");
-      if (webContentsListener) {
-        try {
-          ipcRenderer.removeListener(webContentsChannelFromHost, webContentsListener);
-        } catch {
-          // ignore
-        }
-      }
-      webContentsListener = (_evt, payload) => {
-        transportNotifyMessage(payload);
-      };
-      ipcRenderer.on(webContentsChannelFromHost, webContentsListener);
-      transportNotifyReady();
       return;
     }
   } catch {
@@ -275,39 +179,11 @@ contextBridge.exposeInMainWorld("__assistantTransport", {
   attach: (params) => {
     try {
       const target = params?.target;
-      if (target && target.type === "ws" && target.url) {
-        transportConnect(String(target.url));
-        return;
-      }
       if (target && target.type === "messageChannel") {
         transportMode = "messageChannel";
         if (messagePort) {
           transportNotifyReady();
         }
-        return;
-      }
-      if (target && target.type === "webContents") {
-        transportMode = "webContents";
-        webContentsHostId = Number(target.hostId ?? 0);
-        if (!Number.isFinite(webContentsHostId) || webContentsHostId <= 0) {
-          console.warn("[Assistant] Transport: webContents requires hostId");
-          transportReady = false;
-          return;
-        }
-        webContentsChannelToHost = String(target.channelToDialog || "assistant/window/request");
-        webContentsChannelFromHost = String(target.channelFromDialog || "assistant/window/response");
-        if (webContentsListener) {
-          try {
-            ipcRenderer.removeListener(webContentsChannelFromHost, webContentsListener);
-          } catch {
-            // ignore
-          }
-        }
-        webContentsListener = (_evt, payload) => {
-          transportNotifyMessage(payload);
-        };
-        ipcRenderer.on(webContentsChannelFromHost, webContentsListener);
-        transportNotifyReady();
         return;
       }
     } catch {
@@ -332,17 +208,6 @@ contextBridge.exposeInMainWorld("__assistantTransport", {
         }
         return;
       }
-      if (transportMode === "webContents") {
-        if (!webContentsHostId) return;
-        ipcRenderer.sendTo(webContentsHostId, webContentsChannelToHost, payload);
-        return;
-      }
-      const msg = JSON.stringify(payload ?? null);
-      if (!transportSocket || transportSocket.readyState !== 1) {
-        transportQueue.push(msg);
-        return;
-      }
-      transportSocket.send(msg);
     } catch {
       // ignore
     }
@@ -357,22 +222,17 @@ contextBridge.exposeInMainWorld("__assistantTransport", {
   },
   close: () => {
     try {
-      if (transportSocket) {
-        transportSocket.close();
-      }
-      transportSocket = null;
       transportReady = false;
-      transportQueue.length = 0;
       transportMessageCallbacks.clear();
       transportReadyCallbacks.clear();
-      if (webContentsListener) {
+      if (messagePort && typeof messagePort.close === "function") {
         try {
-          ipcRenderer.removeListener(webContentsChannelFromHost, webContentsListener);
+          messagePort.close();
         } catch {
           // ignore
         }
-        webContentsListener = null;
       }
+      messagePort = null;
     } catch {
       // ignore
     }

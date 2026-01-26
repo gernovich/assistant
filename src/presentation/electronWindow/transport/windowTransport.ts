@@ -1,7 +1,7 @@
 /**
  * WindowTransport — единый контракт моста сообщений между приложением и диалогом.
  *
- * Цель: UI и логика не знают "как именно" доставляются сообщения (IPC/Channel/WebSocket и т.д.).
+ * Цель: UI и логика не знают "как именно" доставляются сообщения (Channel и т.д.).
  * Реализация скрыта внутри конкретного транспорта; снаружи используются только методы интерфейса.
  */
 export type TransportMessage = unknown;
@@ -13,21 +13,10 @@ export type TransportRole = "host" | "dialog";
  * Единый конфиг транспорта, который можно прокинуть в attach().
  * UI работает с этим контрактом, не зная реализацию.
  */
-export type TransportConfig =
-  | {
-      type: "ws";
-      url: string;
-    }
-  | {
-      type: "messageChannel";
-      channel?: string;
-    }
-  | {
-      type: "webContents";
-      hostId: number;
-      channelToDialog?: string;
-      channelFromDialog?: string;
-    };
+export type TransportConfig = {
+  type: "messageChannel";
+  channel?: string;
+};
 
 /**
  * Параметры подключения/получателя для конкретной реализации.

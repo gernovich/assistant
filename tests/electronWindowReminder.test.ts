@@ -84,10 +84,10 @@ const { MockTransport, existsSyncMock } = vi.hoisted(() => {
       // no-op
     }
     getConfig(): TransportConfig | null {
-      return { type: "ws", url: "ws://127.0.0.1:0/assistant-dialog" };
+      return { type: "messageChannel", channel: "assistant/message-channel-port/test" };
     }
     getCspConnectSrc(): string[] | null {
-      return ["ws://127.0.0.1:*"];
+      return null;
     }
   }
   return { MockTransport, existsSyncMock };
@@ -144,11 +144,11 @@ class FakeTransport implements WindowTransport {
   }
 
   getConfig(): TransportConfig | null {
-    return { type: "ws", url: "ws://127.0.0.1:12345/assistant-dialog" };
+    return { type: "messageChannel", channel: "assistant/message-channel-port/test" };
   }
 
   getCspConnectSrc(): string[] | null {
-    return ["ws://127.0.0.1:*"];
+    return null;
   }
 
   emit(payload: unknown): void {

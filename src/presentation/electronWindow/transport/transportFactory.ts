@@ -1,6 +1,6 @@
 import type { WindowTransport } from "./windowTransport";
-import { WebSocketTransport } from "./webSocketTransport";
 import { MessageChannelTransport } from "./messageChannelTransport";
+import { MockTransport } from "./mockTransport";
 
 export function createDialogTransport(params?: { webContents?: any; channelName?: string }): WindowTransport {
   let MessageChannelMain: any = null;
@@ -18,8 +18,5 @@ export function createDialogTransport(params?: { webContents?: any; channelName?
       channelName: params.channelName,
     });
   }
-  const host = "127.0.0.1";
-  const port = 0;
-  const path = "/assistant-dialog";
-  return new WebSocketTransport({ host, port, path });
+  return new MockTransport();
 }

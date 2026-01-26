@@ -19,7 +19,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
-    "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
     "@vitest/coverage-v8": "^2.1.9",
@@ -35,7 +34,6 @@
   "dependencies": {
     "fix-webm-duration": "^1.0.6",
     "reflect-metadata": "^0.2.2",
-    "ws": "^8.16.0",
     "tsdav": "^2.1.6",
     "tsyringe": "^4.10.0",
     "zod": "^3.25.0"
