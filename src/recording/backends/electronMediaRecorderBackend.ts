@@ -29,7 +29,7 @@ export class ElectronMediaRecorderBackend {
   constructor(
     private params: {
       isActiveSession: (s: ElectronSession) => boolean;
-      getOnViz: () => ((amp01: number) => void) | undefined;
+      getOnViz: () => ((p: { mic01: number; monitor01: number }) => void) | undefined;
       log: Logger;
       writeBinary: (path: string, data: ArrayBuffer) => Promise<void>;
       onFileSaved?: (recordingFilePath: string) => void;
@@ -178,7 +178,7 @@ export class ElectronMediaRecorderBackend {
           }
           const rms = n ? Math.sqrt(sumSq / n) : 0;
           const amp01 = amp01FromTimeDomainRmsPolicy(rms, 2.2);
-          this.params.getOnViz()?.(amp01);
+          this.params.getOnViz()?.({ mic01: amp01, monitor01: 0 });
         } catch {
           // Игнорируем ошибки расчёта визуализации.
         }

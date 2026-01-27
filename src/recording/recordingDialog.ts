@@ -202,7 +202,12 @@ export class RecordingDialog {
     const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     void win.loadURL(url);
 
-    const vizNormalizer = new RecordingVizNormalizer({
+    const micVizNormalizer = new RecordingVizNormalizer({
+      outputIntervalMs: 33,
+      logIntervalMs: 1000,
+      onLog: (m) => this.params.onLog?.(m),
+    });
+    const monitorVizNormalizer = new RecordingVizNormalizer({
       outputIntervalMs: 33,
       logIntervalMs: 1000,
       onLog: (m) => this.params.onLog?.(m),
@@ -213,7 +218,8 @@ export class RecordingDialog {
       this.statsTimer = undefined;
       if (this.vizTimer) window.clearInterval(this.vizTimer);
       this.vizTimer = undefined;
-      vizNormalizer.reset();
+      micVizNormalizer.reset();
+      monitorVizNormalizer.reset();
       this.vizPushInFlight = false;
     };
 
@@ -222,10 +228,10 @@ export class RecordingDialog {
       transport.send(payload);
     };
 
-    const pushViz = (amp01: number) => {
+    const pushViz = (p: { mic01: number; monitor01: number }) => {
       try {
         this.vizPushInFlight = true;
-        const payload: WindowTransportMessage = { type: "recording/viz", payload: { amp01 } };
+        const payload: WindowTransportMessage = { type: "recording/viz", payload: p as any };
         transport.send(payload);
       } finally {
         this.vizPushInFlight = false;
@@ -240,16 +246,18 @@ export class RecordingDialog {
       }
     };
     const clearViz = () => {
-      vizNormalizer.reset();
-      pushViz(0);
+      micVizNormalizer.reset();
+      monitorVizNormalizer.reset();
+      pushViz({ mic01: 0, monitor01: 0 });
       pushVizClear();
     };
 
     this.params.recordingController.setOnStats((s) => pushStats(s));
-    this.params.recordingController.setOnViz((amp01) => {
+    this.params.recordingController.setOnViz((p) => {
       const st = this.params.recordingController.getStats();
       if (st.status !== "recording") return;
-      vizNormalizer.push(Number(amp01), Date.now());
+      micVizNormalizer.push(Number(p?.mic01 ?? 0), Date.now());
+      monitorVizNormalizer.push(Number(p?.monitor01 ?? 0), Date.now());
     });
     // Батч-пуш визуализации: 30fps, дропаем кадры если webContents занят.
     let lastVizStatus: RecordingStatus = "idle";
@@ -264,10 +272,12 @@ export class RecordingDialog {
         clearViz();
       }
       if (status === "paused" && lastVizStatus === "recording") {
-        vizNormalizer.pause(now);
+        micVizNormalizer.pause(now);
+        monitorVizNormalizer.pause(now);
       }
       if (status === "recording" && lastVizStatus === "paused") {
-        vizNormalizer.resume(now);
+        micVizNormalizer.resume(now);
+        monitorVizNormalizer.resume(now);
       }
       // Если запись на паузе — не сбрасываем буфер, просто не отправляем viz.
       if (status === "paused") {
@@ -284,13 +294,16 @@ export class RecordingDialog {
       }
       lastVizStatus = status;
 
-      const v = vizNormalizer.pull(now);
-      if (v == null) return;
+      const mic = micVizNormalizer.pull(now);
+      const monitor = monitorVizNormalizer.pull(now);
+      if (mic == null && monitor == null) return;
       if (now - lastVizLogAtMs > 1000) {
         lastVizLogAtMs = now;
-        this.params.onLog?.(`Визуализация: отправка viz в окно amp01=${Number(v).toFixed(3)}`);
+        this.params.onLog?.(
+          `Визуализация: отправка viz в окно mic01=${Number(mic ?? 0).toFixed(3)} monitor01=${Number(monitor ?? 0).toFixed(3)}`,
+        );
       }
-      pushViz(v);
+      pushViz({ mic01: Number(mic ?? 0), monitor01: Number(monitor ?? 0) });
     }, 33);
     this.statsTimer = window.setInterval(() => pushStats(this.params.recordingController.getStats()), 1000);
 
@@ -421,20 +434,27 @@ export class RecordingDialog {
         const m = msg as { type?: string; payload?: any };
         if (!m) return;
         if (m.type === "recording/viz-debug") {
-          const amp01 = Number(m.payload?.amp01 ?? 0);
+          const mic01 = Number(m.payload?.mic01 ?? 0);
+          const monitor01 = Number(m.payload?.monitor01 ?? 0);
           const w = Number(m.payload?.canvas?.w ?? 0);
           const h = Number(m.payload?.canvas?.h ?? 0);
-          this.params.onLog?.(`Визуализация: окно получило amp01=${amp01.toFixed(3)} canvas=${w}x${h}`);
+          this.params.onLog?.(
+            `Визуализация: окно получило mic01=${mic01.toFixed(3)} monitor01=${monitor01.toFixed(3)} canvas=${w}x${h}`,
+          );
           return;
         }
         if (m.type === "recording/diag") {
           const kind = String(m.payload?.kind ?? "");
           const w = Number(m.payload?.canvas?.w ?? 0);
           const h = Number(m.payload?.canvas?.h ?? 0);
-          const points = Number(m.payload?.points ?? 0);
-          const ampTarget = Number(m.payload?.ampTarget ?? 0);
+          const micPoints = Number(m.payload?.micPoints ?? m.payload?.points ?? 0);
+          const monitorPoints = Number(m.payload?.monitorPoints ?? 0);
+          const micTarget = Number(m.payload?.micTarget ?? m.payload?.ampTarget ?? 0);
+          const monitorTarget = Number(m.payload?.monitorTarget ?? 0);
           this.params.onLog?.(
-            `Визуализация: diag ${kind} canvas=${w}x${h} points=${points} ampTarget=${ampTarget.toFixed(3)}`,
+            `Визуализация: diag ${kind} canvas=${w}x${h} micPoints=${micPoints} monitorPoints=${monitorPoints} micTarget=${micTarget.toFixed(
+              3,
+            )} monitorTarget=${monitorTarget.toFixed(3)}`,
           );
         }
       } catch {

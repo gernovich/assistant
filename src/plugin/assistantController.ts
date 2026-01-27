@@ -38,9 +38,13 @@ import { DefaultRecordingController } from "../presentation/controllers/recordin
 import { DefaultLogController } from "../presentation/controllers/logController";
 import { AgendaController } from "../application/agenda/agendaController";
 import { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
+import {
+  listGStreamerRecordingSourcesViaPactl,
+  pickMicFromPactl as pickMicFromPactlPolicy,
+  pickMonitorFromPactl as pickMonitorFromPactlPolicy,
+} from "../recording/gstreamer/gstreamerPactl";
 import { commandExists } from "../os/commandExists";
 import { execFile as execFileNode, spawn as spawnNode } from "node:child_process";
-import { parsePactlDefaultSourceFromInfo, parsePactlListShortRows } from "../domain/policies/pactl";
 import * as fsNode from "node:fs";
 import * as pathNode from "node:path";
 import { createRequire as createRequireNode } from "node:module";
@@ -523,23 +527,11 @@ export class AssistantController {
   }
 
   private async pickMonitorFromPactl(): Promise<string> {
-    if (!(await commandExists("pactl"))) return "";
-    const sources = await this.execShell("pactl list short sources 2>/dev/null");
-    const rows = parsePactlListShortRows(sources.stdout);
-    const monitors = rows
-      .map((parts) => ({ name: String(parts[1] ?? "").trim(), state: String(parts[parts.length - 1] ?? "").toUpperCase() }))
-      .filter((x) => x.name.endsWith(".monitor"));
-    const running = monitors.find((x) => x.state === "RUNNING");
-    if (running) return running.name;
-    const idle = monitors.find((x) => x.state === "IDLE");
-    if (idle) return idle.name;
-    return monitors[0]?.name ?? "";
+    return await pickMonitorFromPactlPolicy();
   }
 
   private async pickMicFromPactl(): Promise<string> {
-    if (!(await commandExists("pactl"))) return "";
-    const info = await this.execShell("pactl info 2>/dev/null");
-    return parsePactlDefaultSourceFromInfo(info.stdout);
+    return await pickMicFromPactlPolicy();
   }
 
   // gst-kit нельзя безопасно require() в renderer (см. document/createRequire(app://...)).
@@ -759,22 +751,14 @@ export class AssistantController {
   }
 
   async listGStreamerRecordingSources(): Promise<{ micSources: string[]; monitorSources: string[] }> {
-    if (!(await commandExists("pactl"))) return { micSources: [], monitorSources: [] };
-    const out = await this.execShell("pactl list short sources 2>/dev/null");
-    const rows = parsePactlListShortRows(out.stdout);
-    const names = rows.map((r) => String(r[1] ?? "").trim()).filter(Boolean);
-    const monitorSources = names.filter((n) => n.endsWith(".monitor"));
-    const micSources = names.filter((n) => !n.endsWith(".monitor"));
-    return { micSources, monitorSources };
+    return await listGStreamerRecordingSourcesViaPactl();
   }
 
   async resolveGStreamerActualSource(params: { kind: "mic" | "monitor" }): Promise<string> {
     if (params.kind === "monitor") {
       return await this.pickMonitorFromPactl();
     }
-    if (!(await commandExists("pactl"))) return "";
-    const info = await this.execShell("pactl info 2>/dev/null");
-    return parsePactlDefaultSourceFromInfo(info.stdout);
+    return await this.pickMicFromPactl();
   }
 
   async refreshCalendars(): Promise<void> {

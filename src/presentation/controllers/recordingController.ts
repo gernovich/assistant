@@ -4,7 +4,7 @@ import type { Result } from "../../shared/result";
 
 export type RecordingController = {
   setOnStats: (cb?: (s: RecordingStats) => void) => void;
-  setOnViz: (cb?: (amp01: number) => void) => void;
+  setOnViz: (cb?: (p: { mic01: number; monitor01: number }) => void) => void;
   getStats: () => RecordingStats;
   start: (params: { ev?: Event; eventKey?: string; protocolFilePath?: string }) => Promise<void>;
   startResult: (params: { ev?: Event; eventKey?: string; protocolFilePath?: string }) => Promise<Result<void>>;
@@ -28,7 +28,7 @@ export class DefaultRecordingController implements RecordingController {
     this.svc.setOnStats(cb);
   }
 
-  setOnViz(cb?: (amp01: number) => void): void {
+  setOnViz(cb?: (p: { mic01: number; monitor01: number }) => void): void {
     this.svc.setOnViz(cb);
   }
 

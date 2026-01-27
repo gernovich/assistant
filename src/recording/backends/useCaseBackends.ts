@@ -5,6 +5,9 @@ import type { RecordingBackend, RecordingBackendId, RecordingBackendSessionHandl
 
 import type { ElectronSession } from "../recordingSessionTypes";
 import { ElectronMediaRecorderBackend } from "./electronMediaRecorderBackend";
+import { normalizePath } from "obsidian";
+import { recordingChunkFileName } from "../../domain/policies/recordingFileNaming";
+import { startGstKitRecordWorker, amp01FromDbfs } from "../gstreamer/gstKitNode";
 
 type Logger = {
   info: (message: string, data?: Record<string, unknown>) => void;
@@ -26,13 +29,38 @@ function asElectronHandle(h: RecordingBackendSessionHandle, log: Logger): Electr
   return h as ElectronHandle;
 }
 
+type GStreamerSession = {
+  backend: "g_streamer";
+  recordingsDir: string;
+  filePrefix: string;
+  eventKey?: string;
+  outVaultPath: string;
+  proc: ReturnType<typeof startGstKitRecordWorker> | null;
+  onFileSaved: (path: string) => void;
+};
+
+type GStreamerHandle = RecordingBackendSessionHandle & {
+  kind: "g_streamer";
+  session: GStreamerSession;
+};
+
+function asGStreamerHandle(h: RecordingBackendSessionHandle, log: Logger): GStreamerHandle | null {
+  if (h.kind !== "g_streamer") {
+    log.error("Запись: не совпадает тип хэндла бэкенда", { expected: "g_streamer", got: h.kind });
+    return null;
+  }
+  return h as GStreamerHandle;
+}
+
 export function createUseCaseRecordingBackends(params: {
   app: App;
   getSettings: () => AssistantSettings;
-  getOnViz: () => ((amp01: number) => void) | undefined;
+  getOnViz: () => ((p: { mic01: number; monitor01: number }) => void) | undefined;
+  pluginDirPath: string | null;
   log: Logger;
 }): Record<RecordingBackendId, RecordingBackend> {
   let activeElectronSession: ElectronSession | null = null;
+  let activeGStreamerSession: GStreamerSession | null = null;
 
   const writeBinary = async (path: string, data: ArrayBuffer) => {
     await params.app.vault.createBinary(path, data);
@@ -102,7 +130,7 @@ export function createUseCaseRecordingBackends(params: {
         if (paused) {
           if (s.vizTimer) window.clearInterval(s.vizTimer);
           s.vizTimer = undefined;
-          params.getOnViz()?.(0);
+          params.getOnViz()?.({ mic01: 0, monitor01: 0 });
         } else {
           if (!s.vizTimer && s.vizSample) s.vizTimer = window.setInterval(s.vizSample, 50);
         }
@@ -113,17 +141,141 @@ export function createUseCaseRecordingBackends(params: {
   };
 
   const gstreamerBackend: RecordingBackend = {
-    async startSession(): Promise<RecordingBackendSessionHandle> {
-      return await Promise.reject("GStreamer backend: еще не реализован (нужна интеграция gst-kit).");
+    async startSession(p: Parameters<RecordingBackend["startSession"]>[0]): Promise<RecordingBackendSessionHandle> {
+      if (!params.pluginDirPath) {
+        return await Promise.reject(
+          "GStreamer backend: pluginDirPath недоступен (нельзя запустить worker процесс с gst-kit).",
+        );
+      }
+
+      const s: GStreamerSession = {
+        backend: "g_streamer",
+        recordingsDir: p.recordingsDir,
+        filePrefix: p.filePrefix,
+        eventKey: p.eventKey,
+        outVaultPath: "",
+        proc: null,
+        onFileSaved: (path) => p.onFileSaved(path),
+      };
+
+      const startChunk = () => {
+        const settings = params.getSettings();
+        const rec = settings.recording;
+        const iso = new Date().toISOString();
+        const name = recordingChunkFileName({ prefix: s.filePrefix, iso, ext: "ogg" });
+        const outVaultPath = normalizePath(`${s.recordingsDir}/${name}`);
+        const outFsPath = (params.app.vault.adapter as any).getFullPath
+          ? (params.app.vault.adapter as any).getFullPath(outVaultPath)
+          : outVaultPath;
+        s.outVaultPath = outVaultPath;
+
+        // уровни: прокидываем в viz hub (без сглаживания)
+        const proc = startGstKitRecordWorker({
+          pluginDirPath: params.pluginDirPath!,
+          micSource: String(rec.gstreamerMicSource || "auto"),
+          monitorSource: String(rec.gstreamerMonitorSource || "auto"),
+          outFsPath: String(outFsPath),
+          processingMic: rec.gstreamerMicProcessing,
+          processingMonitor: rec.gstreamerMonitorProcessing,
+          levelIntervalMs: 100,
+          log: params.log,
+          onMessage: (m) => {
+            if (activeGStreamerSession !== s) return;
+            if (m.type === "level") {
+              const mic01 = amp01FromDbfs(m.micDb);
+              const monitor01 = amp01FromDbfs(m.monitorDb);
+              params.getOnViz()?.({ mic01, monitor01 });
+            }
+            if (m.type === "error") {
+              params.log.error("GStreamer worker error", { message: m.message, details: m.details as any });
+            }
+          },
+        });
+        s.proc = proc;
+      };
+
+      startChunk();
+      activeGStreamerSession = s;
+      const handle: GStreamerHandle = { kind: "g_streamer", session: s };
+      return handle;
     },
-    async startNewChunk() {
-      return await Promise.reject("GStreamer backend: еще не реализован (startNewChunk).");
+    async startNewChunk(handle: RecordingBackendSessionHandle) {
+      const h = asGStreamerHandle(handle, params.log);
+      if (!h) return;
+      const s = h.session;
+      if (activeGStreamerSession !== s) return;
+      // новый процесс -> новый файл
+      const settings = params.getSettings();
+      const rec = settings.recording;
+      const iso = new Date().toISOString();
+      const name = recordingChunkFileName({ prefix: s.filePrefix, iso, ext: "ogg" });
+      const outVaultPath = normalizePath(`${s.recordingsDir}/${name}`);
+      const outFsPath = (params.app.vault.adapter as any).getFullPath
+        ? (params.app.vault.adapter as any).getFullPath(outVaultPath)
+        : outVaultPath;
+      s.outVaultPath = outVaultPath;
+
+      const proc = startGstKitRecordWorker({
+        pluginDirPath: params.pluginDirPath!,
+        micSource: String(rec.gstreamerMicSource || "auto"),
+        monitorSource: String(rec.gstreamerMonitorSource || "auto"),
+        outFsPath: String(outFsPath),
+        processingMic: rec.gstreamerMicProcessing,
+        processingMonitor: rec.gstreamerMonitorProcessing,
+        levelIntervalMs: 100,
+        log: params.log,
+        onMessage: (m) => {
+          if (activeGStreamerSession !== s) return;
+          if (m.type === "level") {
+            const mic01 = amp01FromDbfs(m.micDb);
+            const monitor01 = amp01FromDbfs(m.monitorDb);
+            params.getOnViz()?.({ mic01, monitor01 });
+          }
+          if (m.type === "error") {
+            params.log.error("GStreamer worker error", { message: m.message, details: m.details as any });
+          }
+        },
+      });
+      s.proc = proc;
     },
-    async finalizeCurrentFile() {
-      return await Promise.reject("GStreamer backend: еще не реализован (finalizeCurrentFile).");
+    async finalizeCurrentFile(handle: RecordingBackendSessionHandle) {
+      const h = asGStreamerHandle(handle, params.log);
+      if (!h) return;
+      const s = h.session;
+      if (activeGStreamerSession !== s) return;
+      const proc = s.proc;
+      const outVaultPath = s.outVaultPath;
+      if (!proc) return;
+      s.proc = null;
+      try {
+        proc.stop();
+      } catch {
+        // ignore
+      }
+      // ждём завершение, чтобы файл был корректно закрыт (EOS)
+      const exit = await proc.waitExit();
+      if (exit.code !== 0) {
+        params.log.warn("GStreamer worker завершился неуспешно", { code: exit.code, signal: exit.signal });
+      }
+      if (outVaultPath) {
+        s.onFileSaved(outVaultPath);
+      }
+      // на всякий случай очищаем viz
+      params.getOnViz()?.({ mic01: 0, monitor01: 0 });
     },
-    async stopSession() {
-      return await Promise.reject("GStreamer backend: еще не реализован (stopSession).");
+    async stopSession(handle: RecordingBackendSessionHandle) {
+      const h = asGStreamerHandle(handle, params.log);
+      if (!h) return;
+      const s = h.session;
+      if (activeGStreamerSession === s) activeGStreamerSession = null;
+      // finalizeCurrentFile уже вызван из use-case перед stopSession, но на всякий случай:
+      if (s.proc) {
+        try {
+          await gstreamerBackend.finalizeCurrentFile(handle);
+        } catch {
+          // ignore
+        }
+      }
     },
   };
 

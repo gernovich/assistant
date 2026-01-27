@@ -75,7 +75,7 @@ export type RecordingStatsDto = {
   protocolFilePath?: string;
 };
 
-export type RecordingVizDto = { amp01: number };
+export type RecordingVizDto = { mic01: number; monitor01: number };
 
 // Конверт транспорта (не зависит от реализации)
 export type WindowTransportMessage =

@@ -144,6 +144,7 @@ export function createAssistantContainer(params: {
           app,
           getSettings: () => settingsRef.get(),
           getOnViz: () => viz.get(),
+          pluginDirPath: cc.resolve<PluginContextPaths>("assistant.paths").pluginDirPath,
           log: {
             info: (m, d) => log.info(m, d),
             warn: (m, d) => log.warn(m, d),

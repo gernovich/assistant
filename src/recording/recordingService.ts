@@ -28,7 +28,7 @@ export class RecordingService {
     this.deps.facade.setOnStats(cb);
   }
 
-  setOnViz(cb?: (amp01: number) => void) {
+  setOnViz(cb?: (p: { mic01: number; monitor01: number }) => void) {
     this.deps.viz.set(cb);
   }
 
@@ -66,13 +66,13 @@ export class RecordingService {
 
   async stop(): Promise<void> {
     await this.deps.facade.stop();
-    this.deps.viz.tryPush(0);
+    this.deps.viz.tryPush({ mic01: 0, monitor01: 0 });
   }
 
   async stopResult(): Promise<Result<void>> {
     const r = await this.deps.facade.stopResult();
     // даже при ошибке стопа пытаемся очистить визуализацию
-    this.deps.viz.tryPush(0);
+    this.deps.viz.tryPush({ mic01: 0, monitor01: 0 });
     return r;
   }
 }

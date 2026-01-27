@@ -255,8 +255,10 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         const rect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
         sendDiag("tick", {
           at: Date.now(),
-          points: state.ampPoints.length,
-          ampTarget: Number(state.ampTarget || 0),
+          micPoints: state.micPoints.length,
+          monitorPoints: state.monitorPoints.length,
+          micTarget: Number(state.micTarget || 0),
+          monitorTarget: Number(state.monitorTarget || 0),
           canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) },
         });
       }catch{}
@@ -337,13 +339,16 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       nextChunkInMs: 0,
       // история амплитуды за последние ~10 секунд (новое справа)
       // точки: [{t, v}] где t=Date.now(), v=0..1
-      ampPoints: [],
+      micPoints: [],
+      monitorPoints: [],
       ampMaxLen: 800,
       vizWindowMs: 10_000,
       // входной уровень (приходит из основного процесса) и плавная интерполяция в rAF
-      ampTarget: 0,
-      ampSmooth: 0,
-      ampLastFillAtMs: 0,
+      micTarget: 0,
+      monitorTarget: 0,
+      micSmooth: 0,
+      monitorSmooth: 0,
+      vizLastFillAtMs: 0,
       vizDebugLastAtMs: 0,
       drawDebugLastAtMs: 0,
       drawTimer: 0,
@@ -379,18 +384,24 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       if(protocolSel) protocolSel.value = "";
       state.eventSummary = "";
       // Сбрасываем осциллограмму (после стопа/простоя она должна быть пустой)
-      state.ampPoints = [];
-      state.ampTarget = 0;
-      state.ampSmooth = 0;
-      state.ampLastFillAtMs = Date.now();
+      state.micPoints = [];
+      state.monitorPoints = [];
+      state.micTarget = 0;
+      state.monitorTarget = 0;
+      state.micSmooth = 0;
+      state.monitorSmooth = 0;
+      state.vizLastFillAtMs = Date.now();
       state.pauseStartedAtMs = 0;
     }
 
     function resetVizState(){
-      state.ampPoints = [];
-      state.ampTarget = 0;
-      state.ampSmooth = 0;
-      state.ampLastFillAtMs = Date.now();
+      state.micPoints = [];
+      state.monitorPoints = [];
+      state.micTarget = 0;
+      state.monitorTarget = 0;
+      state.micSmooth = 0;
+      state.monitorSmooth = 0;
+      state.vizLastFillAtMs = Date.now();
       state.pauseStartedAtMs = 0;
     }
 
@@ -726,11 +737,15 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
         if(state.lastStatus === "paused" && state.pauseStartedAtMs){
           const delta = Date.now() - state.pauseStartedAtMs;
           if(delta > 0){
-            for(let i=0;i<state.ampPoints.length;i++){
-              const p = state.ampPoints[i];
+            for(let i=0;i<state.micPoints.length;i++){
+              const p = state.micPoints[i];
               if(p && typeof p.t === "number") p.t += delta;
             }
-            state.ampLastFillAtMs = (state.ampLastFillAtMs || Date.now()) + delta;
+            for(let i=0;i<state.monitorPoints.length;i++){
+              const p = state.monitorPoints[i];
+              if(p && typeof p.t === "number") p.t += delta;
+            }
+            state.vizLastFillAtMs = (state.vizLastFillAtMs || Date.now()) + delta;
           }
           state.pauseStartedAtMs = 0;
         }
@@ -758,11 +773,13 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     window.__assistantRecordingVizUpdate = (dto) => {
       if(state.switchingKind === "stop") return;
       if(!state.recording || state.paused) return;
-      const v = Number(dto && dto.amp01);
-      if(!Number.isFinite(v)) return;
+      const mic = Number(dto && (dto.mic01 != null ? dto.mic01 : dto.amp01));
+      const monitor = Number(dto && (dto.monitor01 != null ? dto.monitor01 : 0));
+      if(!Number.isFinite(mic) && !Number.isFinite(monitor)) return;
       // Важно: не пишем точки прямо здесь. Апдейты из основного процесса могут приходить редко (или пачками),
       // что визуально даёт “квадраты”. Вместо этого сохраняем цель, а точки наполняем равномерно в rAF.
-      state.ampTarget = Math.max(0, Math.min(1, v));
+      if(Number.isFinite(mic)) state.micTarget = Math.max(0, Math.min(1, mic));
+      if(Number.isFinite(monitor)) state.monitorTarget = Math.max(0, Math.min(1, monitor));
 
       // Диагностика доставки: раз в ~1с отправляем сигнал обратно в хост.
       try{
@@ -772,7 +789,12 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
           const rect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
           transport.send({
             type: "recording/viz-debug",
-            payload: { amp01: Number(v), canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) }, at: now },
+            payload: {
+              mic01: Number.isFinite(mic) ? Number(mic) : 0,
+              monitor01: Number.isFinite(monitor) ? Number(monitor) : 0,
+              canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) },
+              at: now
+            },
           });
         }
       }catch{}
@@ -790,10 +812,13 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
               window.__assistantRecordingVizUpdate && window.__assistantRecordingVizUpdate(msg.payload);
             }
             if(msg && msg.type === "recording/viz-clear"){
-              state.ampPoints = [];
-              state.ampTarget = 0;
-              state.ampSmooth = 0;
-              state.ampLastFillAtMs = Date.now();
+              state.micPoints = [];
+              state.monitorPoints = [];
+              state.micTarget = 0;
+              state.monitorTarget = 0;
+              state.micSmooth = 0;
+              state.monitorSmooth = 0;
+              state.vizLastFillAtMs = Date.now();
               state.pauseStartedAtMs = 0;
               stopDrawLoop();
             }
@@ -805,7 +830,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     function fillVizPoints(now){
       const windowMs = Math.max(1000, Number(state.vizWindowMs || 10_000));
       const horizon = windowMs + 2500;
-      let lastAt = Number(state.ampLastFillAtMs || 0);
+      let lastAt = Number(state.vizLastFillAtMs || 0);
       if(!lastAt) lastAt = now;
       // если мы “проспали” (например окно подвисло) — не догоняем бесконечно, просто перескочим.
       if(now - lastAt > horizon) lastAt = now - horizon;
@@ -813,14 +838,19 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       const stepMs = 33;
       for(let t = lastAt + stepMs; t <= now; t += stepMs){
         // Сглаживание (инерция): чтобы “пачки” апдейтов не выглядели дергано.
-        state.ampSmooth = (state.ampSmooth * 0.82) + (state.ampTarget * 0.18);
-        state.ampPoints.push({ t, v: state.ampSmooth });
+        state.micSmooth = (state.micSmooth * 0.82) + (state.micTarget * 0.18);
+        state.monitorSmooth = (state.monitorSmooth * 0.82) + (state.monitorTarget * 0.18);
+        state.micPoints.push({ t, v: state.micSmooth });
+        state.monitorPoints.push({ t, v: state.monitorSmooth });
       }
-      state.ampLastFillAtMs = now;
+      state.vizLastFillAtMs = now;
       // чистим старое
-      while(state.ampPoints.length && (now - state.ampPoints[0].t) > horizon) state.ampPoints.shift();
-      const extra = state.ampPoints.length - (state.ampMaxLen || 800);
-      if(extra > 0) state.ampPoints.splice(0, extra);
+      while(state.micPoints.length && (now - state.micPoints[0].t) > horizon) state.micPoints.shift();
+      while(state.monitorPoints.length && (now - state.monitorPoints[0].t) > horizon) state.monitorPoints.shift();
+      const extraMic = state.micPoints.length - (state.ampMaxLen || 800);
+      if(extraMic > 0) state.micPoints.splice(0, extraMic);
+      const extraMon = state.monitorPoints.length - (state.ampMaxLen || 800);
+      if(extraMon > 0) state.monitorPoints.splice(0, extraMon);
     }
 
     function draw(){
@@ -839,10 +869,11 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       const w = canvas.width, h = canvas.height;
       ctx.clearRect(0,0,w,h);
 
-      const ptsAll = state.ampPoints;
+      const ptsMicAll = state.micPoints;
+      const ptsMonAll = state.monitorPoints;
       const now = Date.now();
       fillVizPoints(now);
-      if(!ptsAll || ptsAll.length < 2) { return; }
+      if((!ptsMicAll || ptsMicAll.length < 2) && (!ptsMonAll || ptsMonAll.length < 2)) { return; }
 
       // рисуем только справа от кнопки записи (как в макете)
       const btnRect = recBtn && recBtn.getBoundingClientRect ? recBtn.getBoundingClientRect() : null;
@@ -864,65 +895,84 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       // Инвертируем ось времени: "звук исходит из кнопки" (новое слева, старое уезжает вправо)
       // Рисуем сплошной заливкой, без контура.
       const windowMs = Math.max(1000, Number(state.vizWindowMs || 10_000));
-      const points = [];
-      // Берём только последние N секунд. Новое (age=0) рисуем у кнопки.
-      for(let i = ptsAll.length - 1; i >= 0; i--){
-        const p0 = ptsAll[i];
-        const ageMs = now - Number(p0.t || 0);
-        if(ageMs < 0) continue;
-        if(ageMs > windowMs) break;
-        const t = ageMs / windowMs; // 0..1
-        // Гамма-коррекция для заметности тихих уровней (иначе 0.02..0.08 выглядит почти "плоско").
-        const v0 = Math.max(0, Math.min(1, Number(p0.v||0)));
-        const v = Math.pow(v0, 0.55);
-        const x = startX + Math.floor(t * drawW);
-        points.push({ x, v });
+      function buildPoints(ptsAll){
+        const points = [];
+        if(!ptsAll || !ptsAll.length) return points;
+        // Берём только последние N секунд. Новое (age=0) рисуем у кнопки.
+        for(let i = ptsAll.length - 1; i >= 0; i--){
+          const p0 = ptsAll[i];
+          const ageMs = now - Number(p0.t || 0);
+          if(ageMs < 0) continue;
+          if(ageMs > windowMs) break;
+          const t = ageMs / windowMs; // 0..1
+          // Гамма-коррекция для заметности тихих уровней (иначе 0.02..0.08 выглядит почти "плоско").
+          const v0 = Math.max(0, Math.min(1, Number(p0.v||0)));
+          const v = Math.pow(v0, 0.55);
+          const x = startX + Math.floor(t * drawW);
+          points.push({ x, v });
+        }
+        return points;
       }
+      const pointsMic = buildPoints(ptsMicAll);
+      const pointsMon = buildPoints(ptsMonAll);
       const nowDiag = Date.now();
       if(!state.drawDebugLastAtMs || (nowDiag - state.drawDebugLastAtMs) > 1000){
         state.drawDebugLastAtMs = nowDiag;
-        sendDiag("draw", { points: points.length, ampTarget: Number(state.ampTarget || 0), canvas: { w: Math.round(canvasRect.width||0), h: Math.round(canvasRect.height||0) } });
+        sendDiag("draw", {
+          micPoints: pointsMic.length,
+          monitorPoints: pointsMon.length,
+          micTarget: Number(state.micTarget || 0),
+          monitorTarget: Number(state.monitorTarget || 0),
+          canvas: { w: Math.round(canvasRect.width||0), h: Math.round(canvasRect.height||0) }
+        });
       }
-      if(points.length < 2){
-        if(state.ampTarget > 0.005){
-          const p = { x: startX + Math.floor(drawW * 0.02), v: Math.pow(Math.max(0, Math.min(1, state.ampTarget)), 0.55) };
-          ctx.globalAlpha = 0.95;
-          ctx.strokeStyle = "rgba(255,255,255,0.55)";
-          ctx.lineWidth = Math.max(1, Math.floor(1.2 * dpr));
-          ctx.beginPath();
-          ctx.moveTo(p.x, mid - p.v * ampScale);
-          ctx.lineTo(p.x, mid + p.v * ampScale);
-          ctx.stroke();
+      function drawChannel(points, fillStyle, strokeStyle, target){
+        if(!points || points.length < 2){
+          if(target > 0.005){
+            const p = { x: startX + Math.floor(drawW * 0.02), v: Math.pow(Math.max(0, Math.min(1, target)), 0.55) };
+            ctx.globalAlpha = 0.95;
+            ctx.strokeStyle = strokeStyle;
+            ctx.lineWidth = Math.max(1, Math.floor(1.2 * dpr));
+            ctx.beginPath();
+            ctx.moveTo(p.x, mid - p.v * ampScale);
+            ctx.lineTo(p.x, mid + p.v * ampScale);
+            ctx.stroke();
+          }
+          return;
         }
-        return;
+
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = fillStyle;
+
+        ctx.beginPath();
+        for(let i=0;i<points.length;i++){
+          const p = points[i];
+          const y = mid - p.v * ampScale;
+          if(i===0) ctx.moveTo(p.x, y); else ctx.lineTo(p.x, y);
+        }
+        for(let i=points.length-1;i>=0;i--){
+          const p = points[i];
+          const y = mid + p.v * ampScale;
+          ctx.lineTo(p.x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.globalAlpha = 0.92;
+        ctx.lineWidth = Math.max(1, Math.floor(1.1 * dpr));
+        ctx.strokeStyle = strokeStyle;
+        ctx.beginPath();
+        for(let i=0;i<points.length;i++){
+          const p = points[i];
+          const y = mid - p.v * ampScale;
+          if(i===0) ctx.moveTo(p.x, y); else ctx.lineTo(p.x, y);
+        }
+        ctx.stroke();
       }
 
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = "rgba(255,255,255,0.22)";
-
-      ctx.beginPath();
-      for(let i=0;i<points.length;i++){
-        const p = points[i];
-        const y = mid - p.v * ampScale;
-        if(i===0) ctx.moveTo(p.x, y); else ctx.lineTo(p.x, y);
-      }
-      for(let i=points.length-1;i>=0;i--){
-        const p = points[i];
-        const y = mid + p.v * ampScale;
-        ctx.lineTo(p.x, y);
-      }
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.lineWidth = Math.max(1, Math.floor(1.1 * dpr));
-      ctx.strokeStyle = "rgba(255,255,255,0.28)";
-      ctx.beginPath();
-      for(let i=0;i<points.length;i++){
-        const p = points[i];
-        const y = mid - p.v * ampScale;
-        if(i===0) ctx.moveTo(p.x, y); else ctx.lineTo(p.x, y);
-      }
-      ctx.stroke();
+      // mic: жёлтый, monitor: синий
+      drawChannel(pointsMon, "rgba(80,160,255,0.18)", "rgba(80,160,255,0.40)", Number(state.monitorTarget||0));
+      drawChannel(pointsMic, "rgba(255,220,0,0.18)", "rgba(255,220,0,0.45)", Number(state.micTarget||0));
 
       ctx.restore();
 
