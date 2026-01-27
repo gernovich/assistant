@@ -15,8 +15,7 @@ import { linuxNativeFfmpegArgsPolicy } from "../../domain/policies/linuxNativeFf
 import { buildLinuxNativeSourceAttemptPlan } from "../../domain/policies/linuxNativeSourcePlan";
 import { buildPulseMicCandidates, parsePactlDefaultSourceFromInfo } from "../../domain/policies/pactl";
 import { parseMomentaryLufsFromEbur128Line } from "../../domain/policies/ebur128";
-import { shouldEmitByInterval } from "../../domain/policies/rateLimit";
-import { amp01FromLufsPolicy, amp01FromRmsPolicy, smoothAmp01Policy } from "../../domain/policies/recordingVizAmp";
+import { amp01FromLufsPolicy, amp01FromRmsPolicy } from "../../domain/policies/recordingVizAmp";
 import { rms01FromS16leMonoFrame } from "../../domain/policies/pcmRms";
 import { trimForLogPolicy } from "../../domain/policies/logText";
 
@@ -213,15 +212,8 @@ export class LinuxFfmpegBackend {
           for (const line of lines) {
             const lufs = parseMomentaryLufsFromEbur128Line(line);
             if (lufs == null) continue;
-            const amp01raw = amp01FromLufsPolicy(lufs);
-            const prev = Number(session.native.lastAmp01 ?? 0);
-            const amp01 = smoothAmp01Policy({ prev, raw: amp01raw, alpha: 0.25 });
+            const amp01 = amp01FromLufsPolicy(lufs);
             session.native.lastAmp01 = amp01;
-
-            const now = Date.now();
-            const lastAt = Number(session.native.lastVizAtMs ?? 0);
-            if (!shouldEmitByInterval({ nowMs: now, lastAtMs: lastAt, intervalMs: 50 })) continue;
-            session.native.lastVizAtMs = now;
 
             if (this.params.isActiveSession(session) && session.status !== "paused") {
               this.params.getOnViz()?.(amp01);
@@ -254,16 +246,10 @@ export class LinuxFfmpegBackend {
               const n = 200;
               const rms = rms01FromS16leMonoFrame(frame, n);
               const { amp01raw } = amp01FromRmsPolicy(rms);
-              const prev = Number(session.native.lastAmp01 ?? 0);
-              const amp01 = smoothAmp01Policy({ prev, raw: amp01raw, alpha: 0.25 });
+              const amp01 = amp01raw;
               session.native.lastAmp01 = amp01;
 
-              const now = Date.now();
-              const lastAt = Number(session.native.lastVizAtMs ?? 0);
-              if (shouldEmitByInterval({ nowMs: now, lastAtMs: lastAt, intervalMs: 25 })) {
-                session.native.lastVizAtMs = now;
-                if (this.params.isActiveSession(session) && session.status !== "paused") this.params.getOnViz()?.(amp01);
-              }
+              if (this.params.isActiveSession(session) && session.status !== "paused") this.params.getOnViz()?.(amp01);
             }
             session.native.vizPcmBuf = off ? buf.subarray(off) : buf;
           } catch (e) {
@@ -289,6 +275,7 @@ export class LinuxFfmpegBackend {
         });
         try {
           proc.kill("SIGKILL");
+          
         } catch (e) {
           this.params.log.warn("Linux Native: не удалось остановить ffmpeg (SIGKILL) после быстрого выхода", { error: e });
         }

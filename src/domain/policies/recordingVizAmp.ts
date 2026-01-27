@@ -1,17 +1,9 @@
 /**
- * Политика: преобразование метрик уровня звука в amp01 (0..1) + сглаживание.
+ * Политика: преобразование метрик уровня звука в amp01 (0..1).
  */
 
 function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
-}
-
-/** Exponential smoothing: prev*(1-alpha) + raw*alpha */
-export function smoothAmp01Policy(params: { prev: number; raw: number; alpha: number }): number {
-  const prev = Number(params.prev) || 0;
-  const raw = Number(params.raw) || 0;
-  const a = clamp01(Number(params.alpha));
-  return clamp01(prev * (1 - a) + raw * a);
 }
 
 /** Mapping for ebur128 momentary loudness M: LUFS -> 0..1 using range ~[-70..-20]. */
