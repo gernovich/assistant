@@ -15,8 +15,6 @@ export type RecordingDialogUseCaseDeps = {
   getEvents: () => Event[];
   getRecordingsProtocolsList: (limit: number) => Array<{ path: string; label: string }>;
 
-  warnLinuxNativeDepsOnOpen: () => void;
-
   createProtocolFromEvent: (ev: Event) => Promise<string>; // возвращает путь файла протокола
   createEmptyProtocolAndOpen: () => Promise<string>; // возвращает путь файла протокола
   openProtocolByPath: (protocolFilePath: string) => Promise<void>;
@@ -46,10 +44,6 @@ export class RecordingDialogUseCase {
   constructor(private readonly deps: RecordingDialogUseCaseDeps) {}
 
   openResult(preferredEvent?: Event): Result<{ opened: boolean; skipped: boolean }> {
-    // Ранний сигнал: если выбран "Linux Native" и не хватает зависимостей — покажем уведомление сразу при открытии окна.
-    // Если всё ок — молчим.
-    this.deps.warnLinuxNativeDepsOnOpen();
-
     const settings = this.deps.getSettings();
     const events = this.deps.getEvents();
 

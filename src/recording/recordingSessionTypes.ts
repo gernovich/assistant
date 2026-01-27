@@ -1,7 +1,7 @@
 export type RecordingStatus = "idle" | "recording" | "paused";
 
 export type BaseSession = {
-  backend: "electron_media_devices" | "linux_native";
+  backend: "electron_media_devices" | "g_streamer";
   status: "recording" | "paused";
   startedAtMs: number;
   /** Время старта текущего файла/чанка (нужно для корректной длительности в WebM). */
@@ -40,22 +40,3 @@ export type ElectronSession = BaseSession & {
   vizTimer?: number;
 };
 
-export type LinuxNativeSession = BaseSession & {
-  backend: "linux_native";
-  native: {
-    proc: import("child_process").ChildProcess | null;
-    tmpPath: string | null;
-    ext: "ogg";
-    stderrTail: string;
-    monitorName?: string;
-    vizBuf?: string;
-    lastAmp01?: number;
-    lastVizAtMs?: number;
-    lastVizParseErrAtMs?: number;
-    lastVizDebugAtMs?: number;
-    stopRequestedAtMs?: number;
-    vizPcmBuf?: Buffer;
-    vizPcmFrames?: number;
-    vizPcmFramesAtMs?: number;
-  };
-};

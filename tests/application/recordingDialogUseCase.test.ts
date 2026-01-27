@@ -15,7 +15,6 @@ function makeEvent(): Event {
 
 describe("RecordingDialogUseCase", () => {
   it("передаёт preferredEvent как locked defaultEventKey", () => {
-    const warnLinuxNativeDepsOnOpen = vi.fn();
     const dlgOpen = vi.fn();
     const dialogFactory = vi.fn().mockImplementation((p) => {
       const ev = makeEvent();
@@ -28,7 +27,6 @@ describe("RecordingDialogUseCase", () => {
       getSettings: () => structuredClone(DEFAULT_SETTINGS),
       getEvents: () => [makeEvent()],
       getRecordingsProtocolsList: () => [],
-      warnLinuxNativeDepsOnOpen,
       createProtocolFromEvent: async () => "p.md",
       createEmptyProtocolAndOpen: async () => "p2.md",
       openProtocolByPath: async () => undefined,
@@ -39,7 +37,6 @@ describe("RecordingDialogUseCase", () => {
     });
 
     uc.open(makeEvent());
-    expect(warnLinuxNativeDepsOnOpen).toHaveBeenCalledTimes(1);
     expect(dlgOpen).toHaveBeenCalledTimes(1);
   });
 
@@ -51,7 +48,6 @@ describe("RecordingDialogUseCase", () => {
       getSettings: () => structuredClone(DEFAULT_SETTINGS),
       getEvents: () => [],
       getRecordingsProtocolsList: () => [],
-      warnLinuxNativeDepsOnOpen: vi.fn(),
       createProtocolFromEvent: async () => "p.md",
       createEmptyProtocolAndOpen: async () => "p2.md",
       openProtocolByPath: async () => undefined,
@@ -75,7 +71,6 @@ describe("RecordingDialogUseCase", () => {
       getSettings: () => structuredClone(DEFAULT_SETTINGS),
       getEvents: () => [],
       getRecordingsProtocolsList: () => [],
-      warnLinuxNativeDepsOnOpen: vi.fn(),
       createProtocolFromEvent: async () => "p.md",
       createEmptyProtocolAndOpen: async () => "p2.md",
       openProtocolByPath: async () => undefined,
@@ -106,7 +101,6 @@ describe("RecordingDialogUseCase", () => {
       getSettings: () => structuredClone(DEFAULT_SETTINGS),
       getEvents: () => [makeEvent()],
       getRecordingsProtocolsList: () => [],
-      warnLinuxNativeDepsOnOpen: vi.fn(),
       createProtocolFromEvent: async () => "p.md",
       createEmptyProtocolAndOpen: async () => "p2.md",
       openProtocolByPath: async () => undefined,

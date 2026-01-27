@@ -167,25 +167,22 @@ export interface AssistantSettings {
     /**
      * Механизм записи звука.
      *
-     * - `electron_media_devices` (MVP, сейчас): пишем микрофон через `navigator.mediaDevices.getUserMedia` + `MediaRecorder`.
+     * - `electron_media_devices`: пишем микрофон через `navigator.mediaDevices.getUserMedia` + `MediaRecorder`.
      *   Плюсы: не требует внешних бинарников. Минусы: ограничения Chromium/Electron.
      *
-     * - `linux_native`: запись через системные утилиты (например `ffmpeg`, PipeWire/Pulse) без участия Chromium.
-     *   Плюсы: больше контроля над источниками и миксом. Минусы: нужны зависимости в системе.
+     * - `g_streamer`: запись через GStreamer в системе (Linux).
      *
      * Совместимость: старое значение `electron_desktop_capturer` при чтении настроек маппится в `electron_media_devices`.
      */
-    audioBackend: "electron_media_devices" | "linux_native";
-    /**
-     * Пост-обработка аудио для Linux Native (ffmpeg filtergraph).
-     *
-     * - `none`: без обработки (только микс mic+monitor)
-     * - `normalize`: нормализация громкости (EBU-like one-pass) + лимитер
-     * - `voice`: лёгкий "голосовой" пресет (EQ+мягкий denoise на микрофоне) + нормализация + лимитер
-     *
-     * Важно: агрессивный шумодав после микса может ухудшать системный звук, поэтому `voice` обрабатывает только mic-вход.
-     */
-    linuxNativeAudioProcessing: "none" | "normalize" | "voice";
+    audioBackend: "electron_media_devices" | "g_streamer";
+    /** Источник микрофона для GStreamer (auto = системный default). */
+    gstreamerMicSource: string;
+    /** Источник монитора для GStreamer (auto = системный default). */
+    gstreamerMonitorSource: string;
+    /** Обработка микрофона для GStreamer. */
+    gstreamerMicProcessing: "none" | "normalize" | "voice";
+    /** Обработка монитора для GStreamer. */
+    gstreamerMonitorProcessing: "none" | "normalize" | "voice";
     /** Автостарт записи, если выбранное событие уже идёт. */
     autoStartEnabled: boolean;
     /** Тайминг автостарта записи (секунды). По умолчанию 5. */

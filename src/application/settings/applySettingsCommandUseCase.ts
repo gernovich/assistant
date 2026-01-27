@@ -177,13 +177,17 @@ function applySettingsCommandMutate(s: AssistantSettings, cmd: SettingsCommand, 
 
     case "recording.update": {
       const p = cmd.patch ?? {};
-      if (p.audioBackend === "linux_native" || p.audioBackend === "electron_media_devices") s.recording.audioBackend = p.audioBackend;
+      if (p.audioBackend === "electron_media_devices" || p.audioBackend === "g_streamer") s.recording.audioBackend = p.audioBackend;
+      if (typeof p.gstreamerMicSource === "string") s.recording.gstreamerMicSource = p.gstreamerMicSource.trim() || "auto";
+      if (typeof p.gstreamerMonitorSource === "string") s.recording.gstreamerMonitorSource = p.gstreamerMonitorSource.trim() || "auto";
+      if (p.gstreamerMicProcessing === "none" || p.gstreamerMicProcessing === "normalize" || p.gstreamerMicProcessing === "voice")
+        s.recording.gstreamerMicProcessing = p.gstreamerMicProcessing;
       if (
-        p.linuxNativeAudioProcessing === "none" ||
-        p.linuxNativeAudioProcessing === "normalize" ||
-        p.linuxNativeAudioProcessing === "voice"
+        p.gstreamerMonitorProcessing === "none" ||
+        p.gstreamerMonitorProcessing === "normalize" ||
+        p.gstreamerMonitorProcessing === "voice"
       )
-        s.recording.linuxNativeAudioProcessing = p.linuxNativeAudioProcessing;
+        s.recording.gstreamerMonitorProcessing = p.gstreamerMonitorProcessing;
       if (typeof p.chunkMinutes === "number") s.recording.chunkMinutes = sanitizePositiveOrDefault(p.chunkMinutes, 5, { max: 180 });
       if (typeof p.autoStartEnabled === "boolean") s.recording.autoStartEnabled = p.autoStartEnabled;
       if (typeof p.autoStartSeconds === "number")

@@ -42,8 +42,11 @@ export type NotificationsPatch = {
 };
 
 export type RecordingPatch = {
-  audioBackend: "electron_media_devices" | "linux_native";
-  linuxNativeAudioProcessing: "none" | "normalize" | "voice";
+  audioBackend: "electron_media_devices" | "g_streamer";
+  gstreamerMicSource: string;
+  gstreamerMonitorSource: string;
+  gstreamerMicProcessing: "none" | "normalize" | "voice";
+  gstreamerMonitorProcessing: "none" | "normalize" | "voice";
   chunkMinutes: number;
   autoStartEnabled: boolean;
   autoStartSeconds: number;

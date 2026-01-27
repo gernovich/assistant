@@ -24,7 +24,7 @@ describe("settingsStore", () => {
 
   it("normalizeSettings: recording.audioBackend по умолчанию electron_media_devices и валидируется (+ backward compat)", () => {
     expect(normalizeSettings({}).recording.audioBackend).toBe("electron_media_devices");
-    expect(normalizeSettings({ recording: { audioBackend: "linux_native" } }).recording.audioBackend).toBe("linux_native");
+    expect(normalizeSettings({ recording: { audioBackend: "g_streamer" } }).recording.audioBackend).toBe("g_streamer");
     // backward compat
     expect(normalizeSettings({ recording: { audioBackend: "electron_desktop_capturer" } as any }).recording.audioBackend).toBe(
       "electron_media_devices",

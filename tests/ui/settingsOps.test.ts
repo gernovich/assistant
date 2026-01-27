@@ -163,7 +163,7 @@ describe("Settings UI operations use settingsOps port", () => {
     expect(buttons.some((b) => b.text === "Открыть файл")).toBe(false);
   });
 
-  it("recordingSection (linux_native): кнопка 'Проверить' вызывает checkLinuxNativeRecordingDependencies()", async () => {
+  it("recordingSection (g_streamer): кнопка 'Проверить' вызывает checkGStreamerRecordingDependencies()", async () => {
     const buttons: ButtonRec[] = [];
     installObsidianSettingMock(buttons);
     const { renderRecordingSection } = await importSection<{ renderRecordingSection: any }>(
@@ -173,14 +173,21 @@ describe("Settings UI operations use settingsOps port", () => {
     const plugin = {
       settings: {
         recording: {
-          audioBackend: "linux_native",
-          linuxNativeAudioProcessing: "normalize",
+          audioBackend: "g_streamer",
+          gstreamerMicSource: "auto",
+          gstreamerMonitorSource: "auto",
+          gstreamerMicProcessing: "none",
+          gstreamerMonitorProcessing: "none",
           chunkMinutes: 5,
           autoStartEnabled: true,
           autoStartSeconds: 5,
         },
       },
-      settingsOps: { checkLinuxNativeRecordingDependencies: vi.fn(async () => undefined) },
+      settingsOps: {
+        checkGStreamerRecordingDependencies: vi.fn(async () => undefined),
+        listGStreamerRecordingSources: vi.fn(async () => ({ micSources: [], monitorSources: [] })),
+        probeGStreamerLevel: vi.fn(async () => ({ rmsDb: -60 })),
+      },
       applySettingsCommand: vi.fn(async () => undefined),
     } as any;
 
@@ -188,7 +195,7 @@ describe("Settings UI operations use settingsOps port", () => {
     const checkBtn = buttons.find((b) => b.text === "Проверить");
     expect(checkBtn?.onClick).toBeTypeOf("function");
     await checkBtn!.onClick!();
-    expect(plugin.settingsOps.checkLinuxNativeRecordingDependencies).toHaveBeenCalledTimes(1);
+    expect(plugin.settingsOps.checkGStreamerRecordingDependencies).toHaveBeenCalledTimes(1);
   });
 
   it("calendarBlock: кнопка 'Обновить' вызывает settingsOps.refreshCalendar(cal.id)", async () => {

@@ -26,7 +26,7 @@ describe("RecordingUseCase", () => {
     const be = makeFakeBackend("electron_media_devices");
     const backends: Record<RecordingBackendId, RecordingBackend> = {
       electron_media_devices: be,
-      linux_native: makeFakeBackend("linux_native"),
+      g_streamer: makeFakeBackend("g_streamer"),
     };
 
     const uc = new RecordingUseCase({
@@ -57,7 +57,7 @@ describe("RecordingUseCase", () => {
   });
 
   it("getStats отражает idle/recording/paused", async () => {
-    const be = makeFakeBackend("linux_native");
+    const be = makeFakeBackend("g_streamer");
     const uc = new RecordingUseCase({
       nowMs: () => 1000,
       setInterval: () => 1,
@@ -65,11 +65,11 @@ describe("RecordingUseCase", () => {
       shouldRotateChunk: () => false,
       nextChunkInMs: () => 123,
       ensureRecordingsDir: async () => undefined,
-      backends: { electron_media_devices: makeFakeBackend("electron_media_devices"), linux_native: be },
+      backends: { electron_media_devices: makeFakeBackend("electron_media_devices"), g_streamer: be },
     });
 
     expect(uc.getStats().status).toBe("idle");
-    await uc.start({ backend: "linux_native", recordingsDir: "x", filePrefix: "p", chunkEveryMs: 1000 });
+    await uc.start({ backend: "g_streamer", recordingsDir: "x", filePrefix: "p", chunkEveryMs: 1000 });
     expect(uc.getStats().status).toBe("recording");
     await uc.pause();
     expect(uc.getStats().status).toBe("paused");
@@ -101,7 +101,7 @@ describe("RecordingUseCase", () => {
       shouldRotateChunk: () => false,
       nextChunkInMs: () => 0,
       ensureRecordingsDir: async () => undefined,
-      backends: { electron_media_devices: be, linux_native: makeFakeBackend("linux_native") },
+      backends: { electron_media_devices: be, g_streamer: makeFakeBackend("g_streamer") },
     });
 
     await uc.start({ backend: "electron_media_devices", recordingsDir: "x", filePrefix: "p", chunkEveryMs: 1000 });

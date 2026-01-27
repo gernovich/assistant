@@ -3,9 +3,8 @@ import type { App } from "obsidian";
 import type { AssistantSettings } from "../../types";
 import type { RecordingBackend, RecordingBackendId, RecordingBackendSessionHandle } from "../../application/recording/recordingUseCase";
 
-import type { ElectronSession, LinuxNativeSession } from "../recordingSessionTypes";
+import type { ElectronSession } from "../recordingSessionTypes";
 import { ElectronMediaRecorderBackend } from "./electronMediaRecorderBackend";
-import { LinuxFfmpegBackend } from "./linuxFfmpegBackend";
 
 type Logger = {
   info: (message: string, data?: Record<string, unknown>) => void;
@@ -19,26 +18,12 @@ type ElectronHandle = RecordingBackendSessionHandle & {
   session: ElectronSession;
 };
 
-type LinuxHandle = RecordingBackendSessionHandle & {
-  kind: "linux_native";
-  impl: LinuxFfmpegBackend;
-  session: LinuxNativeSession;
-};
-
 function asElectronHandle(h: RecordingBackendSessionHandle, log: Logger): ElectronHandle | null {
   if (h.kind !== "electron_media_devices") {
     log.error("Запись: не совпадает тип хэндла бэкенда", { expected: "electron_media_devices", got: h.kind });
     return null;
   }
   return h as ElectronHandle;
-}
-
-function asLinuxHandle(h: RecordingBackendSessionHandle, log: Logger): LinuxHandle | null {
-  if (h.kind !== "linux_native") {
-    log.error("Запись: не совпадает тип хэндла бэкенда", { expected: "linux_native", got: h.kind });
-    return null;
-  }
-  return h as LinuxHandle;
 }
 
 export function createUseCaseRecordingBackends(params: {
@@ -48,7 +33,6 @@ export function createUseCaseRecordingBackends(params: {
   log: Logger;
 }): Record<RecordingBackendId, RecordingBackend> {
   let activeElectronSession: ElectronSession | null = null;
-  let activeLinuxSession: LinuxNativeSession | null = null;
 
   const writeBinary = async (path: string, data: ArrayBuffer) => {
     await params.app.vault.createBinary(path, data);
@@ -128,74 +112,23 @@ export function createUseCaseRecordingBackends(params: {
     },
   };
 
-  const linuxBackend: RecordingBackend = {
-    async startSession(p: Parameters<RecordingBackend["startSession"]>[0]): Promise<RecordingBackendSessionHandle> {
-      const now = Date.now();
-      const s: LinuxNativeSession = {
-        backend: "linux_native",
-        status: "recording",
-        startedAtMs: now,
-        currentFileStartedAtMs: now,
-        filesTotal: 0,
-        filesRecognized: 0,
-        foundProjects: 0,
-        foundFacts: 0,
-        foundPeople: 0,
-        recordingsDir: p.recordingsDir,
-        filePrefix: p.filePrefix,
-        eventKey: p.eventKey,
-        chunkEveryMs: 0,
-        lastChunkAtMs: now,
-        pendingWrites: new Set(),
-        native: { proc: null, tmpPath: null, ext: "ogg", stderrTail: "" },
-      };
-
-      const impl = new LinuxFfmpegBackend({
-        getSettings: params.getSettings,
-        isActiveSession: (x) => activeLinuxSession === x,
-        getOnViz: params.getOnViz,
-        log: params.log,
-        writeBinary,
-        onFileSaved: (path) => p.onFileSaved(path),
-      });
-
-      await impl.startChunk(s);
-      activeLinuxSession = s;
-      const handle: LinuxHandle = { kind: "linux_native", impl, session: s };
-      return handle;
+  const gstreamerBackend: RecordingBackend = {
+    async startSession(): Promise<RecordingBackendSessionHandle> {
+      return await Promise.reject("GStreamer backend: еще не реализован (нужна интеграция gst-kit).");
     },
-    async startNewChunk(handle: RecordingBackendSessionHandle) {
-      const h = asLinuxHandle(handle, params.log);
-      if (!h) return;
-      await h.impl.startChunk(h.session);
+    async startNewChunk() {
+      return await Promise.reject("GStreamer backend: еще не реализован (startNewChunk).");
     },
-    async finalizeCurrentFile(handle: RecordingBackendSessionHandle) {
-      const h = asLinuxHandle(handle, params.log);
-      if (!h) return;
-      await h.impl.finalizeFile(h.session);
+    async finalizeCurrentFile() {
+      return await Promise.reject("GStreamer backend: еще не реализован (finalizeCurrentFile).");
     },
-    async stopSession(handle: RecordingBackendSessionHandle) {
-      const h = asLinuxHandle(handle, params.log);
-      if (!h) return;
-      const s = h.session;
-      if (activeLinuxSession === s) activeLinuxSession = null;
-      await h.impl.stopProc(s);
-    },
-    setPaused(handle: RecordingBackendSessionHandle, paused: boolean) {
-      const h = asLinuxHandle(handle, params.log);
-      if (!h) return;
-      const s = h.session;
-      s.status = paused ? "paused" : "recording";
-      try {
-        if (paused) params.getOnViz()?.(0);
-      } catch {
-        // Игнорируем ошибки обновления визуализации.
-      }
+    async stopSession() {
+      return await Promise.reject("GStreamer backend: еще не реализован (stopSession).");
     },
   };
 
   return {
     electron_media_devices: electronBackend,
-    linux_native: linuxBackend,
+    g_streamer: gstreamerBackend,
   };
 }

@@ -104,7 +104,6 @@ export class RecordingFacade {
     this.deps.log.info("Запись: старт", {
       backend,
       chunkMinutes,
-      processing: this.settings.recording.linuxNativeAudioProcessing ?? "normalize",
       eventKey: params.eventKey,
       protocolFilePath: params.protocolFilePath,
     });

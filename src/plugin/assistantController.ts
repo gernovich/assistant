@@ -24,7 +24,6 @@ import { CalendarRefreshUseCase } from "../application/calendar/calendarRefreshU
 import { RecordingDialogUseCase } from "../application/recording/recordingDialogUseCase";
 import { AutoRefreshUseCase } from "../application/calendar/autoRefreshUseCase";
 import { RecordingDialog } from "../recording/recordingDialog";
-import { commandExists } from "../os/commandExists";
 import { CaldavProvider } from "../calendar/providers/caldavProvider";
 import { runGoogleLoopbackOAuth } from "../caldav/googleOauth";
 import { AuthorizeGoogleCaldavUseCase } from "../application/caldav/authorizeGoogleCaldavUseCase";
@@ -39,6 +38,12 @@ import { DefaultRecordingController } from "../presentation/controllers/recordin
 import { DefaultLogController } from "../presentation/controllers/logController";
 import { AgendaController } from "../application/agenda/agendaController";
 import { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
+import { commandExists } from "../os/commandExists";
+import { execFile as execFileNode, spawn as spawnNode } from "node:child_process";
+import { parsePactlDefaultSourceFromInfo, parsePactlListShortRows } from "../domain/policies/pactl";
+import * as fsNode from "node:fs";
+import * as pathNode from "node:path";
+import { createRequire as createRequireNode } from "node:module";
 import type { CommandsController } from "../presentation/controllers/commandsController";
 import { ProtocolIndex } from "../protocols/protocolIndex";
 import type { DependencyContainer } from "tsyringe";
@@ -113,7 +118,12 @@ export class AssistantController {
     applyOutbox: async () => await this.applyOutbox(),
     clearOutbox: async () => await this.ctx.outboxService.clear(),
     getOutboxCount: async () => (await this.ctx.outboxService.list()).length,
-    checkLinuxNativeRecordingDependencies: async () => await this.checkLinuxNativeRecordingDependencies(),
+    checkGStreamerRecordingDependencies: async () => await this.checkGStreamerRecordingDependencies(),
+    listGStreamerRecordingSources: async () => await this.listGStreamerRecordingSources(),
+    resolveGStreamerActualSource: async (p: { kind: "mic" | "monitor" }) => await this.resolveGStreamerActualSource(p),
+    startGStreamerLevelProbe: async (p: { kind: "mic" | "monitor"; device?: string | null }) => await this.startGStreamerLevelProbe(p),
+    stopGStreamerLevelProbe: async (p: { kind: "mic" | "monitor"; device?: string | null }) => await this.stopGStreamerLevelProbe(p),
+    probeGStreamerLevel: async (p: { kind: "mic" | "monitor"; device?: string | null }) => await this.probeGStreamerLevel(p),
   };
 
   /** Порт для Settings UI: CalDAV accounts (use-case facade). */
@@ -216,7 +226,6 @@ export class AssistantController {
     this.di.register("assistant.controller.clearTodayLogFile", { useValue: () => void this.ctx.logFileWriter.clearTodayLogFile() });
 
     // Зависимости диалога записи
-    this.di.register("assistant.controller.warnLinuxNativeDepsOnOpen", { useValue: () => void this.warnLinuxNativeDepsOnRecorderOpen() });
     this.di.register("assistant.controller.refreshCalendars", { useValue: async () => await this.refreshCalendars() });
     this.di.register("assistant.controller.createProtocolFromEvent", {
       useValue: async (ev: Event) => await this.createProtocolFromEvent(ev),
@@ -435,8 +444,8 @@ export class AssistantController {
     }
   }
 
-  async checkLinuxNativeRecordingDependencies(): Promise<void> {
-    const cmds = ["ffmpeg", "pactl", "pw-record", "parec"];
+  async checkGStreamerRecordingDependencies(): Promise<void> {
+    const cmds = ["gst-launch-1.0", "gst-inspect-1.0"];
     const found: string[] = [];
     const missing: string[] = [];
     for (const c of cmds) {
@@ -447,19 +456,325 @@ export class AssistantController {
         missing.push(c);
       }
     }
-    if (missing.length === 0) return;
-    this.notice.show(`Ассистент: Linux Native — не хватает: ${missing.join(", ")} (найдено: ${found.join(", ") || "—"})`);
+
+    // Проверяем node + gst-kit через отдельный node-процесс (в renderer gst-kit может падать из-за document/app://).
+    const pluginRoot = this.pluginDirPath && typeof this.pluginDirPath === "string" ? this.pluginDirPath : process.cwd();
+    const nodeBin = await this.pickNodeBinaryOrNull();
+    if (!nodeBin) {
+      if (missing.length === 0) this.notice.show("Ассистент: GStreamer — node не найден (нужен для gst-kit probe)");
+      return;
+    }
+    try {
+      const proc = spawnNode(
+        nodeBin,
+        [
+          "-e",
+          `const Gst=require("gst-kit"); const ee=Gst?.Pipeline?.elementExists;` +
+            `const ok=!!Gst && !!ee && ee("pulsesrc") && ee("level");` +
+            `process.exit(ok?0:2);`,
+        ],
+        { cwd: pluginRoot, stdio: ["ignore", "ignore", "ignore"] },
+      );
+      const code = await new Promise<number | null>((resolve) => proc.on("exit", (c) => resolve(c)));
+      if (code && code !== 0) {
+        this.notice.show("Ассистент: GStreamer — gst-kit/плагины не готовы (проверьте установку GStreamer)");
+      }
+    } catch {
+      this.notice.show("Ассистент: GStreamer — не удалось запустить gst-kit probe (node/gst-kit)");
+    }
+
+    if (missing.length === 0) {
+      this.notice.show(`Ассистент: GStreamer — зависимости OK (${found.join(", ")})`);
+      return;
+    }
+    this.notice.show(`Ассистент: GStreamer — не хватает: ${missing.join(", ")} (найдено: ${found.join(", ") || "—"})`);
   }
 
-  private async warnLinuxNativeDepsOnRecorderOpen(): Promise<void> {
-    if (this.getSettings().recording.audioBackend !== "linux_native") return;
+  private getNodeRequire(): NodeRequire | null {
     try {
-      await this.checkLinuxNativeRecordingDependencies();
-    } catch (e) {
-      this.ctx.logService.warn("Linux Native: проверка зависимостей при открытии диктофона завершилась с ошибкой", {
-        error: String((e as unknown) ?? "неизвестная ошибка"),
-      });
+      const base =
+        this.pluginDirPath && typeof this.pluginDirPath === "string"
+          ? pathNode.join(this.pluginDirPath, "main.js")
+          : typeof __filename === "string"
+            ? __filename
+            : pathNode.join(process.cwd(), "main.js");
+      return createRequireNode(base);
+    } catch {
+      return null;
     }
+  }
+
+  private gstreamerProbeSessions = new Map<
+    string,
+    {
+      proc: import("child_process").ChildProcess | null;
+      running: boolean;
+      lastRms?: number;
+      requestedDevice: string;
+      actualDevice: string;
+      stderrTail: string;
+    }
+  >();
+
+  private getGstreamerProbeKey(params: { kind: "mic" | "monitor"; device?: string | null }): string {
+    const raw = String(params.device ?? "auto").trim();
+    const keyDevice = raw ? raw : "auto";
+    return `${params.kind}:${keyDevice}`;
+  }
+
+  private async pickMonitorFromPactl(): Promise<string> {
+    if (!(await commandExists("pactl"))) return "";
+    const sources = await this.execShell("pactl list short sources 2>/dev/null");
+    const rows = parsePactlListShortRows(sources.stdout);
+    const monitors = rows
+      .map((parts) => ({ name: String(parts[1] ?? "").trim(), state: String(parts[parts.length - 1] ?? "").toUpperCase() }))
+      .filter((x) => x.name.endsWith(".monitor"));
+    const running = monitors.find((x) => x.state === "RUNNING");
+    if (running) return running.name;
+    const idle = monitors.find((x) => x.state === "IDLE");
+    if (idle) return idle.name;
+    return monitors[0]?.name ?? "";
+  }
+
+  private async pickMicFromPactl(): Promise<string> {
+    if (!(await commandExists("pactl"))) return "";
+    const info = await this.execShell("pactl info 2>/dev/null");
+    return parsePactlDefaultSourceFromInfo(info.stdout);
+  }
+
+  // gst-kit нельзя безопасно require() в renderer (см. document/createRequire(app://...)).
+  // Поэтому прямой загрузки здесь нет — только через child-process.
+
+  private extractRmsFromAny(value: any, depth = 0): number[] | null {
+    if (!value || depth > 4) return null;
+    if (Array.isArray(value)) {
+      if (value.length > 0 && typeof value[0] === "number") return value as number[];
+      return null;
+    }
+    if (typeof value === "object") {
+      if (Array.isArray(value.rms)) return value.rms as number[];
+      for (const key of Object.keys(value)) {
+        const found = this.extractRmsFromAny((value as any)[key], depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  private getLevelRms(msg: any): number[] | null {
+    if (!msg) return null;
+    const structure = msg.structure || msg.structureValue || msg.value || null;
+    const structureName = msg.structureName || (structure && structure.name) || null;
+    if (structureName !== "level") return null;
+    if (Array.isArray(msg.rms) && msg.rms.length > 0) return msg.rms as number[];
+    if (structure) {
+      const rms = this.extractRmsFromAny(structure);
+      if (Array.isArray(rms) && rms.length > 0) return rms;
+    }
+    return null;
+  }
+
+  async startGStreamerLevelProbe(
+    params: { kind: "mic" | "monitor"; device?: string | null },
+  ): Promise<{ ok: boolean; error?: string; actualDevice?: string }> {
+    const key = this.getGstreamerProbeKey(params);
+    if (this.gstreamerProbeSessions.has(key)) {
+      const existing = this.gstreamerProbeSessions.get(key);
+      return { ok: true, actualDevice: existing?.actualDevice };
+    }
+
+    const requested = String(params.device ?? "auto").trim() || "auto";
+    let actualDevice = requested;
+    if (requested === "auto") {
+      if (params.kind === "monitor") actualDevice = await this.pickMonitorFromPactl();
+      else actualDevice = await this.pickMicFromPactl();
+    }
+
+    const session = {
+      proc: null as import("child_process").ChildProcess | null,
+      running: true,
+      lastRms: undefined as number | undefined,
+      requestedDevice: requested,
+      actualDevice,
+      stderrTail: "",
+    };
+    this.gstreamerProbeSessions.set(key, session);
+
+    // В Obsidian plugin-рантайме есть `document`, из-за чего gst-kit (cjs) пытается работать как браузерный модуль
+    // и падает на createRequire(app://...). Поэтому делаем probe в отдельном node-процессе без DOM.
+    const pluginRoot = this.pluginDirPath && typeof this.pluginDirPath === "string" ? this.pluginDirPath : process.cwd();
+    const probeScript = `
+      const Gst = require("gst-kit");
+      const device = String(process.env.DEVICE || "");
+      const src = device ? ("pulsesrc device=" + device) : "pulsesrc";
+      const desc = src + " ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=1 ! level name=level0 interval=100000000 message=true ! fakesink sync=false";
+      const p = new Gst.Pipeline(desc);
+      const level = p.getElementByName ? p.getElementByName("level0") : null;
+      if (level && level.setElementProperty) { try { level.setElementProperty("message", true); } catch {} try { level.setElementProperty("post-messages", true); } catch {} }
+      let running = true;
+      const loop = async () => {
+        while (running) {
+          const msg = await p.busPop(100);
+          if (!msg) continue;
+          if (msg.type === "error") {
+            try { process.stderr.write(String(JSON.stringify(msg.parseError ? msg.parseError() : msg)) + "\\n"); } catch {}
+            continue;
+          }
+          const structure = msg.structure || msg.structureValue || msg.value || null;
+          const structureName = msg.structureName || (structure && structure.name) || null;
+          if (structureName !== "level") continue;
+          const rms = Array.isArray(msg.rms) ? msg.rms : (structure && structure.rms);
+          if (!Array.isArray(rms) || rms.length === 0) continue;
+          const db = Number(rms[0]);
+          if (!Number.isFinite(db)) continue;
+          process.stdout.write(JSON.stringify({ rmsDb: db }) + "\\n");
+        }
+      };
+      process.on("SIGTERM", () => { running = false; try { p.stop && p.stop(); } catch {} process.exit(0); });
+      process.on("SIGINT", () => { running = false; try { p.stop && p.stop(); } catch {} process.exit(0); });
+      (async () => { await p.play(); await loop(); })().catch((e) => { try { process.stderr.write(String(e && e.stack || e) + "\\n"); } catch {} process.exit(1); });
+    `;
+
+    // eslint-disable-next-line no-console
+    if (this.getSettings().debug?.enabled) console.log("[assistant][gstreamer][probe:start]", { kind: params.kind, requested: requested, actualDevice, cwd: pluginRoot });
+
+    const nodeBin = await this.pickNodeBinaryOrNull();
+    if (!nodeBin) {
+      // eslint-disable-next-line no-console
+      console.warn("[assistant][gstreamer] node not found; probe disabled");
+      return { ok: false, error: "node не найден (нужен для запуска GStreamer probe процесса)", actualDevice };
+    }
+    const proc = spawnNode(nodeBin, ["-e", probeScript], {
+      cwd: pluginRoot,
+      env: { ...process.env, DEVICE: actualDevice },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    session.proc = proc;
+
+    let stdoutBuf = "";
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      stdoutBuf += String(chunk ?? "");
+      const lines = stdoutBuf.split("\n");
+      stdoutBuf = lines.pop() ?? "";
+      for (const line of lines) {
+        const s = String(line ?? "").trim();
+        if (!s) continue;
+        try {
+          const obj = JSON.parse(s);
+          const db = Number(obj?.rmsDb);
+          if (Number.isFinite(db)) session.lastRms = db;
+        } catch {
+          // ignore junk
+        }
+      }
+    });
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      session.stderrTail = (session.stderrTail + String(chunk ?? "")).slice(-2000);
+    });
+    proc.on("exit", (code) => {
+      session.running = false;
+      if (this.getSettings().debug?.enabled) {
+        // eslint-disable-next-line no-console
+        console.warn("[assistant][gstreamer][probe:exit]", { code, stderrTail: session.stderrTail.slice(-500) });
+      }
+      this.gstreamerProbeSessions.delete(key);
+    });
+
+    return { ok: true, actualDevice };
+  }
+
+  private cachedNodeBinary: string | null = null;
+
+  private async pickNodeBinaryOrNull(): Promise<string | null> {
+    if (this.cachedNodeBinary) return this.cachedNodeBinary;
+
+    const candidates: string[] = [];
+    const envNode = String(process.env.ASSISTANT_NODE_BINARY ?? process.env.NODE_BINARY ?? "").trim();
+    if (envNode) candidates.push(envNode);
+    candidates.push("node");
+    candidates.push("/usr/bin/node", "/usr/local/bin/node", "/bin/node");
+
+    for (const c of candidates) {
+      const bin = String(c || "").trim();
+      if (!bin) continue;
+      if (bin !== "node") {
+        try {
+          if (!fsNode.existsSync(bin)) continue;
+        } catch {
+          continue;
+        }
+      } else {
+        try {
+          const ok = await commandExists("node");
+          if (!ok) continue;
+        } catch {
+          continue;
+        }
+      }
+      const ok = await this.canRunNode(bin);
+      if (!ok) continue;
+      this.cachedNodeBinary = bin;
+      return bin;
+    }
+    return null;
+  }
+
+  private async canRunNode(bin: string): Promise<boolean> {
+    try {
+      const r = await new Promise<{ ok: boolean }>((resolve) => {
+        execFileNode(bin, ["--version"], { timeout: 800 }, (err) => resolve({ ok: !err }));
+      });
+      return r.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async stopGStreamerLevelProbe(params: { kind: "mic" | "monitor"; device?: string | null }): Promise<void> {
+    const key = this.getGstreamerProbeKey(params);
+    const session = this.gstreamerProbeSessions.get(key);
+    if (!session) return;
+    session.running = false;
+    try {
+      session.proc?.kill("SIGTERM");
+    } catch {
+      // ignore
+    }
+    this.gstreamerProbeSessions.delete(key);
+  }
+
+  async probeGStreamerLevel(params: { kind: "mic" | "monitor"; device?: string | null }): Promise<{ rmsDb?: number; error?: string }> {
+    const key = this.getGstreamerProbeKey(params);
+    const session = this.gstreamerProbeSessions.get(key);
+    if (!session) return { rmsDb: undefined };
+    return { rmsDb: session.lastRms };
+  }
+
+  private async execShell(cmd: string, timeoutMs = 2000): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+    return await new Promise((resolve) => {
+      execFileNode("sh", ["-lc", cmd], { timeout: timeoutMs }, (err, stdout, stderr) => {
+        resolve({ ok: !err, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+      });
+    });
+  }
+
+  async listGStreamerRecordingSources(): Promise<{ micSources: string[]; monitorSources: string[] }> {
+    if (!(await commandExists("pactl"))) return { micSources: [], monitorSources: [] };
+    const out = await this.execShell("pactl list short sources 2>/dev/null");
+    const rows = parsePactlListShortRows(out.stdout);
+    const names = rows.map((r) => String(r[1] ?? "").trim()).filter(Boolean);
+    const monitorSources = names.filter((n) => n.endsWith(".monitor"));
+    const micSources = names.filter((n) => !n.endsWith(".monitor"));
+    return { micSources, monitorSources };
+  }
+
+  async resolveGStreamerActualSource(params: { kind: "mic" | "monitor" }): Promise<string> {
+    if (params.kind === "monitor") {
+      return await this.pickMonitorFromPactl();
+    }
+    if (!(await commandExists("pactl"))) return "";
+    const info = await this.execShell("pactl info 2>/dev/null");
+    return parsePactlDefaultSourceFromInfo(info.stdout);
   }
 
   async refreshCalendars(): Promise<void> {

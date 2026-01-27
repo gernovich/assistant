@@ -30,7 +30,10 @@ export const DEFAULT_SETTINGS: AssistantSettings = {
   recording: {
     chunkMinutes: 5,
     audioBackend: "electron_media_devices",
-    linuxNativeAudioProcessing: "normalize",
+    gstreamerMicSource: "auto",
+    gstreamerMonitorSource: "auto",
+    gstreamerMicProcessing: "none",
+    gstreamerMonitorProcessing: "none",
     autoStartEnabled: true,
     autoStartSeconds: 5,
   },
@@ -106,19 +109,32 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
         max: 180,
       }),
       audioBackend:
-        obj.recording?.audioBackend === "linux_native"
-          ? "linux_native"
-          : obj.recording?.audioBackend === "electron_media_devices"
-            ? "electron_media_devices"
-            : obj.recording?.audioBackend === "electron_desktop_capturer"
-              ? "electron_media_devices" // backward compat
-              : DEFAULT_SETTINGS.recording.audioBackend,
-      linuxNativeAudioProcessing:
-        obj.recording?.linuxNativeAudioProcessing === "none" ||
-        obj.recording?.linuxNativeAudioProcessing === "normalize" ||
-        obj.recording?.linuxNativeAudioProcessing === "voice"
-          ? obj.recording.linuxNativeAudioProcessing
-          : DEFAULT_SETTINGS.recording.linuxNativeAudioProcessing,
+        obj.recording?.audioBackend === "g_streamer"
+          ? "g_streamer"
+          : obj.recording?.audioBackend === "electron_media_devices" ||
+              obj.recording?.audioBackend === "electron_desktop_capturer"
+          ? "electron_media_devices"
+          : DEFAULT_SETTINGS.recording.audioBackend,
+      gstreamerMicSource:
+        typeof obj.recording?.gstreamerMicSource === "string" && obj.recording.gstreamerMicSource.trim()
+          ? obj.recording.gstreamerMicSource.trim()
+          : DEFAULT_SETTINGS.recording.gstreamerMicSource,
+      gstreamerMonitorSource:
+        typeof obj.recording?.gstreamerMonitorSource === "string" && obj.recording.gstreamerMonitorSource.trim()
+          ? obj.recording.gstreamerMonitorSource.trim()
+          : DEFAULT_SETTINGS.recording.gstreamerMonitorSource,
+      gstreamerMicProcessing:
+        obj.recording?.gstreamerMicProcessing === "none" ||
+        obj.recording?.gstreamerMicProcessing === "normalize" ||
+        obj.recording?.gstreamerMicProcessing === "voice"
+          ? obj.recording.gstreamerMicProcessing
+          : DEFAULT_SETTINGS.recording.gstreamerMicProcessing,
+      gstreamerMonitorProcessing:
+        obj.recording?.gstreamerMonitorProcessing === "none" ||
+        obj.recording?.gstreamerMonitorProcessing === "normalize" ||
+        obj.recording?.gstreamerMonitorProcessing === "voice"
+          ? obj.recording.gstreamerMonitorProcessing
+          : DEFAULT_SETTINGS.recording.gstreamerMonitorProcessing,
       autoStartEnabled:
         typeof obj.recording?.autoStartEnabled === "boolean" ? obj.recording.autoStartEnabled : DEFAULT_SETTINGS.recording.autoStartEnabled,
       autoStartSeconds: normalizeNumber(obj.recording?.autoStartSeconds, {

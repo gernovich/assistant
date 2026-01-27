@@ -26,4 +26,17 @@ await fs.rm(targetDir, { recursive: true, force: true });
 await fs.mkdir(targetDir, { recursive: true });
 await fs.cp(path.join(REPO_ROOT, "dist"), targetDir, { recursive: true });
 
+// 3) native deps (gst-kit) — Obsidian plugin folder не содержит node_modules, поэтому копируем явно.
+// Важно: gst-kit грузит native addon из build/Release/gst_kit.node относительно своего package root.
+try {
+  const gstKitSrc = path.join(REPO_ROOT, "node_modules", "gst-kit");
+  const gstKitDst = path.join(targetDir, "node_modules", "gst-kit");
+  await fs.mkdir(path.dirname(gstKitDst), { recursive: true });
+  await fs.cp(gstKitSrc, gstKitDst, { recursive: true });
+  console.log(`Copied native dependency: gst-kit -> ${gstKitDst}`);
+} catch (e) {
+  console.warn("WARN: failed to copy gst-kit into Obsidian plugin folder. GStreamer features may not work.");
+  console.warn(String(e ?? ""));
+}
+
 console.log(`Installed to: ${targetDir}`);

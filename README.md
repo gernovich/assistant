@@ -58,6 +58,16 @@ npm run test:coverage
 
 Уведомления реализованы как **electron_window** + fallback на `Notice` (если `BrowserWindow` недоступен в окружении).
 
+### Зависимости для записи через GStreamer
+
+Используем `gst-kit`: https://github.com/repugraf/gst-kit  
+Минимальная установка (Ubuntu/Debian):
+
+```bash
+sudo apt update
+sudo apt install -y gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+```
+
 ### Сборка
 
 ```bash

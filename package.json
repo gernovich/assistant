@@ -25,7 +25,6 @@
     "esbuild": "^0.20.2",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
-    "gst-kit": "^0.2.2",
     "jsdom": "^24.0.0",
     "obsidian": "^1.5.12",
     "prettier": "^3.3.3",
@@ -34,6 +33,7 @@
   },
   "dependencies": {
     "fix-webm-duration": "^1.0.6",
+    "gst-kit": "^0.2.2",
     "reflect-metadata": "^0.2.2",
     "tsdav": "^2.1.6",
     "tsyringe": "^4.10.0",

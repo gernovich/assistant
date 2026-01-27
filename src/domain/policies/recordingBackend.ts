@@ -5,7 +5,7 @@ import type { RecordingBackendId } from "../../application/recording/recordingUs
  */
 export function recordingBackendFromSettings(raw: unknown): RecordingBackendId {
   const v = String(raw ?? "");
-  if (v === "linux_native") return "linux_native";
+  if (v === "g_streamer") return "g_streamer";
   // legacy name (historical)
   if (v === "electron_desktop_capturer") return "electron_media_devices";
   // default

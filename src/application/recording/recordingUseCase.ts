@@ -14,7 +14,7 @@ export type RecordingStats = {
   protocolFilePath?: string;
 };
 
-export type RecordingBackendId = "electron_media_devices" | "linux_native";
+export type RecordingBackendId = "electron_media_devices" | "g_streamer";
 
 export type RecordingBackendSessionHandle = { kind: RecordingBackendId };
 

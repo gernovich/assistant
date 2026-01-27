@@ -564,7 +564,6 @@ export function createAssistantContainer(params: {
             protocolsRoot: cc.resolve<() => AssistantSettings>("assistant.controller.getSettings")().folders.protocols,
             limit,
           }),
-        warnLinuxNativeDepsOnOpen: cc.resolve<() => void>("assistant.controller.warnLinuxNativeDepsOnOpen"),
         createProtocolFromEvent: async (ev) =>
           (await cc.resolve<(ev: any) => Promise<{ path: string }>>("assistant.controller.createProtocolFromEvent")(ev)).path,
         createEmptyProtocolAndOpen: async () => {

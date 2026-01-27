@@ -105,7 +105,10 @@ export const RawAssistantSettingsSchema = z
       .object({
         chunkMinutes: zNumOrStr.optional(),
         audioBackend: zStr.optional(),
-        linuxNativeAudioProcessing: zStr.optional(),
+        gstreamerMicSource: zStr.optional(),
+        gstreamerMonitorSource: zStr.optional(),
+        gstreamerMicProcessing: zStr.optional(),
+        gstreamerMonitorProcessing: zStr.optional(),
         autoStartEnabled: zBool.optional(),
         autoStartSeconds: zNumOrStr.optional(),
       })
