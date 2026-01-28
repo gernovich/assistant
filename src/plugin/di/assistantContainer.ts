@@ -8,6 +8,7 @@ import { RecordingVizHub } from "../../recording/recordingVizHub";
 import { createDefaultCalendarProviderRegistry } from "../../calendar/providers/calendarProviderRegistry";
 import type { CalendarProviderRegistry } from "../../calendar/providers/calendarProviderRegistry";
 import { CalendarService } from "../../calendar/calendarService";
+import { GoogleCalendarApi } from "../../google/googleCalendarApi";
 import { RecordingUseCase } from "../../application/recording/recordingUseCase";
 import { nextChunkInMsPolicy, shouldRotateChunkPolicy } from "../../domain/policies/recordingChunkTiming";
 import { ensureFolder } from "../../vault/ensureFolder";
@@ -50,6 +51,7 @@ import { ProtocolFromActiveEventUseCase } from "../../application/protocols/prot
 import { CalendarRefreshUseCase } from "../../application/calendar/calendarRefreshUseCase";
 import { RecordingDialogUseCase } from "../../application/recording/recordingDialogUseCase";
 import { AutoRefreshUseCase } from "../../application/calendar/autoRefreshUseCase";
+import { TranscriptionSchedulerUseCase } from "../../application/recording/transcriptionSchedulerUseCase";
 import { ProtocolIndex } from "../../protocols/protocolIndex";
 import { DefaultLogController } from "../../presentation/controllers/logController";
 import { AgendaController } from "../../application/agenda/agendaController";
@@ -115,7 +117,8 @@ export function createAssistantContainer(params: {
   );
   c.register<CalendarProviderRegistry>("calendar.providerRegistry", { useValue: calendarProviderRegistry });
 
-  const calendarService = new CalendarService(c.resolve<AssistantSettings>("assistant.settings"), calendarProviderRegistry);
+  const googleCalendarApi = new GoogleCalendarApi();
+  const calendarService = new CalendarService(c.resolve<AssistantSettings>("assistant.settings"), calendarProviderRegistry, googleCalendarApi);
   c.register(CalendarService, { useValue: calendarService });
 
   // Запись: use-case + facade + service
@@ -354,6 +357,7 @@ export function createAssistantContainer(params: {
         updateOpenViews: cc.resolve<(s: AssistantSettings) => void>("assistant.controller.updateOpenViews"),
         rescheduleNotifications: cc.resolve<() => void>("assistant.controller.rescheduleNotifications"),
         setupAutoRefreshTimer: cc.resolve<() => void>("assistant.controller.setupAutoRefreshTimer"),
+        setupTranscriptionTimer: cc.resolve<() => void>("assistant.controller.setupTranscriptionTimer"),
         updateRibbonIcons: cc.resolve<() => void>("assistant.controller.updateRibbonIcons"),
         applyRecordingMediaPermissions: cc.resolve<() => void>("assistant.controller.applyRecordingMediaPermissions"),
       }),
@@ -596,6 +600,18 @@ export function createAssistantContainer(params: {
         setInterval: cc.resolve<(fn: () => void, ms: number) => number | ReturnType<typeof globalThis.setInterval>>("clock.setInterval"),
         clearInterval: cc.resolve<(id: number | ReturnType<typeof globalThis.setInterval>) => void>("clock.clearInterval"),
         log: cc.resolve<LogService>("assistant.logService"),
+      }),
+  });
+
+  c.register(TranscriptionSchedulerUseCase, {
+    useFactory: (cc) =>
+      new TranscriptionSchedulerUseCase({
+        app: cc.resolve<App>("obsidian.app"),
+        getSettings: cc.resolve<() => AssistantSettings>("assistant.controller.getSettings"),
+        setInterval: cc.resolve<(fn: () => void, ms: number) => number | ReturnType<typeof globalThis.setInterval>>("clock.setInterval"),
+        clearInterval: cc.resolve<(id: number | ReturnType<typeof globalThis.setInterval>) => void>("clock.clearInterval"),
+        log: cc.resolve<LogService>("assistant.logService"),
+        fetch: globalThis.fetch.bind(globalThis),
       }),
   });
 

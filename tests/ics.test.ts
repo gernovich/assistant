@@ -10,7 +10,7 @@ const cal1: Calendar = {
 };
 
 describe("parseIcs", () => {
-  it("uses calendar.config.color as fallback when VEVENT has no COLOR", () => {
+  it("не подставляет цвет календаря в Event.color, если в VEVENT нет COLOR (цвет календаря — UI fallback)", () => {
     const cal: Calendar = {
       id: "cal-color",
       name: "cal-color",
@@ -36,7 +36,7 @@ describe("parseIcs", () => {
 
     const events = parseIcs(cal, ics);
     expect(events).toHaveLength(1);
-    expect(events[0].color?.value).toBe("#00ff00");
+    expect(events[0].color?.value).toBeUndefined();
   });
 
   it("parses basic VEVENT with UTC DTSTART/DTEND", () => {

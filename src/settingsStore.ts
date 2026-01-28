@@ -44,6 +44,16 @@ export const DEFAULT_SETTINGS: AssistantSettings = {
     maxEntries: 2048,
     retentionDays: 7,
   },
+  transcription: {
+    enabled: false,
+    provider: "nexara",
+    pollMinutes: 20,
+    providers: {
+      nexara: {
+        token: "",
+      },
+    },
+  },
 };
 
 /**
@@ -150,6 +160,22 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
       maxEntries: normalizeNumber(obj.log?.maxEntries, { defaultValue: DEFAULT_SETTINGS.log.maxEntries, min: 10, max: 20_000 }),
       retentionDays: normalizeRetentionDays(obj.log?.retentionDays ?? DEFAULT_SETTINGS.log.retentionDays),
     },
+    transcription: {
+      enabled: typeof obj.transcription?.enabled === "boolean" ? obj.transcription.enabled : DEFAULT_SETTINGS.transcription.enabled,
+      pollMinutes: normalizeNumber(obj.transcription?.pollMinutes, { defaultValue: DEFAULT_SETTINGS.transcription.pollMinutes, min: 1, max: 24 * 60 }),
+      provider: obj.transcription?.provider === "nexara" ? "nexara" : DEFAULT_SETTINGS.transcription.provider,
+      providers: {
+        nexara: {
+          // backward compat: token previously stored at `transcription.token`
+          token:
+            typeof obj.transcription?.providers?.nexara?.token === "string"
+              ? obj.transcription.providers.nexara.token
+              : typeof obj.transcription?.token === "string"
+                ? obj.transcription.token
+                : DEFAULT_SETTINGS.transcription.providers.nexara.token,
+        },
+      },
+    },
   };
 }
 
@@ -182,6 +208,18 @@ function normalizeCalendar(c: Partial<CalendarConfig>): CalendarConfig | null {
 
   const color = typeof (c as any).color === "string" ? String((c as any).color).trim() : "";
   const normColor = color ? color : undefined;
+  const colorOverride = typeof (c as any).colorOverride === "string" ? String((c as any).colorOverride).trim() : "";
+  const normColorOverride = colorOverride ? colorOverride : undefined;
+
+  const labelsRaw = (c as any).googleColorLabels;
+  const normGoogleColorLabels: Record<string, string> | undefined =
+    labelsRaw && typeof labelsRaw === "object" && !Array.isArray(labelsRaw)
+      ? Object.fromEntries(
+          Object.entries(labelsRaw as Record<string, unknown>)
+            .map(([k, v]) => [String(k ?? "").trim(), typeof v === "string" ? v.trim() : ""] as const)
+            .filter(([k, v]) => Boolean(k) && Boolean(v)),
+        )
+      : undefined;
 
   if (c.type === "ics_url") {
     return {
@@ -190,6 +228,8 @@ function normalizeCalendar(c: Partial<CalendarConfig>): CalendarConfig | null {
       type: "ics_url",
       enabled: c.enabled ?? true,
       color: normColor,
+      colorOverride: normColorOverride,
+      googleColorLabels: normGoogleColorLabels,
       url: typeof c.url === "string" ? c.url : "",
     };
   }
@@ -203,6 +243,8 @@ function normalizeCalendar(c: Partial<CalendarConfig>): CalendarConfig | null {
       type: "caldav",
       enabled: c.enabled ?? true,
       color: normColor,
+      colorOverride: normColorOverride,
+      googleColorLabels: normGoogleColorLabels,
       caldav: {
         accountId: typeof caldav.accountId === "string" ? caldav.accountId : "",
         calendarUrl: typeof caldav.calendarUrl === "string" ? caldav.calendarUrl : "",

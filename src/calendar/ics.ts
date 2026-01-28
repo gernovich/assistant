@@ -236,7 +236,6 @@ function toBaseEvent(calendar: Calendar, ve: ParsedVEvent, myEmail?: string): Ev
   const recurrence = buildRecurrence(ve);
   const reminders = buildReminders(ve, myEmail);
   const color = parseEventColor(fields, ve.singleParams);
-  const calendarColor = typeof (calendar.config as any)?.color === "string" ? String((calendar.config as any).color).trim() : "";
 
   return {
     calendar,
@@ -252,7 +251,9 @@ function toBaseEvent(calendar: Calendar, ve: ParsedVEvent, myEmail?: string): Ev
     status,
     recurrence,
     reminders,
-    color: color ?? (calendarColor ? { value: calendarColor } : undefined),
+    // Важно: `Event.color` — это семантическая метка встречи (COLOR из VEVENT).
+    // Цвет календаря/override применяются на уровне UI как fallback, но не записываются в событие.
+    color: color ?? undefined,
     organizer,
     attendees,
   };

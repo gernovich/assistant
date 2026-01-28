@@ -7,6 +7,7 @@
 export interface CommandsController {
   openAgenda(): void;
   openRecordingDialog(): void;
+  runTranscriptionNow(): void;
   openLog(): void;
   refreshCalendars(): void;
   createMeetingCard(): void;

@@ -58,7 +58,13 @@ export async function requestUrlFetch(input: FetchInput, init?: RequestInit): Pr
     throw: false,
   });
 
-  return new Response(res.arrayBuffer, {
+  // Важно: для "no-content" статусов Response не может иметь body (спецификация Fetch).
+  // Obsidian `requestUrl` всегда возвращает `arrayBuffer`, поэтому для таких статусов нужно явно передавать `null`.
+  const status = Number(res.status) || 0;
+  const noBody = (status >= 100 && status < 200) || status === 204 || status === 205 || status === 304;
+  const responseBody = noBody ? null : res.arrayBuffer;
+
+  return new Response(responseBody as any, {
     status: res.status,
     headers: res.headers,
   });

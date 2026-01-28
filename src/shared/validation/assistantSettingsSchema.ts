@@ -23,6 +23,8 @@ const CalendarConfigSchema = z
     type: z.enum(["ics_url", "caldav"]),
     enabled: zBool.optional(),
     color: zStr.optional(),
+    colorOverride: zStr.optional(),
+    googleColorLabels: z.record(zStr).optional(),
     url: zStr.optional(),
     caldav: z
       .object({
@@ -124,6 +126,23 @@ export const RawAssistantSettingsSchema = z
       .object({
         maxEntries: zNumOrStr.optional(),
         retentionDays: zNumOrStr.optional(),
+      })
+      .optional(),
+
+    transcription: z
+      .object({
+        enabled: zBool.optional(),
+        provider: zStr.optional(),
+        pollMinutes: zNumOrStr.optional(),
+        providers: z
+          .object({
+            nexara: z
+              .object({
+                token: zStr.optional(),
+              })
+              .optional(),
+          })
+          .optional(),
       })
       .optional(),
   })

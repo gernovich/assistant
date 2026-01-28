@@ -12,6 +12,8 @@ export function registerAssistantCommands(plugin: PluginPort, c: CommandsControl
 
   plugin.addCommand({ id: "recording-open-dialog", name: "Диктофон", callback: () => c.openRecordingDialog() });
 
+  plugin.addCommand({ id: "transcription-run-now", name: "Транскрибация: запустить сейчас", callback: () => c.runTranscriptionNow() });
+
   plugin.addCommand({ id: "refresh-calendars", name: "Обновить календари", callback: () => c.refreshCalendars() });
 
   plugin.addCommand({ id: "create-meeting-card", name: "Создать карточку встречи", callback: () => c.createMeetingCard() });

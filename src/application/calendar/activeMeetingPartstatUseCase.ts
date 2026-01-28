@@ -1,9 +1,12 @@
 import type { Calendar } from "../../types";
 import { splitFrontmatter, parseFrontmatterMap } from "../../domain/policies/frontmatter";
 import { makeCalendarStub } from "../../domain/policies/calendarStub";
+import { toAppErrorDto } from "../../shared/appError";
+import { APP_ERROR } from "../../shared/appErrorCodes";
 
 type Logger = {
   warn: (message: string, data?: Record<string, unknown>) => void;
+  error: (message: string, data?: Record<string, unknown>) => void;
 };
 
 export type Partstat = "accepted" | "declined" | "tentative" | "needs_action";
@@ -74,6 +77,19 @@ export class ActiveMeetingPartstatUseCase {
       const uid = String(fm?.event_id ?? "").trim();
       const start = String(fm?.start ?? "").trim();
 
+      const dto = toAppErrorDto(e, { code: APP_ERROR.CALDAV_WRITEBACK, message: "Ассистент: не удалось изменить статус в календаре" });
+      this.deps.log.error("RSVP: установка статуса из карточки встречи: ошибка", {
+        code: dto.code,
+        message: dto.message,
+        cause: dto.cause,
+        details: dto.details,
+        calendarId,
+        uid,
+        start,
+        partstat,
+        error: e,
+      });
+
       const id = `${this.deps.nowMs().toString(36)}-${this.deps.randomHex()}`;
       await this.deps.enqueueOutbox({
         id,
@@ -82,12 +98,13 @@ export class ActiveMeetingPartstatUseCase {
         payload: { calendarId, uid, start, partstat },
       });
 
-      this.deps.log.warn("Офлайн-режим: действие добавлено в очередь (не удалось применить к календарю)", {
+      this.deps.log.warn("RSVP: действие добавлено в офлайн-очередь", {
         calendarId,
         uid,
         start,
         partstat,
-        error: String((e as unknown) ?? "неизвестная ошибка"),
+        reason: dto.message,
+        cause: dto.cause,
       });
       this.deps.notice("Ассистент: не удалось применить. Действие добавлено в офлайн-очередь.");
     }

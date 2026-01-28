@@ -29,6 +29,9 @@ export function renderMeetingNoteMarkdown(params: {
     attendeesTentative: string;
     attendeesNeedsAction: string;
     attendeesUnknown: string;
+    eventColor: string;
+    eventColorId: string;
+    eventColorLabel: string;
   };
   escape: (s: string) => string;
 }): string {
@@ -54,7 +57,9 @@ export function renderMeetingNoteMarkdown(params: {
     fm.timezone ? `timezone: ${escape(fm.timezone)}` : "",
     fm.rrule ? `rrule: ${escape(fm.rrule)}` : "",
     fm.remindersMinutesBefore?.length ? `reminders_minutes_before: [${fm.remindersMinutesBefore.join(", ")}]` : "",
-    fm.eventColor ? `event_color: ${escape(fm.eventColor)}` : "",
+    fm.eventColor ? `${keys.eventColor}: ${escape(fm.eventColor)}` : "",
+    fm.eventColorId ? `${keys.eventColorId}: ${escape(fm.eventColorId)}` : "",
+    fm.eventColorLabel ? `${keys.eventColorLabel}: ${escape(fm.eventColorLabel)}` : "",
     fm.status ? `${keys.status}: ${escape(fm.status)}` : "",
     fm.organizerEmail ? `${keys.organizerEmail}: ${escape(fm.organizerEmail)}` : "",
     fm.organizerCn ? `${keys.organizerCn}: ${escape(fm.organizerCn)}` : "",
@@ -67,6 +72,7 @@ export function renderMeetingNoteMarkdown(params: {
     "",
     `- Начало: ${fm.startIso}`,
     fm.endIso ? `- Конец: ${fm.endIso}` : "",
+    `- Цветовая метка: ${fm.eventColorLabel ? fm.eventColorLabel : "Нет"}`,
     fm.url ? `- Ссылка: ${fm.url}` : "",
     fm.location ? `- Место: ${fm.location}` : "",
     "",

@@ -31,6 +31,8 @@ export const FM = {
   rrule: "rrule",
   remindersMinutesBefore: "reminders_minutes_before",
   eventColor: "event_color",
+  eventColorId: "event_color_id",
+  eventColorLabel: "event_color_label",
   attendees: "attendees",
   attendeesAccepted: "attendees_accepted",
   attendeesDeclined: "attendees_declined",

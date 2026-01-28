@@ -21,7 +21,7 @@ describe("ActiveMeetingPartstatUseCase", () => {
       setMyPartstatInCalendar: async () => undefined,
       enqueueOutbox: async () => undefined,
       notice,
-      log: { warn: vi.fn() },
+      log: { warn: vi.fn(), error: vi.fn() },
       nowMs: () => 1,
       randomHex: () => "x",
     });
@@ -40,7 +40,7 @@ describe("ActiveMeetingPartstatUseCase", () => {
       setMyPartstatInCalendar,
       enqueueOutbox: async () => undefined,
       notice,
-      log: { warn: vi.fn() },
+      log: { warn: vi.fn(), error: vi.fn() },
       nowMs: () => 1,
       randomHex: () => "x",
     });
@@ -61,7 +61,7 @@ describe("ActiveMeetingPartstatUseCase", () => {
       setMyPartstatInCalendar: vi.fn().mockRejectedValue(new Error("net")),
       enqueueOutbox,
       notice,
-      log: { warn },
+      log: { warn, error: vi.fn() },
       nowMs: () => 1000,
       randomHex: () => "abc",
     });

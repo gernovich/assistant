@@ -31,6 +31,7 @@ describe("SettingsUseCase", () => {
       updateOpenViews: () => calls.push("updateOpenViews"),
       rescheduleNotifications: () => calls.push("rescheduleNotifications"),
       setupAutoRefreshTimer: () => calls.push("setupAutoRefreshTimer"),
+      setupTranscriptionTimer: () => calls.push("setupTranscriptionTimer"),
       updateRibbonIcons: () => calls.push("updateRibbonIcons"),
       applyRecordingMediaPermissions: () => calls.push("applyRecordingMediaPermissions"),
     });
@@ -46,6 +47,7 @@ describe("SettingsUseCase", () => {
       "updateOpenViews",
       "rescheduleNotifications",
       "setupAutoRefreshTimer",
+      "setupTranscriptionTimer",
       "updateRibbonIcons",
       "applyRecordingMediaPermissions",
       "info:Настройки: сохранены и применены (успех)",
@@ -76,6 +78,7 @@ describe("SettingsUseCase", () => {
       updateOpenViews: () => calls.push("updateOpenViews"),
       rescheduleNotifications: () => calls.push("rescheduleNotifications"),
       setupAutoRefreshTimer: () => calls.push("setupAutoRefreshTimer"),
+      setupTranscriptionTimer: () => calls.push("setupTranscriptionTimer"),
       updateRibbonIcons: () => calls.push("updateRibbonIcons"),
       applyRecordingMediaPermissions: () => calls.push("applyRecordingMediaPermissions"),
     });
@@ -111,6 +114,7 @@ describe("SettingsUseCase", () => {
       updateOpenViews: () => calls.push("updateOpenViews"),
       rescheduleNotifications: () => calls.push("rescheduleNotifications"),
       setupAutoRefreshTimer: () => calls.push("setupAutoRefreshTimer"),
+      setupTranscriptionTimer: () => calls.push("setupTranscriptionTimer"),
       updateRibbonIcons: () => calls.push("updateRibbonIcons"),
       applyRecordingMediaPermissions: () => calls.push("applyRecordingMediaPermissions"),
     });

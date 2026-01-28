@@ -39,6 +39,8 @@ export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: s
   const timezone = String(map[FM.timezone] ?? "").trim();
   const rrule = String(map[FM.rrule] ?? "").trim();
   const eventColor = String(map[FM.eventColor] ?? "").trim();
+  const eventColorId = String(map[FM.eventColorId] ?? "").trim();
+  const eventColorLabel = String(map[FM.eventColorLabel] ?? "").trim();
   const remindersMinutesBefore = parseNumberArray(map[FM.remindersMinutesBefore]);
 
   return ok({
@@ -57,6 +59,8 @@ export function parseMeetingNoteFromMd(md: string, fallback?: { fileBasename?: s
     rrule: rrule || undefined,
     reminders_minutes_before: remindersMinutesBefore,
     event_color: eventColor || undefined,
+    event_color_id: eventColorId || undefined,
+    event_color_label: eventColorLabel || undefined,
   });
 }
 

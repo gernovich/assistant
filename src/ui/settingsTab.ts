@@ -9,6 +9,7 @@ import { renderLogSection } from "./settings/sections/logSection";
 import { renderNotificationsSection } from "./settings/sections/notificationsSection";
 import { renderOutboxSection } from "./settings/sections/outboxSection";
 import { renderRecordingSection } from "./settings/sections/recordingSection";
+import { renderTranscriptionSection } from "./settings/sections/transcriptionSection";
 import { renderVaultFoldersSection } from "./settings/sections/vaultFoldersSection";
 
 /** Вкладка настроек плагина “Ассистент” в Obsidian. */
@@ -33,6 +34,7 @@ export class AssistantSettingsTab extends PluginSettingTab {
     this.renderVaultFoldersSection(containerEl);
     this.renderNotificationsSection(containerEl);
     this.renderRecordingSection(containerEl);
+    this.renderTranscriptionSection(containerEl);
     this.renderAutoRefreshSection(containerEl);
     this.renderLogSection(containerEl);
     this.renderOutboxSection(containerEl);
@@ -69,6 +71,10 @@ export class AssistantSettingsTab extends PluginSettingTab {
 
   private renderRecordingSection(containerEl: HTMLElement) {
     renderRecordingSection({ containerEl, plugin: this.plugin });
+  }
+
+  private renderTranscriptionSection(containerEl: HTMLElement) {
+    renderTranscriptionSection({ containerEl, plugin: this.plugin });
   }
 
   private renderAutoRefreshSection(containerEl: HTMLElement) {

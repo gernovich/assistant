@@ -12,6 +12,11 @@
   --assistant-radius-m: var(--radius-m, 10px);
 
   --assistant-font-size-xs: var(--font-ui-smaller, 12px);
+
+  /* Повестка: цвет по умолчанию (константа) */
+  --assistant-agenda-default-color: #999;
+  /* Повестка: цвет текста для отклонённых встреч (константа) */
+  --assistant-agenda-declined-text: #777;
 }
 
 .assistant-agenda {
@@ -87,12 +92,39 @@
 .assistant-agenda__allday-pill {
   padding: 4px 8px;
   border-radius: 999px;
-  background: var(--background-modifier-hover);
+  background: transparent;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--assistant-agenda-event-color, var(--assistant-agenda-default-color)) 75%,
+      transparent
+    );
   cursor: pointer;
   user-select: none;
   display: flex;
   gap: 6px;
   align-items: baseline;
+}
+
+.assistant-agenda__allday-pill--accepted {
+  background: color-mix(in srgb, var(--assistant-agenda-event-color, var(--assistant-agenda-default-color)) 25%, transparent);
+}
+
+.assistant-agenda__allday-pill--declined {
+  background: transparent;
+}
+
+.assistant-agenda__allday-pill--declined .assistant-agenda__event-title {
+  text-decoration: line-through;
+  color: var(--assistant-agenda-declined-text);
+}
+
+.assistant-agenda__allday-pill--tentative {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 8px,
+    color-mix(in srgb, var(--assistant-agenda-event-color, var(--assistant-agenda-default-color)) 25%, transparent) 8px 16px
+  );
 }
 
 .assistant-agenda__grid {
@@ -167,6 +199,23 @@
   border-radius: var(--assistant-radius-m);
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
+}
+
+/* LLM settings: params row (keep inputs compact so "Параметры" fits) */
+.assistant-llm-params__hint {
+  font-size: var(--assistant-font-size-xs);
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.assistant-llm-params__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.assistant-llm-params__row input {
+  width: 118px;
+  max-width: 118px;
 }
 
 .assistant-settings__calendar-title {
@@ -363,9 +412,36 @@
   display: flex;
   align-items: center;
   border-radius: var(--assistant-radius-m);
-  background: var(--background-modifier-hover);
+  background: transparent;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--assistant-agenda-event-color, var(--assistant-agenda-default-color)) 75%,
+      transparent
+    );
   overflow: hidden;
   cursor: pointer;
+}
+
+.assistant-agenda__block--accepted {
+  background: color-mix(in srgb, var(--assistant-agenda-event-color, var(--assistant-agenda-default-color)) 25%, transparent);
+}
+
+.assistant-agenda__block--declined {
+  background: transparent;
+}
+
+.assistant-agenda__block--declined .assistant-agenda__event-title {
+  text-decoration: line-through;
+  color: var(--assistant-agenda-declined-text);
+}
+
+.assistant-agenda__block--tentative {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 10px,
+    color-mix(in srgb, var(--assistant-agenda-event-color, var(--assistant-agenda-default-color)) 25%, transparent) 10px 20px
+  );
 }
 
 .assistant-agenda__block-time {
@@ -373,29 +449,6 @@
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
   margin-bottom: 2px;
-}
-
-.assistant-agenda__resp {
-  font-size: var(--assistant-font-size-xs);
-  opacity: 0.95;
-  margin-left: 6px;
-  white-space: nowrap;
-}
-
-.assistant-agenda__resp--accepted {
-  color: var(--color-green);
-}
-
-.assistant-agenda__resp--declined {
-  color: var(--color-red);
-}
-
-.assistant-agenda__resp--tentative {
-  color: var(--color-yellow);
-}
-
-.assistant-agenda__resp--needs-action {
-  color: var(--text-muted);
 }
 
 .assistant-agenda__caldot {
@@ -406,40 +459,10 @@
   opacity: 0.9;
 }
 
-.assistant-agenda__plan {
-  font-size: var(--assistant-font-size-xs);
-  opacity: 0.95;
-  white-space: nowrap;
-}
-
-.assistant-agenda__plan--accepted {
-  color: var(--color-green);
-}
-
-.assistant-agenda__plan--declined {
-  color: var(--color-red);
-}
-
-.assistant-agenda__plan--tentative {
-  color: var(--color-yellow);
-}
-
 .assistant-agenda__att {
   font-size: var(--assistant-font-size-xs);
   opacity: 0.8;
   white-space: nowrap;
-}
-
-.assistant-agenda__block--plan-accepted {
-  background: color-mix(in srgb, var(--color-green) 12%, var(--background-modifier-hover));
-}
-
-.assistant-agenda__block--plan-declined {
-  background: color-mix(in srgb, var(--color-red) 10%, var(--background-modifier-hover));
-}
-
-.assistant-agenda__block--plan-tentative {
-  background: color-mix(in srgb, var(--color-yellow) 10%, var(--background-modifier-hover));
 }
 
 .assistant-agenda__block-title {

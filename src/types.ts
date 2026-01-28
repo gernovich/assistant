@@ -60,8 +60,16 @@ export interface CalendarConfig {
   type: CalendarSourceType;
   /** Включён ли календарь в refresh/sync. */
   enabled: boolean;
-  /** Цвет календаря (в основном для CalDAV discovery; используется как резерв для `Event.color`, если у события нет COLOR). */
+  /** Цвет календаря с сервера (например CalDAV discovery: calendar-color). */
   color?: string;
+  /** Переопределённый цвет календаря в настройках (если задан, перекрывает `color`). */
+  colorOverride?: string;
+  /**
+   * Google Calendar: пользовательские подписи для цветов событий (event colorId -> label).
+   *
+   * Пример: { "1": "Мои", "2": "Важные", "3": "Плановые" }
+   */
+  googleColorLabels?: Record<string, string>;
   /** URL ICS, если `type = "ics_url"`. */
   url?: string;
   /** Настройки CalDAV, если `type = "caldav"`. */
@@ -198,6 +206,26 @@ export interface AssistantSettings {
     /** Сколько дней хранить лог‑файлы в `.obsidian/plugins/assistant/logs`. По умолчанию 7. */
     retentionDays: number;
   };
+
+  /**
+   * Транскрибация записей (ASR).
+   * Сейчас: максимально простой режим — внешний сервис Nexara (без диаризации, без нормализации).
+   */
+  transcription: {
+    /** Включить фоновую расшифровку прикреплённых файлов записи. */
+    enabled: boolean;
+    /** Текущий выбранный сервис транскрибации. */
+    provider: "nexara";
+    /** Период фонового поиска “не расшифровано” (минуты). */
+    pollMinutes: number;
+    /** Настройки провайдеров. */
+    providers: {
+      nexara: {
+        /** Токен Bearer (хранится в `.obsidian/plugins/assistant/data.json`). */
+        token: string;
+      };
+    };
+  };
 }
 
 /** Событие календаря (нормализованное представление для UI/синхронизации). */
@@ -302,6 +330,10 @@ export interface MeetingNoteDto {
   rrule?: string;
   reminders_minutes_before?: number[];
   event_color?: string;
+  /** Google Calendar API: colorId (1..11), если доступно. */
+  event_color_id?: string;
+  /** Человекочитаемая подпись метки (например “Важные”). */
+  event_color_label?: string;
   /** Все участники (person_id). */
   attendees?: string[];
   /** Участники по статусам (person_id). */

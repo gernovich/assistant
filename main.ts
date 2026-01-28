@@ -162,6 +162,10 @@ export default class AssistantPlugin extends Plugin {
     await this.controller.activateAgendaView();
   }
 
+  async activateChatView(): Promise<void> {
+    await this.controller.activateChatView();
+  }
+
   async activateLogView(): Promise<void> {
     await this.controller.activateLogView();
   }

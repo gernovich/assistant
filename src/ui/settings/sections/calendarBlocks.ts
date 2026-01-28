@@ -2,6 +2,7 @@ import { Setting } from "obsidian";
 import type AssistantPlugin from "../../../../main";
 import type { CalendarConfig } from "../../../types";
 import { createSettingsNotice } from "../helpers";
+import { mergeGoogleEventColorLabels } from "../../../domain/policies/googleEventColorLabels";
 
 /**
  * Отрисовать один блок календаря (ICS/CalDAV).
@@ -30,6 +31,23 @@ export function renderCalendarBlock(params: {
       calHeader.setText(name);
     }),
   );
+
+  new Setting(containerEl)
+    .setName("Цвет календаря (сервер)")
+    .setDesc(cal.color ? String(cal.color) : "—");
+
+  new Setting(containerEl)
+    .setName("Переопределить цвет календаря")
+    .setDesc("Если пусто — используется цвет календаря с сервера. Пример: #ff8800")
+    .addText((t) =>
+      t.setPlaceholder("#999").setValue(String((cal as any).colorOverride ?? "")).onChange(async (v) => {
+        await plugin.applySettingsCommand({
+          type: "calendar.update",
+          calendarId: cal.id,
+          patch: { colorOverride: String(v || "").trim() },
+        });
+      }),
+    );
 
   new Setting(containerEl).setName("Тип").addDropdown((dd) => {
     dd.addOption("ics_url", "ICS URL");
@@ -121,6 +139,40 @@ export function renderCalendarBlock(params: {
             b.setButtonText("Авторизоваться").onClick(async () => {
               await plugin.caldavAccounts.authorizeGoogle(selectedAcc.id);
               params.rerenderPreservingScroll();
+            }),
+          );
+      }
+
+      // Google Calendar API: подписи для цветов событий (colorId -> label).
+      if (method === "google_oauth" && hasToken) {
+        const cur = (cal as any).googleColorLabels as Record<string, string> | undefined;
+        const toText = (m?: Record<string, string>) => {
+          const entries = Object.entries(m ?? {});
+          entries.sort((a, b) => Number(a[0]) - Number(b[0]));
+          return entries.map(([k, v]) => `${k}=${v}`).join("\n");
+        };
+        const merged = mergeGoogleEventColorLabels(cur);
+        new Setting(containerEl)
+          .setName("Метки цветов Google (для событий)")
+          .setDesc("Формат: одна строка = colorId=Название. По умолчанию — стандартные названия Google (Lavender/Sage/…). Можно переопределить.")
+          .addTextArea((ta) =>
+            ta.setValue(toText(merged)).onChange(async (v) => {
+              const out: Record<string, string> = {};
+              for (const line of String(v ?? "").split("\n")) {
+                const s = line.trim();
+                if (!s) continue;
+                const idx = s.indexOf("=");
+                if (idx <= 0) continue;
+                const k = s.slice(0, idx).trim();
+                const val = s.slice(idx + 1).trim();
+                if (!k || !val) continue;
+                out[k] = val;
+              }
+              await plugin.applySettingsCommand({
+                type: "calendar.update",
+                calendarId: cal.id,
+                patch: { googleColorLabels: Object.keys(out).length ? out : null },
+              });
             }),
           );
       }

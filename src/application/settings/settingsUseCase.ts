@@ -20,6 +20,7 @@ export type SettingsUseCaseDeps = {
   rescheduleNotifications: () => void;
 
   setupAutoRefreshTimer: () => void;
+  setupTranscriptionTimer: () => void;
   updateRibbonIcons: () => void;
   applyRecordingMediaPermissions: () => void;
 };
@@ -56,6 +57,7 @@ export class SettingsUseCase {
     this.deps.rescheduleNotifications();
 
     this.deps.setupAutoRefreshTimer();
+    this.deps.setupTranscriptionTimer();
     this.deps.updateRibbonIcons();
     this.deps.applyRecordingMediaPermissions();
 

@@ -9,11 +9,18 @@ export interface CalendarRsvpWriter {
   setSettings?(settings: AssistantSettings): void;
 }
 
+/** Интерфейс для обратной записи “цвета встречи” (COLOR в VEVENT). */
+export interface CalendarMeetingColorWriter {
+  setMeetingColor(cal: CalendarConfig, ev: Event, color: string | null): Promise<void>;
+  setSettings?(settings: AssistantSettings): void;
+}
+
 export interface CalendarProviderRegistry {
   get(type: CalendarConfig["type"]): CalendarProvider | undefined;
   setSettings(settings: AssistantSettings): void;
   /** Обратная запись (может быть undefined, если нет провайдера записи). */
   rsvpWriter?: CalendarRsvpWriter;
+  meetingColorWriter?: CalendarMeetingColorWriter;
 }
 
 export function createDefaultCalendarProviderRegistry(settings: AssistantSettings): CalendarProviderRegistry {
@@ -39,5 +46,6 @@ export function createDefaultCalendarProviderRegistry(settings: AssistantSetting
       }
     },
     rsvpWriter: caldav as unknown as CalendarRsvpWriter,
+    meetingColorWriter: caldav as unknown as CalendarMeetingColorWriter,
   };
 }

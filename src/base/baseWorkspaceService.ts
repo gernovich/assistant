@@ -81,6 +81,8 @@ export class BaseWorkspaceService {
           "event_id",
           "organizer_email",
           "status",
+          "event_color_label",
+          "event_color",
           "attendees_accepted",
           "attendees_declined",
           "attendees_tentative",
@@ -141,19 +143,22 @@ export class BaseWorkspaceService {
    * не трогая остальные поля (columns/views/formulas и т.п.).
    */
   async syncBaseInFoldersToSettings(): Promise<void> {
-    await this.syncOneBaseInFolder(this.meetingsBaseFile, this.meetingsDir);
+    await this.syncOneBaseInFolder(this.meetingsBaseFile, this.meetingsDir, { ensureMeetingColumns: true });
     await this.syncOneBaseInFolder(this.protocolsBaseFile, this.protocolsDir);
     await this.syncOneBaseInFolder(this.peopleBaseFile, this.peopleDir);
     await this.syncOneBaseInFolder(this.projectsBaseFile, this.projectsDir);
   }
 
-  private async syncOneBaseInFolder(basePath: string, dir: string): Promise<void> {
+  private async syncOneBaseInFolder(basePath: string, dir: string, opts?: { ensureMeetingColumns?: boolean }): Promise<void> {
     const af = this.vault.getAbstractFileByPath(basePath);
     if (!af) return;
     if (!isTFile(af)) return;
 
     const cur = await this.vault.read(af);
-    const next = replaceAllInFolder(cur, dir);
+    let next = replaceAllInFolder(cur, dir);
+    if (opts?.ensureMeetingColumns) {
+      next = ensureMeetingsBaseColumns(next);
+    }
     if (next !== cur) await this.vault.modify(af, next);
   }
 }
@@ -179,4 +184,54 @@ function renderBaseYaml(params: { name: string; inFolder: string; order: string[
 function replaceAllInFolder(baseYaml: string, folder: string): string {
   // Меняем все встреченные `file.inFolder("...")` на актуальную папку карточек.
   return String(baseYaml ?? "").replace(/file\.inFolder\("([^"]*)"\)/g, `file.inFolder("${folder}")`);
+}
+
+function ensureMeetingsBaseColumns(baseYaml: string): string {
+  const lines = String(baseYaml ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const hasLabel = lines.some((l) => /^\s*-\s*event_color_label\s*$/i.test(l));
+  const hasHex = lines.some((l) => /^\s*-\s*event_color\s*$/i.test(l));
+  if (hasLabel && hasHex) return baseYaml;
+
+  // Ищем секцию order: ... и вставляем поля после status (если нашли).
+  let orderIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*order:\s*$/.test(lines[i] ?? "")) {
+      orderIdx = i;
+      break;
+    }
+  }
+  if (orderIdx < 0) return baseYaml;
+
+  // Определяем отступ списка (берём первый item после order:)
+  let insertAt = -1;
+  let indent = "      "; // дефолт как в renderBaseYaml()
+  for (let i = orderIdx + 1; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const m = /^(\s*)-\s+/.exec(line);
+    if (m) {
+      indent = m[1] ?? indent;
+      break;
+    }
+  }
+
+  // Вставка: после строки "- status", иначе в конец order-list.
+  for (let i = orderIdx + 1; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (/^\s*-\s*status\s*$/i.test(line)) {
+      insertAt = i + 1;
+      break;
+    }
+    // Конец order-list: встретили пустую строку или новый ключ верхнего уровня
+    if (/^\S/.test(line) || /^\s*$/.test(line)) {
+      insertAt = i;
+      break;
+    }
+  }
+  if (insertAt < 0) insertAt = lines.length;
+
+  const additions: string[] = [];
+  if (!hasLabel) additions.push(`${indent}- event_color_label`);
+  if (!hasHex) additions.push(`${indent}- event_color`);
+  lines.splice(insertAt, 0, ...additions);
+  return lines.join("\n");
 }

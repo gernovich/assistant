@@ -95,4 +95,21 @@ describe("requestUrlFetch", () => {
       throw: false,
     });
   });
+
+  it("не падает на 204 No Content (Response без body)", async () => {
+    const spy = vi.spyOn(obsidian, "requestUrl").mockResolvedValue({
+      status: 204,
+      headers: {},
+      text: "",
+      // Obsidian всё равно возвращает arrayBuffer — это и ломало Response(...) в браузерном Fetch.
+      arrayBuffer: new TextEncoder().encode("oops").buffer,
+      json: null,
+    });
+
+    const res = await requestUrlFetch("https://example.com/no-content", { method: "PUT", body: "x" });
+    expect(res.status).toBe(204);
+    const ab = await res.arrayBuffer();
+    expect(ab.byteLength).toBe(0);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
 });

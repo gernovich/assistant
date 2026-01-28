@@ -23,6 +23,7 @@ import { ProtocolFromActiveEventUseCase } from "../application/protocols/protoco
 import { CalendarRefreshUseCase } from "../application/calendar/calendarRefreshUseCase";
 import { RecordingDialogUseCase } from "../application/recording/recordingDialogUseCase";
 import { AutoRefreshUseCase } from "../application/calendar/autoRefreshUseCase";
+import { TranscriptionSchedulerUseCase } from "../application/recording/transcriptionSchedulerUseCase";
 import { RecordingDialog } from "../recording/recordingDialog";
 import { CaldavProvider } from "../calendar/providers/caldavProvider";
 import { runGoogleLoopbackOAuth } from "../caldav/googleOauth";
@@ -51,6 +52,11 @@ import { createRequire as createRequireNode } from "node:module";
 import type { CommandsController } from "../presentation/controllers/commandsController";
 import { ProtocolIndex } from "../protocols/protocolIndex";
 import type { DependencyContainer } from "tsyringe";
+import { DEFAULT_RECORDINGS_DIR } from "../domain/policies/recordingPaths";
+import { FM } from "../domain/policies/frontmatterKeys";
+import { EntityIndex } from "../vault/entityIndex";
+import { parseProtocolNoteFromCache } from "../domain/policies/frontmatterDtos";
+import { makeCalendarStub } from "../domain/policies/calendarStub";
 
 type AssistantControllerParams = {
   plugin: PluginPort;
@@ -106,6 +112,7 @@ export class AssistantController {
   private calendarRefreshUseCase?: CalendarRefreshUseCase;
   private recordingDialogUseCase?: RecordingDialogUseCase;
   private autoRefreshUseCase?: AutoRefreshUseCase;
+  private transcriptionSchedulerUseCase?: TranscriptionSchedulerUseCase;
   private authorizeGoogleCaldavUseCase: AuthorizeGoogleCaldavUseCase;
   private caldavAccountsUseCase: CaldavAccountsUseCase;
   private discoverCaldavCalendarsUseCase: DiscoverCaldavCalendarsUseCase;
@@ -202,6 +209,7 @@ export class AssistantController {
       },
     });
     this.di.register("assistant.controller.setupAutoRefreshTimer", { useValue: () => this.autoRefreshUseCase?.setup() });
+    this.di.register("assistant.controller.setupTranscriptionTimer", { useValue: () => this.transcriptionSchedulerUseCase?.setup() });
     this.di.register("assistant.controller.updateRibbonIcons", { useValue: () => this.updateRibbonIcons() });
     this.di.register("assistant.controller.applyRecordingMediaPermissions", { useValue: () => this.applyRecordingMediaPermissions() });
 
@@ -290,6 +298,7 @@ export class AssistantController {
     const commandsController: CommandsController = {
       openAgenda: () => void this.activateAgendaView(),
       openRecordingDialog: () => void this.openRecordingDialog(),
+      runTranscriptionNow: () => void this.transcriptionSchedulerUseCase?.runNow(),
       openLog: () => void this.activateLogView(),
       refreshCalendars: () => void this.refreshCalendars(),
       createMeetingCard: () => void this.createManualMeetingCard(),
@@ -310,6 +319,131 @@ export class AssistantController {
 
     this.setupRibbonIcons();
     this.updateRibbonIcons();
+
+    this.setupFileContextMenus();
+  }
+
+  private setupFileContextMenus(): void {
+    const app = (this.plugin as any)?.app;
+    const workspace = app?.workspace;
+    if (!workspace?.on) return;
+
+    // Obsidian: контекстное меню в файловом дереве / вкладках
+    this.plugin.registerEvent(
+      workspace.on("file-menu", (menu: any, file: any) => {
+        void this.onFileMenu(menu, file);
+      }),
+    );
+  }
+
+  private async onFileMenu(menu: any, file: any): Promise<void> {
+    if (!file || !isTFile(file)) return;
+
+    // 1) Аудиозаписи: "Перейти в протокол"
+    const recordingPrefix = `${String(DEFAULT_RECORDINGS_DIR).replace(/\/+$/g, "")}/`;
+    const p = String(file.path ?? "");
+    const ext = String(file.extension ?? "").toLowerCase();
+    const isAudio = p.startsWith(recordingPrefix) && ext !== "md";
+    if (isAudio) {
+      const proto = await this.findProtocolFileByRecordingPath(p);
+      if (proto) {
+        menu.addItem((it: any) => {
+          it.setTitle("Перейти в протокол")
+            .setIcon("file-text")
+            .onClick(() => void this.ctx.protocolNoteService.openProtocol(proto));
+        });
+      }
+      return;
+    }
+
+    // 2) Протоколы / встречи: быстрые действия и навигация
+    if (ext !== "md") return;
+    const fm = (this.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined) ?? undefined;
+    const assistantType = String((fm as any)?.[FM.assistantType] ?? "").trim();
+
+    // Протокол: "Перейти во встречу"
+    if (assistantType === "protocol") {
+      menu.addItem((it: any) => {
+        it.setTitle("Перейти во встречу")
+          .setIcon("link")
+          .onClick(() => void this.openMeetingFromProtocolFile(file));
+      });
+    }
+
+    // Карточка встречи: действия по текущей встрече / открытой карточке
+    if (assistantType === "calendar_event") {
+      menu.addSeparator?.();
+      menu.addItem((it: any) => {
+        it.setTitle("Создать протокол из открытой карточки")
+          .setIcon("file-plus")
+          .onClick(() => void this.createProtocolFromOpenMeeting());
+      });
+      menu.addItem((it: any) => {
+        it.setTitle("Создать протокол из текущей встречи")
+          .setIcon("file-plus")
+          .onClick(() => void this.createProtocolFromActiveEvent());
+      });
+      menu.addItem((it: any) => {
+        it.setTitle("Создать карточки людей из участников")
+          .setIcon("users")
+          .onClick(() => void this.createPeopleCardsFromActiveMeeting());
+      });
+    }
+  }
+
+  private async openMeetingFromProtocolFile(protocolFile: any): Promise<void> {
+    const fm0 =
+      (this.metadataCache.getFileCache(protocolFile)?.frontmatter as Record<string, unknown> | undefined) ?? undefined;
+    if (!fm0) {
+      this.notice.show("Ассистент: не удалось прочитать frontmatter протокола");
+      return;
+    }
+
+    // Обратная совместимость: если assistant_type отсутствует, но это протокол — считаем протоколом.
+    const fm: Record<string, unknown> = { ...fm0 };
+    const t = String((fm as any)[FM.assistantType] ?? "").trim();
+    if (!t) (fm as any)[FM.assistantType] = "protocol";
+
+    const pr = parseProtocolNoteFromCache(fm);
+    if (!pr.ok) {
+      this.notice.show(`Ассистент: не удалось распарсить протокол (${pr.error.message})`);
+      return;
+    }
+    const proto = pr.value;
+
+    const startMs = Date.parse(proto.start);
+    if (!Number.isFinite(startMs)) {
+      this.notice.show("Ассистент: в протоколе некорректный start");
+      return;
+    }
+
+    const ev: Event = {
+      calendar: makeCalendarStub({ id: String(proto.calendar_id), name: "" }),
+      id: String(proto.event_id),
+      summary: String(proto.summary ?? protocolFile.basename ?? "Встреча"),
+      start: new Date(startMs),
+      end: proto.end ? new Date(Date.parse(proto.end)) : undefined,
+    };
+
+    await this.ctx.eventNoteService.openEvent(ev);
+  }
+
+  private async findProtocolFileByRecordingPath(recordingVaultPath: string): Promise<any | null> {
+    const s = this.getSettings();
+    const protocolsRoot = String(s.folders.protocols || "").replace(/\/+$/g, "");
+    const rootPrefix = protocolsRoot ? `${protocolsRoot}/` : "";
+
+    const mdFiles = (this.vault.getMarkdownFiles?.() ?? []).filter((f: any) => String(f?.path || "").startsWith(rootPrefix));
+    const idx = new EntityIndex({ vault: this.vault, metadataCache: this.metadataCache });
+
+    for (const f of mdFiles) {
+      const fm = (this.metadataCache.getFileCache(f)?.frontmatter as any) ?? undefined;
+      const t = String(fm?.[FM.assistantType] ?? "");
+      if (t && t !== "protocol") continue;
+      const files = idx.readStringArrayFromCache(f, FM.files);
+      if (files.includes(recordingVaultPath)) return f;
+    }
+    return null;
   }
 
   /**
@@ -369,10 +503,12 @@ export class AssistantController {
     this.setupMeetingStatusAutoWriteBack();
     await this.refreshCalendars();
     this.autoRefreshUseCase?.setup();
+    this.transcriptionSchedulerUseCase?.setup();
   }
 
   onunload(): void {
     this.autoRefreshUseCase?.stop();
+    this.transcriptionSchedulerUseCase?.stop();
     this.ctx.notificationScheduler?.clear();
     void this.ctx.logFileWriter?.flush();
   }
@@ -801,6 +937,7 @@ export class AssistantController {
     this.calendarRefreshUseCase = this.di.resolve(CalendarRefreshUseCase);
     this.recordingDialogUseCase = this.di.resolve(RecordingDialogUseCase);
     this.autoRefreshUseCase = this.di.resolve(AutoRefreshUseCase);
+    this.transcriptionSchedulerUseCase = this.di.resolve(TranscriptionSchedulerUseCase);
   }
 
   async applyOutbox(): Promise<void> {
@@ -892,6 +1029,7 @@ export class AssistantController {
     this.closeExtraLeaves(existing, leaf);
     this.workspace.revealLeaf(leaf as any);
   }
+
 
   private closeExtraLeaves(existing: Array<any>, keepLeaf?: unknown): void {
     for (const leaf of existing) {
@@ -994,6 +1132,12 @@ export class AssistantController {
 
     return {
       recording: s.recording,
+      transcription: {
+        enabled: Boolean((s as any).transcription?.enabled),
+        provider: String((s as any).transcription?.provider ?? ""),
+        pollMinutes: Number((s as any).transcription?.pollMinutes ?? 0),
+        nexaraToken: (s as any).transcription?.providers?.nexara?.token ? "***" : "",
+      },
       log: s.log,
       notifications: s.notifications,
       calendar: {

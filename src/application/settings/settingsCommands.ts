@@ -8,8 +8,9 @@ export type CaldavAccountPatch = Partial<
 >;
 
 export type CalendarPatch = Partial<
-  Pick<CalendarConfig, "enabled" | "name" | "type" | "url" | "color"> & {
+  Pick<CalendarConfig, "enabled" | "name" | "type" | "url" | "color" | "colorOverride"> & {
     caldav?: Partial<NonNullable<CalendarConfig["caldav"]>>;
+    googleColorLabels?: Record<string, string> | null;
   }
 >;
 
@@ -26,6 +27,7 @@ export type SettingsCommand =
   | { type: "recording.update"; patch: Partial<RecordingPatch> }
   | { type: "calendarMeta.update"; patch: Partial<CalendarMetaPatch> }
   | { type: "log.update"; patch: Partial<LogPatch> }
+  | { type: "transcription.update"; patch: Partial<TranscriptionPatch> }
   | { type: "debug.update"; enabled: boolean };
 
 export type AssistantFoldersPatch = {
@@ -62,4 +64,11 @@ export type CalendarMetaPatch = {
 export type LogPatch = {
   maxEntries: number;
   retentionDays: number;
+};
+
+export type TranscriptionPatch = {
+  enabled: boolean;
+  provider: "nexara";
+  nexaraToken: string;
+  pollMinutes: number;
 };

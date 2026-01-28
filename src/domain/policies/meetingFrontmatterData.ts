@@ -18,6 +18,8 @@ export type MeetingFrontmatterData = {
   rrule?: string;
   remindersMinutesBefore?: number[];
   eventColor?: string;
+  eventColorId?: string;
+  eventColorLabel?: string;
   attendeesAll: string[];
   attendeesAccepted: string[];
   attendeesDeclined: string[];
@@ -60,6 +62,8 @@ export function buildMeetingFrontmatterData(ev: Event): MeetingFrontmatterData {
     rrule: ev.recurrence?.rrule,
     remindersMinutesBefore: remindersMinutesBefore.length ? remindersMinutesBefore : undefined,
     eventColor: ev.color?.value,
+    eventColorId: ev.color?.id ? String(ev.color.id) : undefined,
+    eventColorLabel: ev.color?.name ? String(ev.color.name) : undefined,
     attendeesAll: grouped.all,
     attendeesAccepted: grouped.accepted,
     attendeesDeclined: grouped.declined,

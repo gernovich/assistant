@@ -1,9 +1,9 @@
 import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type { AssistantSettings, Event } from "../types";
 import { makeEventKey } from "../ids/stableIds";
-import { rsvpStatusBadgeRu } from "../domain/policies/rsvpStatusBadgeRu";
 import { attendeesTooltipRu } from "../domain/policies/attendeesSummaryRu";
 import type { AgendaController } from "../application/agenda/agendaController";
+import { DEFAULT_CALENDAR_COLOR } from "../domain/policies/defaultCalendarColor";
 
 /** Тип Obsidian view для “Повестки”. */
 export const AGENDA_VIEW_TYPE = "assistant-agenda";
@@ -24,6 +24,8 @@ export class AgendaView extends ItemView {
   private dayOffset = 0;
   /** Оптимистичное значение status, чтобы UI обновлялся сразу после клика. */
   private optimisticPartstatByEventKey = new Map<string, Event["status"]>();
+  /** Оптимистичный payload цвета встречи (google:<id> | #hex | null). */
+  private optimisticMeetingColorPayloadByEventKey = new Map<string, string | null>();
 
   constructor(leaf: WorkspaceLeaf, settings: AssistantSettings, controller: AgendaController) {
     super(leaf);
@@ -153,11 +155,11 @@ export class AgendaView extends ItemView {
       const pills = box.createDiv({ cls: "assistant-agenda__allday-items" });
       for (const ev of allDay) {
         const pill = pills.createDiv({ cls: "assistant-agenda__allday-pill" });
+        pill.addClass(`assistant-agenda__allday-pill--${partstatUiToken(this.getMyPartstat(ev))}`);
+        pill.style.setProperty("--assistant-agenda-event-color", this.resolveEventColor(ev));
         const cal = this.settings.calendars.find((c) => c.id === ev.calendar.id);
         pill.title = this.buildEventTooltip(ev, cal?.name);
-        pill.createSpan({ text: ev.summary });
-        const resp = partstatLabel(ev.status);
-        if (resp) pill.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(ev.status)}` });
+        pill.createSpan({ text: ev.summary, cls: "assistant-agenda__event-title" });
         pill.onclick = () => {
           try {
             this.controller.openEvent(ev);
@@ -217,6 +219,8 @@ export class AgendaView extends ItemView {
     const blocks = layoutTimedEvents(timed, this.dayOffset);
     for (const b of blocks) {
       const node = timeline.createDiv({ cls: "assistant-agenda__block" });
+      node.addClass(`assistant-agenda__block--${partstatUiToken(this.getMyPartstat(b.event))}`);
+      node.style.setProperty("--assistant-agenda-event-color", this.resolveEventColor(b.event));
       node.style.top = `${b.top}px`;
       node.style.height = `${b.height}px`;
       node.style.left = `calc(${(b.col / b.colCount) * 100}% + 4px)`;
@@ -226,9 +230,7 @@ export class AgendaView extends ItemView {
       node.title = this.buildEventTooltip(b.event, cal?.name);
 
       const title = node.createDiv({ cls: "assistant-agenda__block-title" });
-      title.createSpan({ text: b.event.summary });
-      const resp = partstatLabel(b.event.status);
-      if (resp) title.createSpan({ text: resp, cls: `assistant-agenda__resp ${partstatClass(b.event.status)}` });
+      title.createSpan({ text: b.event.summary, cls: "assistant-agenda__event-title" });
 
       node.onclick = () => {
         try {
@@ -317,6 +319,39 @@ export class AgendaView extends ItemView {
       }
     }
 
+    // Цвет встречи (семантическая метка COLOR). Меняет значение на сервере (CalDAV) и влияет на последующие встречи (UID).
+    menu.addSeparator();
+    menu.addItem((it) => {
+      it.setTitle("Цвет встречи…")
+        .setIcon("palette")
+        .onClick(() => {
+          const currentHex = String(ev.color?.value ?? "").trim();
+          const currentGoogleId = String(ev.color?.id ?? "").trim();
+          const sub = new Menu();
+          sub.addItem((ii) => {
+            ii.setTitle(currentHex ? "✓ По умолчанию (сбросить)" : "По умолчанию (сбросить)")
+              .setIcon("rotate-ccw")
+              .onClick(() => void this.applyMeetingColor(ev, null));
+          });
+          sub.addSeparator();
+
+          const labels = this.controller.getCalendarColorLabels(ev.calendar.id);
+          for (const l of labels) {
+            const payload = String(l.id ?? "").trim();
+            const displayColor = String(l.color ?? "").trim();
+            if (!payload) continue;
+            sub.addItem((ii) => {
+              const isSelected =
+                payload.startsWith("google:") ? currentGoogleId === payload.slice("google:".length) : currentHex && currentHex === payload;
+              ii.setTitle(isSelected ? `✓ ${l.name}` : l.name).onClick(() => void this.applyMeetingColor(ev, payload));
+              // displayColor сейчас только для отображения (hex), payload может быть "google:<id>"
+              void displayColor;
+            });
+          }
+          sub.showAtPosition({ x: e.pageX, y: e.pageY });
+        });
+    });
+
     if (this.settings.debug?.enabled) {
       menu.addSeparator();
       menu.addItem((it) => {
@@ -337,6 +372,32 @@ export class AgendaView extends ItemView {
     return ev.status;
   }
 
+  private resolveEventColor(ev: Event): string {
+    const key = makeEventKey(ev.calendar.id, ev.id);
+    if (this.optimisticMeetingColorPayloadByEventKey.has(key)) {
+      const payload = this.optimisticMeetingColorPayloadByEventKey.get(key);
+      if (payload == null || payload === "") {
+        // Сброс к умолчанию: проваливаемся в fallback календаря ниже.
+      } else if (payload.startsWith("google:")) {
+        const labels = this.controller.getCalendarColorLabels(ev.calendar.id);
+        const hit = labels.find((l) => String(l.id ?? "").trim() === payload);
+        const hex = String(hit?.color ?? "").trim();
+        if (hex) return hex;
+      } else {
+        // payload = hex
+        return payload;
+      }
+    }
+    const explicit = String(ev.color?.value ?? "").trim();
+    if (explicit) return explicit;
+    const cal = this.settings.calendars.find((c) => c.id === ev.calendar.id);
+    const override = cal && typeof (cal as any).colorOverride === "string" ? String((cal as any).colorOverride).trim() : "";
+    if (override) return override;
+    const calColor = cal && typeof (cal as any).color === "string" ? String((cal as any).color).trim() : "";
+    if (calColor) return calColor;
+    return DEFAULT_CALENDAR_COLOR;
+  }
+
   private async applyMyPartstat(ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> {
     const key = makeEventKey(ev.calendar.id, ev.id);
     this.optimisticPartstatByEventKey.set(key, partstat);
@@ -350,15 +411,55 @@ export class AgendaView extends ItemView {
     }
   }
 
+  private async applyMeetingColor(ev: Event, color: string | null): Promise<void> {
+    const key = makeEventKey(ev.calendar.id, ev.id);
+    const prev = this.optimisticMeetingColorPayloadByEventKey.has(key) ? this.optimisticMeetingColorPayloadByEventKey.get(key) : undefined;
+    this.optimisticMeetingColorPayloadByEventKey.set(key, color);
+    this.render();
+    try {
+      await this.controller.setMeetingColor(ev, color);
+    } catch (err) {
+      // Откат оптимистичного цвета
+      if (prev === undefined) this.optimisticMeetingColorPayloadByEventKey.delete(key);
+      else this.optimisticMeetingColorPayloadByEventKey.set(key, prev);
+      this.render();
+      const msg = err instanceof Error ? err.message : String(err ?? "");
+      new Notice(msg || "Ассистент: не удалось изменить цвет встречи");
+    } finally {
+      // Успех: данные придут с refresh, снимаем оверрайд.
+      this.optimisticMeetingColorPayloadByEventKey.delete(key);
+      this.render();
+    }
+  }
+
   private buildEventTooltip(ev: Event, calendarName?: string): string {
     const parts: string[] = [];
     const calName = String(calendarName ?? "").trim();
     if (calName) parts.push(`Календарь: ${calName}`);
+    parts.push(`Цветовая метка: ${this.resolveEventColorLabel(ev)}`);
     const org = String(ev.organizer?.emails?.[0] ?? "").trim();
     if (org) parts.push(`Организатор: ${org}`);
     const att = attendeesTooltip(ev);
     if (att) parts.push(att);
     return parts.join("\n");
+  }
+
+  private resolveEventColorLabel(ev: Event): string {
+    const direct = String(ev.color?.name ?? "").trim();
+    if (direct) return direct;
+    const id = String(ev.color?.id ?? "").trim();
+    if (id) {
+      const labels = this.controller.getCalendarColorLabels(ev.calendar.id);
+      const hit = labels.find((l) => String(l.id ?? "").trim() === `google:${id}`);
+      if (hit) {
+        const raw = String(hit.name ?? "").trim();
+        // Обычно hit.name у нас вида "Важные (#aabbcc)" — для tooltip берём только подпись.
+        const short = raw.replace(/\s*\([^)]*\)\s*$/g, "").trim();
+        if (short) return short;
+      }
+      return "Нет";
+    }
+    return "Нет";
   }
 
   /**
@@ -398,16 +499,11 @@ function formatWhen(ev: Event): string {
   return ev.start.toLocaleString(RU, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function partstatLabel(ps: Event["status"]): string {
-  return rsvpStatusBadgeRu(ps);
-}
-
-function partstatClass(ps: Event["status"]): string {
-  if (ps === "accepted") return "assistant-agenda__resp--accepted";
-  if (ps === "declined") return "assistant-agenda__resp--declined";
-  if (ps === "tentative") return "assistant-agenda__resp--tentative";
-  if (ps === "needs_action") return "assistant-agenda__resp--needs-action";
-  return "";
+function partstatUiToken(ps: Event["status"] | undefined): "accepted" | "declined" | "tentative" | "needs-action" {
+  if (ps === "accepted") return "accepted";
+  if (ps === "declined") return "declined";
+  if (ps === "tentative") return "tentative";
+  return "needs-action";
 }
 
 function attendeesTooltip(ev: Event): string {

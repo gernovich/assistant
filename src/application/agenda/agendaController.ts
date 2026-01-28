@@ -75,6 +75,16 @@ export class AgendaController {
     return this.actions.setMyPartstat(ev, partstat);
   }
 
+  /** Изменить “цвет встречи” (COLOR в VEVENT). */
+  async setMeetingColor(ev: Event, color: string | null): Promise<void> {
+    await this.calendarService.setMeetingColor(ev, color);
+  }
+
+  /** Список доступных “ярлыков/цветов” для календаря. */
+  getCalendarColorLabels(calendarId: string): Array<{ id: string; name: string; color: string }> {
+    return this.calendarService.getCalendarColorLabels(calendarId);
+  }
+
   getProtocolMenuState(ev: Event): Promise<AgendaProtocolMenuState> {
     return this.actions.getProtocolMenuState(ev);
   }

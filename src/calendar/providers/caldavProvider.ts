@@ -337,6 +337,111 @@ export class CaldavProvider implements CalendarProvider {
       defaultAccountType: "caldav",
     });
   }
+
+  /** Установить/сбросить COLOR в VEVENT (цвет встречи). */
+  async setMeetingColor(cal: CalendarConfig, ev: Event, color: string | null): Promise<void> {
+    if (cal.type !== "caldav") return;
+    const cfg = cal.caldav;
+    if (!cfg) return;
+    const account = this.settings.caldav.accounts.find((a) => a.id === cfg.accountId);
+    if (!account) return;
+    const readiness = getCaldavAccountReadiness(account);
+    if (!readiness.ok) return;
+
+    const client = await this.getOrLoginClient(account);
+    const calendar: DAVCalendar = {
+      url: cfg.calendarUrl,
+      displayName: cal.name,
+    };
+
+    const start = new Date(ev.start.getTime() - 12 * 60 * 60_000);
+    const end = new Date(ev.start.getTime() + 36 * 60 * 60_000);
+    const objects = await client.fetchCalendarObjects({
+      calendar,
+      timeRange: { start: start.toISOString(), end: end.toISOString() },
+      expand: false,
+      useMultiGet: true,
+    });
+
+    const myEmails = splitEmails((this.settings.calendar.myEmail || account.username).trim());
+    const target = findBestCalendarObject(objects as any, ev, myEmails);
+    if (!target)
+      return await Promise.reject(
+        new AppError({
+          code: APP_ERROR.NOT_FOUND,
+          message: "Ассистент: не удалось найти CalDAV object для этого события (UID/DTSTART не совпали)",
+        }),
+      );
+
+    const uid = String(ev.id ?? "").trim();
+    if (!uid) return;
+    const updated = updateEventColorInIcal(String((target as any).data ?? ""), uid, color);
+    if (updated === String((target as any).data ?? "")) return;
+
+    const res = await client.updateCalendarObject({
+      calendarObject: { ...(target as any), data: updated },
+    });
+    if (!res.ok) {
+      const txt = await safeReadText(res);
+      return await Promise.reject(
+        new AppError({
+          code: APP_ERROR.CALDAV_WRITEBACK,
+          message: `Ассистент: обратная запись CalDAV не удалась (HTTP ${res.status} ${res.statusText})`,
+          cause: txt ? String(txt) : undefined,
+        }),
+      );
+    }
+  }
+}
+
+export function updateEventColorInIcal(ical: string, uid: string, color: string | null): string {
+  const wantUid = String(uid ?? "").trim();
+  if (!wantUid) return ical;
+  const nextColor = color == null ? "" : String(color).trim();
+
+  return String(ical ?? "").replace(/BEGIN:VEVENT[\s\S]*?\nEND:VEVENT/gm, (ve) => {
+    const blockUid = getIcsProp(ve, "UID");
+    if (!blockUid || blockUid.trim() !== wantUid) return ve;
+
+    const lines = ve.split("\n");
+    const out: string[] = [];
+    let inserted = false;
+    let removedAny = false;
+    for (const line of lines) {
+      if (/^COLOR(?:;[^:]*)?:/i.test(line)) {
+        removedAny = true;
+        continue; // убираем все COLOR
+      }
+      out.push(line);
+    }
+
+    if (nextColor) {
+      // Вставляем рядом с DTSTART (если есть), иначе перед END:VEVENT
+      let insertAt = -1;
+      for (let i = 0; i < out.length; i++) {
+        if (/^DTSTART/i.test(out[i] ?? "")) {
+          insertAt = i + 1;
+          break;
+        }
+      }
+      if (insertAt < 0) {
+        for (let i = out.length - 1; i >= 0; i--) {
+          if (/^END:VEVENT/i.test(out[i] ?? "")) {
+            insertAt = i;
+            break;
+          }
+        }
+      }
+      if (insertAt < 0) insertAt = out.length;
+      out.splice(insertAt, 0, `COLOR:${nextColor}`);
+      inserted = true;
+    }
+
+    // Если ничего не менялось — вернуть оригинал
+    if (!removedAny && !inserted) return ve;
+    if (removedAny && !nextColor) return out.join("\n");
+    return out.join("\n");
+  });
 }
 
 function isGoogleCaldavServerUrl(url: string): boolean {
@@ -439,7 +544,7 @@ function hasAttendeeForAnyEmail(block: string, emails: string[]): boolean {
   return false;
 }
 
-function updateMyAttendeePartstatInIcal(ical: string, myEmails: string[], desiredPartstat: string): string {
+export function updateMyAttendeePartstatInIcal(ical: string, myEmails: string[], desiredPartstat: string): string {
   // Обновляем все VEVENT в объекте (некоторые серверы держат один VEVENT на объект, но лучше не предполагать).
   return ical.replace(/BEGIN:VEVENT[\s\S]*?\nEND:VEVENT/gm, (ve) => updateMyAttendeePartstatInVevent(ve, myEmails, desiredPartstat));
 }
@@ -463,6 +568,37 @@ function updateMyAttendeePartstatInVevent(vevent: string, myEmails: string[], de
     changed = true;
     break;
   }
+
+  // Резерв: некоторые серверы не добавляют организатора в ATTENDEE (только ORGANIZER).
+  // Если я — организатор, добавляем себя как ATTENDEE и проставляем PARTSTAT.
+  if (!changed) {
+    const orgRaw = getIcsProp(vevent, "ORGANIZER");
+    const orgEmail = orgRaw ? normalizeMailto(orgRaw) : "";
+    if (orgEmail && myEmails.includes(orgEmail)) {
+      const attendeeLine = `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=${desiredPartstat}:mailto:${orgEmail}`;
+
+      // Вставим сразу после ORGANIZER, если он есть; иначе — перед END:VEVENT.
+      let insertAt = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (/^ORGANIZER/i.test(lines[i] ?? "")) {
+          insertAt = i + 1;
+          break;
+        }
+      }
+      if (insertAt < 0) {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (/^END:VEVENT/i.test(lines[i] ?? "")) {
+            insertAt = i;
+            break;
+          }
+        }
+      }
+      if (insertAt < 0) insertAt = lines.length;
+      lines.splice(insertAt, 0, attendeeLine);
+      changed = true;
+    }
+  }
+
   return changed ? lines.join("\n") : vevent;
 }
 

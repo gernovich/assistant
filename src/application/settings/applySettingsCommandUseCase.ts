@@ -128,6 +128,22 @@ function applySettingsCommandMutate(s: AssistantSettings, cmd: SettingsCommand, 
         const v = p.color.trim();
         cal.color = v ? v : undefined;
       }
+      if (typeof p.colorOverride === "string") {
+        const v = p.colorOverride.trim();
+        (cal as any).colorOverride = v ? v : undefined;
+      }
+      if (p.googleColorLabels === null) {
+        (cal as any).googleColorLabels = undefined;
+      } else if (p.googleColorLabels && typeof p.googleColorLabels === "object") {
+        const out: Record<string, string> = {};
+        for (const [k, v] of Object.entries(p.googleColorLabels)) {
+          const kk = String(k ?? "").trim();
+          const vv = String(v ?? "").trim();
+          if (!kk || !vv) continue;
+          out[kk] = vv;
+        }
+        (cal as any).googleColorLabels = Object.keys(out).length ? out : undefined;
+      }
 
       if (p.type === "ics_url" || p.type === "caldav") {
         const next = p.type;
@@ -213,6 +229,15 @@ function applySettingsCommandMutate(s: AssistantSettings, cmd: SettingsCommand, 
       const p = cmd.patch ?? {};
       if (typeof p.maxEntries === "number") s.log.maxEntries = sanitizeNumber(p.maxEntries, 2048, { min: 10, max: 20000 });
       if (typeof p.retentionDays === "number") s.log.retentionDays = sanitizeNumber(p.retentionDays, 7, { min: 1, max: 365 });
+      return;
+    }
+
+    case "transcription.update": {
+      const p = cmd.patch ?? {};
+      if (typeof p.enabled === "boolean") s.transcription.enabled = p.enabled;
+      if (p.provider === "nexara") s.transcription.provider = "nexara";
+      if (typeof p.nexaraToken === "string") s.transcription.providers.nexara.token = p.nexaraToken;
+      if (typeof p.pollMinutes === "number") s.transcription.pollMinutes = sanitizeNumber(p.pollMinutes, 20, { min: 1, max: 24 * 60 });
       return;
     }
 

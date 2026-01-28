@@ -365,6 +365,9 @@ function renderEventFile(ev: Event, includeUserSections: boolean): string {
       attendeesTentative: FM.attendeesTentative,
       attendeesNeedsAction: FM.attendeesNeedsAction,
       attendeesUnknown: FM.attendeesUnknown,
+      eventColor: FM.eventColor,
+      eventColorId: FM.eventColorId,
+      eventColorLabel: FM.eventColorLabel,
     },
     escape: yamlEscape,
   });

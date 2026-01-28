@@ -144,6 +144,8 @@
 | Имя           | `Calendar.name`   | `settings.json`  | + (в tooltip)   | Пользователь → настройки |
 | Тип           | `Calendar.type`   | `settings.json`  |                 | Пользователь → настройки |
 | Конфиг        | `Calendar.config` | `settings.json`  |                 | Пользователь → настройки |
+| Цвет          | `Calendar.color`  | `settings.json`  |                 | Пользователь → настройки |
+
 
 ## Конфиг календаря CalendarConfig
 
@@ -156,6 +158,7 @@
 | ICS URL        | `CalendarConfig.url?`               | `settings.json`  |                 | Пользователь → настройки |
 | CalDAV account | `CalendarConfig.caldav.accountId`   | `settings.json`  |                 | Пользователь → настройки |
 | CalDAV url     | `CalendarConfig.caldav.calendarUrl` | `settings.json`  |                 | Пользователь → настройки |
+| Цвет           | `CalendarConfig.color`              | `settings.json`  |                 | Пользователь → настройки |
 
 ## Аккаунт CalendarAccount
 
@@ -203,7 +206,9 @@
 | Статус        | `Event.status`      | `PARTSTAT` (RSVP)                    | `PARTSTAT` (read-only)               | `status`                          | +               | CalDAV: календарь ↔ плагин → vault                  |
 | Повторения    | `Event.recurrence`  | `RRULE` / `EXDATE` / `RECURRENCE-ID` | `RRULE` / `EXDATE` / `RECURRENCE-ID` | `rrule`                           |                 | Календарь → плагин → vault (сейчас сохраняем RRULE) |
 | Уведомления   | `Event.reminders`   | `VALARM`                             | `VALARM`                             | `reminders_minutes_before`        |                 | Календарь → плагин → vault (сейчас minutesBefore)   |
-| Цвет          | `Event.color`       | event color (цель)                   | `COLOR`                              | `event_color`                     |                 | Сейчас: ICS → плагин → vault (COLOR); CalDAV: цель  |
+| Цвет          | `Event.color`       | event color                          | `COLOR`                              | `event_color`                     |                 | Сейчас: Google API/ICS → плагин → vault             |
+| Цветовая метка | `Event.color.name` | Google Calendar event colorId label | —                                    | `event_color_label`               | +               | Google API/настройки → плагин → vault               |
+| Цвет (ID)     | `Event.color.id`    | Google Calendar `colorId`            | —                                    | `event_color_id`                  |                 | Google API → плагин → vault                         |
 
 **Идентичность встречи (в vault)**: `(calendar_id, event_id)` (одно `event_id` без `calendar_id` не уникально).  
 **Стабильный ключ для индексов**: `calendar_id:event_id` (вычисляется, отдельным полем не хранится).
