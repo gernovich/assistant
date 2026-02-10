@@ -77,6 +77,16 @@ function installObsidianSettingMock(buttons: ButtonRec[]) {
       cb(dd);
       return this;
     }
+    addSlider(cb: (slider: any) => void) {
+      const slider = {
+        setLimits: (_min: number, _max: number, _step: number) => slider,
+        setValue: (_v: number) => slider,
+        onChange: (_fn: any) => slider,
+        sliderEl: { classList: { add: () => {} }, setAttribute: () => {} },
+      };
+      cb(slider);
+      return this;
+    }
   }
 
   vi.doMock("obsidian", () => ({ Setting: FakeSetting }));

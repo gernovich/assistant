@@ -12,6 +12,7 @@ import type { RecordingController } from "../presentation/controllers/recordingC
 import { createDialogTransport } from "../presentation/electronWindow/transport/transportFactory";
 import type { WindowTransport } from "../presentation/electronWindow/transport/windowTransport";
 import type { TransportRegistry } from "../presentation/electronWindow/transport/transportRegistry";
+import type { RecordingVizNormalizerFn } from "../domain/policies/recordingVizNormalizePolicy";
 import { RecordingVizNormalizer } from "./recordingVizNormalizer";
 import { makeOccurrenceKey } from "../ids/stableIds";
 
@@ -42,6 +43,8 @@ type RecordingDialogParams = {
   /** Абсолютный путь к директории плагина (для preload скрипта). */
   pluginDirPath?: string | null;
   transportRegistry?: TransportRegistry;
+  /** Политики нормализации для визуализации: сырое значение → 0..1. По одному на канал (mic, monitor). */
+  vizPolicies: { mic: RecordingVizNormalizerFn; monitor: RecordingVizNormalizerFn };
 };
 
 /**
@@ -203,11 +206,13 @@ export class RecordingDialog {
     void win.loadURL(url);
 
     const micVizNormalizer = new RecordingVizNormalizer({
+      normalizePolicy: this.params.vizPolicies.mic,
       outputIntervalMs: 33,
       logIntervalMs: 1000,
       onLog: (m) => this.params.onLog?.(m),
     });
     const monitorVizNormalizer = new RecordingVizNormalizer({
+      normalizePolicy: this.params.vizPolicies.monitor,
       outputIntervalMs: 33,
       logIntervalMs: 1000,
       onLog: (m) => this.params.onLog?.(m),
@@ -228,6 +233,7 @@ export class RecordingDialog {
       transport.send(payload);
     };
 
+    let pendingVizPayload: { mic01: number; monitor01: number } | null = null;
     const pushViz = (p: { mic01: number; monitor01: number }) => {
       try {
         this.vizPushInFlight = true;
@@ -235,6 +241,11 @@ export class RecordingDialog {
         transport.send(payload);
       } finally {
         this.vizPushInFlight = false;
+        if (pendingVizPayload) {
+          const next = pendingVizPayload;
+          pendingVizPayload = null;
+          pushViz(next);
+        }
       }
     };
     const pushVizClear = () => {
@@ -246,6 +257,7 @@ export class RecordingDialog {
       }
     };
     const clearViz = () => {
+      pendingVizPayload = null;
       micVizNormalizer.reset();
       monitorVizNormalizer.reset();
       pushViz({ mic01: 0, monitor01: 0 });
@@ -264,7 +276,6 @@ export class RecordingDialog {
     let lastVizLogAtMs = 0;
     this.vizTimer = window.setInterval(() => {
       if (!this.win) return;
-      if (this.vizPushInFlight) return;
       const st = this.params.recordingController.getStats();
       const status = st.status as RecordingStatus;
       const now = Date.now();
@@ -297,13 +308,18 @@ export class RecordingDialog {
       const mic = micVizNormalizer.pull(now);
       const monitor = monitorVizNormalizer.pull(now);
       if (mic == null && monitor == null) return;
+      const payload = { mic01: Number(mic ?? 0), monitor01: Number(monitor ?? 0) };
+      if (this.vizPushInFlight) {
+        pendingVizPayload = payload;
+        return;
+      }
       if (now - lastVizLogAtMs > 1000) {
         lastVizLogAtMs = now;
         this.params.onLog?.(
-          `Визуализация: отправка viz в окно mic01=${Number(mic ?? 0).toFixed(3)} monitor01=${Number(monitor ?? 0).toFixed(3)}`,
+          `Визуализация: отправка viz в окно mic01=${payload.mic01.toFixed(3)} monitor01=${payload.monitor01.toFixed(3)}`,
         );
       }
-      pushViz({ mic01: Number(mic ?? 0), monitor01: Number(monitor ?? 0) });
+      pushViz(payload);
     }, 33);
     this.statsTimer = window.setInterval(() => pushStats(this.params.recordingController.getStats()), 1000);
 

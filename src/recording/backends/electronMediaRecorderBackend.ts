@@ -5,7 +5,6 @@ import type { ElectronSession } from "../recordingSessionTypes";
 
 import { recordingChunkFileName } from "../../domain/policies/recordingFileNaming";
 import { recordingExtFromMimeType } from "../../domain/policies/recordingExt";
-import { amp01FromTimeDomainRmsPolicy } from "../../domain/policies/recordingVizAmp";
 import { pickMediaRecorderMimeType } from "../../domain/policies/mediaRecorderMimeType";
 import { pickDesktopCapturerSourceId } from "../../domain/policies/desktopCapturerSource";
 
@@ -30,6 +29,7 @@ export class ElectronMediaRecorderBackend {
     private params: {
       isActiveSession: (s: ElectronSession) => boolean;
       getOnViz: () => ((p: { mic01: number; monitor01: number }) => void) | undefined;
+      getSettings?: () => { recording?: { electronMicLevel?: number } };
       log: Logger;
       writeBinary: (path: string, data: ArrayBuffer) => Promise<void>;
       onFileSaved?: (recordingFilePath: string) => void;
@@ -104,9 +104,23 @@ export class ElectronMediaRecorderBackend {
     }
   }
 
-  private async getMicStreamForElectron(): Promise<{ stream: MediaStream; inputStreams: MediaStream[] }> {
+  private async getMicStreamForElectron(): Promise<{
+    stream: MediaStream;
+    inputStreams: MediaStream[];
+    audioCtx?: AudioContext;
+  }> {
     const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-    return { stream: mic, inputStreams: [mic] };
+    const level = Number(this.params.getSettings?.().recording?.electronMicLevel ?? 1);
+    const gain = Number.isFinite(level) && level >= 0.01 && level <= 2 ? level : 1;
+    if (gain === 1) return { stream: mic, inputStreams: [mic] };
+    const ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(mic);
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = gain;
+    const dest = ctx.createMediaStreamDestination();
+    src.connect(gainNode);
+    gainNode.connect(dest);
+    return { stream: dest.stream, inputStreams: [mic], audioCtx: ctx };
   }
 
   private attachRecorderHandlers(session: ElectronSession, recorder: MediaRecorder): void {
@@ -148,10 +162,14 @@ export class ElectronMediaRecorderBackend {
 
   private setupViz(session: ElectronSession): void {
     try {
-      const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextCtor) return;
-
-      const audioCtx: AudioContext = new AudioContextCtor();
+      let audioCtx = session.audioCtx;
+      if (!audioCtx) {
+        const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextCtor) return;
+        audioCtx = new AudioContextCtor();
+        session.audioCtx = audioCtx;
+      }
+      if (!audioCtx) return;
       const source = audioCtx.createMediaStreamSource(session.mediaStream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
@@ -159,7 +177,6 @@ export class ElectronMediaRecorderBackend {
       source.connect(analyser);
       const time = new Uint8Array(analyser.fftSize);
 
-      session.audioCtx = audioCtx;
       session.analyser = analyser;
       session.time = time;
 
@@ -177,8 +194,7 @@ export class ElectronMediaRecorderBackend {
             n++;
           }
           const rms = n ? Math.sqrt(sumSq / n) : 0;
-          const amp01 = amp01FromTimeDomainRmsPolicy(rms, 2.2);
-          this.params.getOnViz()?.({ mic01: amp01, monitor01: 0 });
+          this.params.getOnViz()?.({ mic01: rms, monitor01: 0 });
         } catch {
           // Игнорируем ошибки расчёта визуализации.
         }
@@ -194,9 +210,10 @@ export class ElectronMediaRecorderBackend {
   async startSession(session: ElectronSession): Promise<void> {
     // В текущем поведении используем только микрофон (как было в RecordingService).
     // Захват звука рабочего стола/системного оставлен как опциональный метод на будущее.
-    const { stream: mediaStream, inputStreams } = await this.getMicStreamForElectron();
-    session.mediaStream = mediaStream;
-    session.inputStreams = inputStreams;
+    const result = await this.getMicStreamForElectron();
+    session.mediaStream = result.stream;
+    session.inputStreams = result.inputStreams;
+    if (result.audioCtx) session.audioCtx = result.audioCtx;
 
     const recorder = this.createRecorder(session);
     session.recorder = recorder;

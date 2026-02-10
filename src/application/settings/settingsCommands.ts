@@ -49,6 +49,9 @@ export type RecordingPatch = {
   gstreamerMonitorSource: string;
   gstreamerMicProcessing: "none" | "normalize" | "voice";
   gstreamerMonitorProcessing: "none" | "normalize" | "voice";
+  gstreamerMicMixLevel: number;
+  gstreamerMonitorMixLevel: number;
+  electronMicLevel: number;
   chunkMinutes: number;
   autoStartEnabled: boolean;
   autoStartSeconds: number;

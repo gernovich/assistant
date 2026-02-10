@@ -46,11 +46,17 @@ export function startGstKitRecordWorker(params: {
   processingMic: "none" | "normalize" | "voice";
   processingMonitor: "none" | "normalize" | "voice";
   levelIntervalMs: number;
+  /** Уровень микрофона в микшере (0.01..2). */
+  micMixLevel?: number;
+  /** Уровень монитора в микшере (0.01..2). */
+  monitorMixLevel?: number;
   onMessage?: (m: GstKitRecordWorkerMsg) => void;
   log: Logger;
 }): GstKitRecordProcess {
   const node = params.nodeBinary || process.env.ASSISTANT_NODE_BINARY || "node";
   const workerPath = path.resolve(params.pluginDirPath, "gst-record-worker.cjs");
+  const micMix = Number(params.micMixLevel);
+  const monMix = Number(params.monitorMixLevel);
   const child = spawn(
     node,
     [
@@ -61,6 +67,8 @@ export function startGstKitRecordWorker(params: {
       String(params.processingMic || "none"),
       String(params.processingMonitor || "none"),
       String(Math.max(10, Math.floor(params.levelIntervalMs || 100))),
+      String(Number.isFinite(micMix) && micMix >= 0.01 && micMix <= 2 ? micMix : 1),
+      String(Number.isFinite(monMix) && monMix >= 0.01 && monMix <= 2 ? monMix : 1),
     ],
     {
       cwd: params.pluginDirPath,

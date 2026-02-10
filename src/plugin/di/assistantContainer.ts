@@ -52,6 +52,8 @@ import { CalendarRefreshUseCase } from "../../application/calendar/calendarRefre
 import { RecordingDialogUseCase } from "../../application/recording/recordingDialogUseCase";
 import { AutoRefreshUseCase } from "../../application/calendar/autoRefreshUseCase";
 import { TranscriptionSchedulerUseCase } from "../../application/recording/transcriptionSchedulerUseCase";
+import { TranscribeFileUseCase } from "../../application/transcription/transcribeFileUseCase";
+import { NexaraTranscriptionProvider } from "../../transcription/nexaraTranscriptionProvider";
 import { ProtocolIndex } from "../../protocols/protocolIndex";
 import { DefaultLogController } from "../../presentation/controllers/logController";
 import { AgendaController } from "../../application/agenda/agendaController";
@@ -378,6 +380,9 @@ export function createAssistantContainer(params: {
         openLog: cc.resolve<() => void>("assistant.controller.openLogView"),
         openEvent: cc.resolve<(ev: any) => void>("assistant.controller.openEvent"),
         openRecorder: cc.resolve<(ev: any) => void>("assistant.controller.openRecorder"),
+        refreshCalendars: cc.resolve<() => Promise<void>>("assistant.controller.refreshCalendars"),
+        refreshCalendar: cc.resolve<(calendarId: string) => Promise<void>>("assistant.controller.refreshCalendar"),
+        openSettings: cc.resolve<() => void>("assistant.controller.openSettings"),
         setMyPartstat: cc.resolve<(ev: any, partstat: any) => Promise<void>>("assistant.controller.setMyPartstat"),
         getProtocolMenuState: cc.resolve<(ev: any) => Promise<any>>("assistant.controller.getProtocolMenuState"),
         openCurrentProtocol: cc.resolve<(ev: any) => void>("assistant.controller.openCurrentProtocol"),
@@ -613,6 +618,28 @@ export function createAssistantContainer(params: {
         log: cc.resolve<LogService>("assistant.logService"),
         fetch: globalThis.fetch.bind(globalThis),
       }),
+  });
+
+  c.register(TranscribeFileUseCase, {
+    useFactory: (cc) => {
+      const getSettings = cc.resolve<() => AssistantSettings>("assistant.controller.getSettings");
+      const fetch = globalThis.fetch.bind(globalThis);
+      const log = cc.resolve<LogService>("assistant.logService");
+      return new TranscribeFileUseCase({
+        app: cc.resolve<App>("obsidian.app"),
+        getProvider: () => {
+          const s = getSettings();
+          const providerId = s.transcription?.provider === "nexara" ? "nexara" : "nexara";
+          if (providerId === "nexara") {
+            const token = String(s.transcription?.providers?.nexara?.token ?? "").trim();
+            if (!token) return null;
+            return new NexaraTranscriptionProvider({ fetch, token, log });
+          }
+          return null;
+        },
+        log,
+      });
+    },
   });
 
   return c;

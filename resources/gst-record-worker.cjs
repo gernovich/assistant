@@ -127,15 +127,24 @@ function getLevelRms(msg) {
   return null;
 }
 
-function buildPipelineDesc({ micSrc, monSrc, hasMonitor, micProc, monProc, levelIntervalNs, out }) {
+function clampMixLevel(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0.01) return 1;
+  if (n > 2) return 2;
+  return n;
+}
+
+function buildPipelineDesc({ micSrc, monSrc, hasMonitor, micProc, monProc, levelIntervalNs, out, micMixLevel, monMixLevel }) {
+  const micGain = clampMixLevel(micMixLevel);
+  const monGain = clampMixLevel(monMixLevel);
   if (hasMonitor) {
     return (
       `${micSrc} ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=1 ! tee name=tmic ` +
       `tmic. ! queue ! level name=level_mic interval=${Math.floor(levelIntervalNs)} ! fakesink sync=false ` +
-      `tmic. ! queue ! ${micProc} ! mix. ` +
+      `tmic. ! queue ! ${micProc} ! volume volume=${micGain} ! mix. ` +
       `${monSrc} ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=1 ! tee name=tmon ` +
       `tmon. ! queue ! level name=level_mon interval=${Math.floor(levelIntervalNs)} ! fakesink sync=false ` +
-      `tmon. ! queue ! ${monProc} ! mix. ` +
+      `tmon. ! queue ! ${monProc} ! volume volume=${monGain} ! mix. ` +
       `audiomixer name=mix ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! ` +
       `opusenc bitrate=96000 ! oggmux ! filesink location="${out}"`
     );
@@ -144,7 +153,7 @@ function buildPipelineDesc({ micSrc, monSrc, hasMonitor, micProc, monProc, level
   return (
     `${micSrc} ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=1 ! tee name=tmic ` +
     `tmic. ! queue ! level name=level_mic interval=${Math.floor(levelIntervalNs)} ! fakesink sync=false ` +
-    `tmic. ! queue ! ${micProc} ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! ` +
+    `tmic. ! queue ! ${micProc} ! volume volume=${micGain} ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! ` +
     `opusenc bitrate=96000 ! oggmux ! filesink location="${out}"`
   );
 }
@@ -155,6 +164,8 @@ const outPath = String(process.argv[4] || "");
 const processingMic = String(process.argv[5] || "none");
 const processingMon = String(process.argv[6] || "none");
 const levelIntervalMs = Math.max(10, Number(process.argv[7] || 100));
+const micMixLevel = process.argv[8] != null ? Number(process.argv[8]) : 1;
+const monMixLevel = process.argv[9] != null ? Number(process.argv[9]) : 1;
 
 if (!outPath) {
   process.stdout.write(JSON.stringify({ type: "error", message: "outPath обязателен" }) + "\n");
@@ -186,6 +197,8 @@ const pipelineDesc = buildPipelineDesc({
   monProc,
   levelIntervalNs,
   out: outPath.replaceAll('"', '\\"'),
+  micMixLevel,
+  monMixLevel,
 });
 
 let pipeline;

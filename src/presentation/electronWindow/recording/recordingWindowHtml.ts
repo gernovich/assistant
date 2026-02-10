@@ -353,6 +353,8 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       drawDebugLastAtMs: 0,
       drawTimer: 0,
       pauseStartedAtMs: 0,
+      // Защита от переполнения: накапливаем только последнее viz-сообщение за кадр, применяем в draw()
+      pendingViz: null,
     };
     const modeSel = document.getElementById('modeSel');
     const occurrenceSel = document.getElementById('occurrenceSel');
@@ -776,22 +778,22 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
       const mic = Number(dto && (dto.mic01 != null ? dto.mic01 : dto.amp01));
       const monitor = Number(dto && (dto.monitor01 != null ? dto.monitor01 : 0));
       if(!Number.isFinite(mic) && !Number.isFinite(monitor)) return;
-      // Важно: не пишем точки прямо здесь. Апдейты из основного процесса могут приходить редко (или пачками),
+      // Защита от переполнения: только последнее за кадр, применяем в draw(). Апдейты из основного процесса могут приходить редко (или пачками),
       // что визуально даёт “квадраты”. Вместо этого сохраняем цель, а точки наполняем равномерно в rAF.
-      if(Number.isFinite(mic)) state.micTarget = Math.max(0, Math.min(1, mic));
-      if(Number.isFinite(monitor)) state.monitorTarget = Math.max(0, Math.min(1, monitor));
+      state.pendingViz = { mic01: Math.max(0, Math.min(1, mic)), monitor01: Math.max(0, Math.min(1, monitor)) };
 
-      // Диагностика доставки: раз в ~1с отправляем сигнал обратно в хост.
+      // Диагностика доставки: раз в ~1с отправляем сигнал обратно в хост (используем значения из pendingViz)
       try{
         const now = Date.now();
         if(debugEnabled && transport && transport.send && (now - (state.vizDebugLastAtMs || 0)) > 1000){
           state.vizDebugLastAtMs = now;
           const rect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+          const p = state.pendingViz;
           transport.send({
             type: "recording/viz-debug",
             payload: {
-              mic01: Number.isFinite(mic) ? Number(mic) : 0,
-              monitor01: Number.isFinite(monitor) ? Number(monitor) : 0,
+              mic01: p ? p.mic01 : 0,
+              monitor01: p ? p.monitor01 : 0,
               canvas: { w: Math.round(rect.width||0), h: Math.round(rect.height||0) },
               at: now
             },
@@ -812,6 +814,7 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
               window.__assistantRecordingVizUpdate && window.__assistantRecordingVizUpdate(msg.payload);
             }
             if(msg && msg.type === "recording/viz-clear"){
+              state.pendingViz = null;
               state.micPoints = [];
               state.monitorPoints = [];
               state.micTarget = 0;
@@ -854,6 +857,12 @@ export function buildRecordingWindowHtml(p: RecordingWindowHtmlParams): string {
     }
 
     function draw(){
+      // Применяем накопленное viz-сообщение не чаще раза за кадр (защита от переполнения очереди)
+      if(state.pendingViz){
+        state.micTarget = state.pendingViz.mic01;
+        state.monitorTarget = state.pendingViz.monitor01;
+        state.pendingViz = null;
+      }
       if(!state.recording || state.paused) return;
       if(!canvas) return;
       if(!ctx && canvas.getContext){

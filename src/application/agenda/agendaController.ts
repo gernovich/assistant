@@ -12,6 +12,9 @@ export type AgendaControllerActions = {
   openEvent: (ev: Event) => void;
   openRecorder: (ev: Event) => void | Promise<void>;
 
+  refreshCalendars: () => void | Promise<void>;
+  refreshCalendar: (calendarId: string) => void | Promise<void>;
+
   setMyPartstat: (ev: Event, partstat: NonNullable<Event["status"]>) => Promise<void> | void;
 
   getProtocolMenuState: (ev: Event) => Promise<AgendaProtocolMenuState>;
@@ -20,6 +23,9 @@ export type AgendaControllerActions = {
   createProtocol: (ev: Event) => unknown | Promise<unknown>;
 
   debugShowReminder: (ev: Event) => void;
+
+  /** Открыть настройки плагина (для алерта «авторизуйтесь заново»). */
+  openSettings?: () => void;
 };
 
 export class AgendaController {
@@ -71,6 +77,14 @@ export class AgendaController {
     return this.actions.openRecorder(ev);
   }
 
+  refreshCalendars(): void | Promise<void> {
+    return this.actions.refreshCalendars();
+  }
+
+  refreshCalendar(calendarId: string): void | Promise<void> {
+    return this.actions.refreshCalendar(calendarId);
+  }
+
   setMyPartstat(ev: Event, partstat: NonNullable<Event["status"]>): Promise<void> | void {
     return this.actions.setMyPartstat(ev, partstat);
   }
@@ -103,5 +117,9 @@ export class AgendaController {
 
   debugShowReminder(ev: Event): void {
     this.actions.debugShowReminder(ev);
+  }
+
+  openSettings(): void {
+    this.actions.openSettings?.();
   }
 }

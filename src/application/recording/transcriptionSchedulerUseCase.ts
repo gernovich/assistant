@@ -146,7 +146,7 @@ export class TranscriptionSchedulerUseCase {
         this.deps.log.warn("Транскрибация: включено, но Nexara token пустой — задачи не будут выполняться");
         return null;
       }
-      return new NexaraTranscriptionProvider({ fetch: this.deps.fetch, token });
+      return new NexaraTranscriptionProvider({ fetch: this.deps.fetch, token, log: this.deps.log });
     }
     this.deps.log.warn("Транскрибация: неизвестный провайдер", { providerId });
     return null;

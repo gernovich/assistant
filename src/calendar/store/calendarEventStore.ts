@@ -5,8 +5,12 @@ import { makeEventKey } from "../../ids/stableIds";
  * Статус данных конкретного календаря после refresh:
  * - `fresh`: обновилось успешно
  * - `stale`: обновить не удалось, показываем lastGood (если есть)
+ * - `refreshing`: идёт обновление
  */
-export type CalendarDataStatus = { status: "fresh"; fetchedAt: number } | { status: "stale"; fetchedAt?: number; error?: string };
+export type CalendarDataStatus =
+  | { status: "fresh"; fetchedAt: number }
+  | { status: "stale"; fetchedAt?: number; error?: string }
+  | { status: "refreshing" };
 
 /** Результат refresh для UI/синхронизации (offline-first: events могут быть lastGood). */
 export interface RefreshResult {
@@ -159,6 +163,16 @@ export class CalendarEventStore {
   /** Получить статусы по календарям (копия). */
   getPerCalendarStatus(): Record<CalendarId, CalendarDataStatus> {
     return { ...this.perCalendar };
+  }
+
+  /**
+   * Установить статус "refreshing" для календарей, которые начинают обновляться.
+   */
+  setRefreshing(calendarIds: CalendarId[]): void {
+    for (const id of calendarIds) {
+      this.perCalendar[id] = { status: "refreshing" };
+    }
+    this.updatedAt = Date.now();
   }
 
   /**

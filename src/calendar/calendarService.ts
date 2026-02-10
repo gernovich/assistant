@@ -241,6 +241,10 @@ export class CalendarService {
       };
     }
 
+    // Устанавливаем статус "refreshing" для этого календаря
+    this.store.setRefreshing([calendarId]);
+    this.emit(); // Уведомляем UI о начале обновления
+
     try {
       const newEvents = await this.refreshOneCalendar(cal);
       // Обновляем стор результатом по одному календарю; остальные оставляют lastGood данные.
@@ -251,6 +255,12 @@ export class CalendarService {
       this.emit();
       return { events: this.getEvents(), errors: [] };
     } catch (e) {
+      // При ошибке стор установит статус "stale" через applyBatch
+      this.store.applyBatch({
+        enabledCalendarIds: this.settings.calendars.filter((c) => c.enabled).map((c) => c.id),
+        results: [{ calendarId: cal.id, ok: false, error: String((e as unknown) ?? "неизвестная ошибка") }],
+      });
+      this.emit();
       return {
         events: this.getEvents(),
         errors: [{ calendarId: cal.id, name: cal.name, error: String((e as unknown) ?? "неизвестная ошибка"), cause: e }],
@@ -260,11 +270,16 @@ export class CalendarService {
 
   /**
    * Обновить все включённые календари.
-   * При ошибках не “обнуляет” данные: стор переводит календарь в stale и оставляет lastGood (если был).
+   * При ошибках не "обнуляет" данные: стор переводит календарь в stale и оставляет lastGood (если был).
    */
   async refreshAll(): Promise<{ events: Event[]; errors: CalendarRefreshError[] }> {
     const enabled = this.settings.calendars.filter((c) => c.enabled);
     const errors: CalendarRefreshError[] = [];
+
+    // Устанавливаем статус "refreshing" для всех календарей, которые будут обновляться
+    const enabledIds = enabled.map((c) => c.id);
+    this.store.setRefreshing(enabledIds);
+    this.emit(); // Уведомляем UI о начале обновления
 
     const results = await Promise.allSettled(
       enabled.map(async (cal) => {

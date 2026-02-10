@@ -204,6 +204,12 @@ function applySettingsCommandMutate(s: AssistantSettings, cmd: SettingsCommand, 
         p.gstreamerMonitorProcessing === "voice"
       )
         s.recording.gstreamerMonitorProcessing = p.gstreamerMonitorProcessing;
+      if (typeof p.gstreamerMicMixLevel === "number")
+        s.recording.gstreamerMicMixLevel = sanitizeNumber(p.gstreamerMicMixLevel, 1, { min: 0.01, max: 2 });
+      if (typeof p.gstreamerMonitorMixLevel === "number")
+        s.recording.gstreamerMonitorMixLevel = sanitizeNumber(p.gstreamerMonitorMixLevel, 1, { min: 0.01, max: 2 });
+      if (typeof p.electronMicLevel === "number")
+        s.recording.electronMicLevel = sanitizeNumber(p.electronMicLevel, 1, { min: 0.01, max: 2 });
       if (typeof p.chunkMinutes === "number") s.recording.chunkMinutes = sanitizePositiveOrDefault(p.chunkMinutes, 5, { max: 180 });
       if (typeof p.autoStartEnabled === "boolean") s.recording.autoStartEnabled = p.autoStartEnabled;
       if (typeof p.autoStartSeconds === "number")

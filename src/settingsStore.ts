@@ -34,6 +34,9 @@ export const DEFAULT_SETTINGS: AssistantSettings = {
     gstreamerMonitorSource: "auto",
     gstreamerMicProcessing: "none",
     gstreamerMonitorProcessing: "none",
+    gstreamerMicMixLevel: 1,
+    gstreamerMonitorMixLevel: 1,
+    electronMicLevel: 1,
     autoStartEnabled: true,
     autoStartSeconds: 5,
   },
@@ -145,6 +148,21 @@ export function normalizeSettings(raw: unknown): AssistantSettings {
         obj.recording?.gstreamerMonitorProcessing === "voice"
           ? obj.recording.gstreamerMonitorProcessing
           : DEFAULT_SETTINGS.recording.gstreamerMonitorProcessing,
+      gstreamerMicMixLevel: normalizeNumber(obj.recording?.gstreamerMicMixLevel, {
+        defaultValue: DEFAULT_SETTINGS.recording.gstreamerMicMixLevel,
+        min: 0.01,
+        max: 2,
+      }),
+      gstreamerMonitorMixLevel: normalizeNumber(obj.recording?.gstreamerMonitorMixLevel, {
+        defaultValue: DEFAULT_SETTINGS.recording.gstreamerMonitorMixLevel,
+        min: 0.01,
+        max: 2,
+      }),
+      electronMicLevel: normalizeNumber(obj.recording?.electronMicLevel, {
+        defaultValue: DEFAULT_SETTINGS.recording.electronMicLevel,
+        min: 0.01,
+        max: 2,
+      }),
       autoStartEnabled:
         typeof obj.recording?.autoStartEnabled === "boolean" ? obj.recording.autoStartEnabled : DEFAULT_SETTINGS.recording.autoStartEnabled,
       autoStartSeconds: normalizeNumber(obj.recording?.autoStartSeconds, {

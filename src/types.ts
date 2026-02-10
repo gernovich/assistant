@@ -191,6 +191,12 @@ export interface AssistantSettings {
     gstreamerMicProcessing: "none" | "normalize" | "voice";
     /** Обработка монитора для GStreamer. */
     gstreamerMonitorProcessing: "none" | "normalize" | "voice";
+    /** Уровень микрофона в микшере (0.01..2, 1 = без изменения). */
+    gstreamerMicMixLevel: number;
+    /** Уровень монитора в микшере (0.01..2, 1 = без изменения). */
+    gstreamerMonitorMixLevel: number;
+    /** Уровень микрофона для Electron Media Devices (0.01..2, 1 = без изменения). */
+    electronMicLevel: number;
     /** Автостарт записи, если выбранное событие уже идёт. */
     autoStartEnabled: boolean;
     /** Тайминг автостарта записи (секунды). По умолчанию 5. */

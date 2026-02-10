@@ -7,7 +7,7 @@ import type { ElectronSession } from "../recordingSessionTypes";
 import { ElectronMediaRecorderBackend } from "./electronMediaRecorderBackend";
 import { normalizePath } from "obsidian";
 import { recordingChunkFileName } from "../../domain/policies/recordingFileNaming";
-import { startGstKitRecordWorker, amp01FromDbfs } from "../gstreamer/gstKitNode";
+import { startGstKitRecordWorker } from "../gstreamer/gstKitNode";
 
 type Logger = {
   info: (message: string, data?: Record<string, unknown>) => void;
@@ -94,6 +94,7 @@ export function createUseCaseRecordingBackends(params: {
       const impl = new ElectronMediaRecorderBackend({
         isActiveSession: (x) => activeElectronSession === x,
         getOnViz: params.getOnViz,
+        getSettings: params.getSettings,
         log: params.log,
         writeBinary,
         onFileSaved: (path) => p.onFileSaved(path),
@@ -178,13 +179,15 @@ export function createUseCaseRecordingBackends(params: {
           processingMic: rec.gstreamerMicProcessing,
           processingMonitor: rec.gstreamerMonitorProcessing,
           levelIntervalMs: 100,
+          micMixLevel: rec.gstreamerMicMixLevel,
+          monitorMixLevel: rec.gstreamerMonitorMixLevel,
           log: params.log,
           onMessage: (m) => {
             if (activeGStreamerSession !== s) return;
             if (m.type === "level") {
-              const mic01 = amp01FromDbfs(m.micDb);
-              const monitor01 = amp01FromDbfs(m.monitorDb);
-              params.getOnViz()?.({ mic01, monitor01 });
+              const micRaw = m.micDb ?? -100;
+              const monitorRaw = m.monitorDb ?? -100;
+              params.getOnViz()?.({ mic01: micRaw, monitor01: monitorRaw });
             }
             if (m.type === "error") {
               params.log.error("GStreamer worker error", { message: m.message, details: m.details as any });
@@ -223,13 +226,15 @@ export function createUseCaseRecordingBackends(params: {
         processingMic: rec.gstreamerMicProcessing,
         processingMonitor: rec.gstreamerMonitorProcessing,
         levelIntervalMs: 100,
+        micMixLevel: rec.gstreamerMicMixLevel,
+        monitorMixLevel: rec.gstreamerMonitorMixLevel,
         log: params.log,
         onMessage: (m) => {
           if (activeGStreamerSession !== s) return;
           if (m.type === "level") {
-            const mic01 = amp01FromDbfs(m.micDb);
-            const monitor01 = amp01FromDbfs(m.monitorDb);
-            params.getOnViz()?.({ mic01, monitor01 });
+            const micRaw = m.micDb ?? -100;
+            const monitorRaw = m.monitorDb ?? -100;
+            params.getOnViz()?.({ mic01: micRaw, monitor01: monitorRaw });
           }
           if (m.type === "error") {
             params.log.error("GStreamer worker error", { message: m.message, details: m.details as any });

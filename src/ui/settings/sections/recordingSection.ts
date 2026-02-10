@@ -1,5 +1,8 @@
-import { Setting } from "obsidian";
+import { Notice, Setting } from "obsidian";
 import type AssistantPlugin from "../../../../main";
+import { createGStreamerVizPolicy } from "../../../domain/policies/recordingVizNormalizePolicy";
+import { createElectronMicVizPolicy } from "../../../domain/policies/recordingVizNormalizePolicy";
+import { RecordingVizNormalizer } from "../../../recording/recordingVizNormalizer";
 
 /** Отрисовать секцию настроек: Запись. */
 export function renderRecordingSection(params: { containerEl: HTMLElement; plugin: AssistantPlugin }): void {
@@ -96,12 +99,14 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
     gstreamerDevicesBox.style.display = isGstreamer ? "block" : "none";
     if (!isGstreamer) return;
 
+    void plugin.settingsOps.runGStreamerAutoDetectAndLog?.();
+
     let micDropdown: any;
     let monDropdown: any;
 
     const micSourceSetting = new Setting(gstreamerDevicesBox)
       .setName("GStreamer: микрофон (источник)")
-      .setDesc("Авто = системный default source.")
+      .setDesc("Авто = системный default source. Если «Авто» выбрал не то устройство — выберите из списка. При смене наушников/разъёма обновите выбор или перезапустите запись.")
       .addDropdown((d) => {
         micDropdown = d;
         d.addOption("auto", "Авто");
@@ -125,6 +130,19 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
       updateMicActual(String(actual ?? "").trim());
     };
     ensureActualBlock(micSourceSetting.descEl, "assistant-gst-mic-actual");
+
+    new Setting(gstreamerDevicesBox)
+      .setName("Автоопределение источников")
+      .setDesc("Запустить автоопределение и вывести результат в уведомление и лог.")
+      .addButton((b) =>
+        b.setButtonText("Определить").onClick(async () => {
+          const r = await plugin.settingsOps.runGStreamerAutoDetectAndLog?.();
+          if (r) {
+            new Notice(`Автоопределение: микрофон ${r.mic || "—"}, монитор ${r.monitor || "—"}`);
+          }
+        }),
+      );
+
     if (plugin.settings.recording.gstreamerMicSource === "auto") {
       void refreshMicActualFromAuto();
     } else {
@@ -151,14 +169,21 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
     micLevelSetting.setDesc("");
     let micMeterEl: HTMLDivElement | null = createLevelMeter(micLevelSetting.descEl);
     let micProbeBtn: any;
+    let micVizNormalizer: RecordingVizNormalizer | null = null;
     const stopMicProbe = () => {
       if (micProbeTimer) window.clearInterval(micProbeTimer);
       micProbeTimer = undefined;
+      micVizNormalizer = null;
       if (micMeterEl) updateLevelMeter(micMeterEl, 0);
       micProbeBtn?.setButtonText("Проверить");
     };
     const startMicProbe = () => {
       if (micProbeTimer) return;
+      micVizNormalizer = new RecordingVizNormalizer({
+        normalizePolicy: createGStreamerVizPolicy(),
+        outputIntervalMs: 400,
+        decayFactor: 0.9,
+      });
       void plugin.settingsOps
         .startGStreamerLevelProbe?.({ kind: "mic", device: plugin.settings.recording.gstreamerMicSource })
         .then((r) => {
@@ -172,8 +197,10 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
           kind: "mic",
           device: plugin.settings.recording.gstreamerMicSource,
         });
-        const level01 = rmsDbToLevel01(r?.rmsDb);
-        updateLevelMeter(micMeterEl!, level01);
+        const rawDb = r?.rmsDb ?? -100;
+        micVizNormalizer?.push(rawDb, Date.now());
+        const out = micVizNormalizer?.pull(Date.now());
+        if (out != null && micMeterEl) updateLevelMeter(micMeterEl, out);
       }, 400);
     };
     micLevelSetting.addButton((b) => {
@@ -187,9 +214,24 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
       });
     });
 
+    new Setting(gstreamerDevicesBox)
+      .setName("Уровень микрофона в микшере")
+      .setDesc("Коэффициент 0.01–2. Значение 1 — без изменения.")
+      .addSlider((slider) => {
+        slider
+          .setLimits(0.01, 2, 0.01)
+          .setValue(Number(plugin.settings.recording.gstreamerMicMixLevel ?? 1))
+          .onChange(async (v) => {
+            const val = Number.isFinite(v) ? Math.max(0.01, Math.min(2, v)) : 1;
+            await plugin.applySettingsCommand({ type: "recording.update", patch: { gstreamerMicMixLevel: val } });
+          });
+        slider.sliderEl.classList.add("slider");
+        slider.sliderEl.setAttribute("data-ignore-swipe", "true");
+      });
+
     const monSourceSetting = new Setting(gstreamerDevicesBox)
       .setName("GStreamer: монитор (источник)")
-      .setDesc("Авто = системный default sink.monitor.")
+      .setDesc("Авто = системный default sink.monitor. Если «Авто» выбрал не то — выберите из списка. При смене устройства вывода обновите выбор или перезапустите запись.")
       .addDropdown((d) => {
         monDropdown = d;
         d.addOption("auto", "Авто");
@@ -239,14 +281,21 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
     monLevelSetting.setDesc("");
     let monMeterEl: HTMLDivElement | null = createLevelMeter(monLevelSetting.descEl);
     let monProbeBtn: any;
+    let monVizNormalizer: RecordingVizNormalizer | null = null;
     const stopMonProbe = () => {
       if (monProbeTimer) window.clearInterval(monProbeTimer);
       monProbeTimer = undefined;
+      monVizNormalizer = null;
       if (monMeterEl) updateLevelMeter(monMeterEl, 0);
       monProbeBtn?.setButtonText("Проверить");
     };
     const startMonProbe = () => {
       if (monProbeTimer) return;
+      monVizNormalizer = new RecordingVizNormalizer({
+        normalizePolicy: createGStreamerVizPolicy(),
+        outputIntervalMs: 400,
+        decayFactor: 0.9,
+      });
       void plugin.settingsOps
         .startGStreamerLevelProbe?.({ kind: "monitor", device: plugin.settings.recording.gstreamerMonitorSource })
         .then((r) => {
@@ -260,8 +309,10 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
           kind: "monitor",
           device: plugin.settings.recording.gstreamerMonitorSource,
         });
-        const level01 = rmsDbToLevel01(r?.rmsDb);
-        updateLevelMeter(monMeterEl!, level01);
+        const rawDb = r?.rmsDb ?? -100;
+        monVizNormalizer?.push(rawDb, Date.now());
+        const out = monVizNormalizer?.pull(Date.now());
+        if (out != null && monMeterEl) updateLevelMeter(monMeterEl, out);
       }, 400);
     };
     monLevelSetting.addButton((b) => {
@@ -274,6 +325,21 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
       } else startMonProbe();
       });
     });
+
+    new Setting(gstreamerDevicesBox)
+      .setName("Уровень монитора в микшере")
+      .setDesc("Коэффициент 0.01–2. Значение 1 — без изменения.")
+      .addSlider((slider) => {
+        slider
+          .setLimits(0.01, 2, 0.01)
+          .setValue(Number(plugin.settings.recording.gstreamerMonitorMixLevel ?? 1))
+          .onChange(async (v) => {
+            const val = Number.isFinite(v) ? Math.max(0.01, Math.min(2, v)) : 1;
+            await plugin.applySettingsCommand({ type: "recording.update", patch: { gstreamerMonitorMixLevel: val } });
+          });
+        slider.sliderEl.classList.add("slider");
+        slider.sliderEl.setAttribute("data-ignore-swipe", "true");
+      });
 
     void plugin.settingsOps
       .listGStreamerRecordingSources()
@@ -303,9 +369,11 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
     const meterEl = createLevelMeter(levelSetting.descEl);
 
     let btn: any;
+    let emdVizNormalizer: RecordingVizNormalizer | null = null;
     const stop = () => {
       if (emdProbeTimer) window.clearInterval(emdProbeTimer);
       emdProbeTimer = undefined;
+      emdVizNormalizer = null;
       updateLevelMeter(meterEl, 0);
       try {
         emdStream?.getTracks?.().forEach((t) => t.stop());
@@ -327,6 +395,11 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
       if (emdProbeTimer) return;
       btn?.setButtonText("Завершить");
       try {
+        emdVizNormalizer = new RecordingVizNormalizer({
+          normalizePolicy: createElectronMicVizPolicy(2.2),
+          outputIntervalMs: 50,
+          decayFactor: 0.9,
+        });
         emdStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         emdAudioCtx = new AudioContext();
         const src = emdAudioCtx.createMediaStreamSource(emdStream);
@@ -336,7 +409,7 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
 
         const buf = new Uint8Array(emdAnalyser.fftSize);
         emdProbeTimer = window.setInterval(() => {
-          if (!emdAnalyser) return;
+          if (!emdAnalyser || !emdVizNormalizer) return;
           emdAnalyser.getByteTimeDomainData(buf);
           let sumSq = 0;
           for (let i = 0; i < buf.length; i += 1) {
@@ -344,7 +417,9 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
             sumSq += v * v;
           }
           const rms = Math.sqrt(sumSq / buf.length);
-          updateLevelMeter(meterEl, rms);
+          emdVizNormalizer.push(rms, Date.now());
+          const out = emdVizNormalizer.pull(Date.now());
+          if (out != null) updateLevelMeter(meterEl, out);
         }, 50);
       } catch {
         stop();
@@ -359,6 +434,21 @@ export function renderRecordingSection(params: { containerEl: HTMLElement; plugi
         else void start();
       });
     });
+
+    new Setting(electronMediaDevicesBox)
+      .setName("Уровень микрофона в записи")
+      .setDesc("Коэффициент 0.01–2. Значение 1 — без изменения.")
+      .addSlider((slider) => {
+        slider
+          .setLimits(0.01, 2, 0.01)
+          .setValue(Number(plugin.settings.recording.electronMicLevel ?? 1))
+          .onChange(async (v) => {
+            const val = Number.isFinite(v) ? Math.max(0.01, Math.min(2, v)) : 1;
+            await plugin.applySettingsCommand({ type: "recording.update", patch: { electronMicLevel: val } });
+          });
+        slider.sliderEl.classList.add("slider");
+        slider.sliderEl.setAttribute("data-ignore-swipe", "true");
+      });
   }
   renderGStreamerDevicesBox();
 
@@ -417,11 +507,17 @@ function createLevelMeter(parent?: HTMLElement | null): HTMLDivElement {
 }
 
 function initLevelMeter(wrap: HTMLDivElement): HTMLDivElement {
-  wrap.style.display = "flex";
-  wrap.style.gap = "2px";
-  wrap.style.height = "10px";
+  wrap.style.position = "relative";
   wrap.style.marginTop = "4px";
-  wrap.style.alignItems = "flex-end";
+
+  const inner = typeof (wrap as any).createDiv === "function" ? (wrap as any).createDiv() : document.createElement("div");
+  inner.style.display = "flex";
+  inner.style.gap = "2px";
+  inner.style.height = "10px";
+  inner.style.alignItems = "flex-end";
+  if (typeof (wrap as any).appendChild === "function" && inner instanceof HTMLElement) {
+    (wrap as any).appendChild(inner);
+  }
 
   for (let i = 0; i < 16; i += 1) {
     const bar =
@@ -435,27 +531,24 @@ function initLevelMeter(wrap: HTMLDivElement): HTMLDivElement {
     bar.style.height = `${4 + i * 0.3}px`;
     bar.style.borderRadius = "2px";
     bar.style.background = "#444";
-    if (typeof (wrap as any).appendChild === "function" && bar instanceof HTMLElement) {
-      (wrap as any).appendChild(bar);
+    if (typeof inner.appendChild === "function" && bar instanceof HTMLElement) {
+      inner.appendChild(bar);
     }
   }
+
   return wrap;
 }
 
 function updateLevelMeter(wrap: HTMLDivElement, level01: number): void {
-  const bars = Array.from(wrap.children) as HTMLElement[];
+  const inner = wrap.children[0];
+  const bars = inner ? Array.from(inner.children) as HTMLElement[] : Array.from(wrap.children) as HTMLElement[];
   const active = Math.round(Math.max(0, Math.min(1, level01)) * bars.length);
+  const redFrom = Math.max(0, bars.length - 5);
   for (let i = 0; i < bars.length; i += 1) {
     const isActive = i < active;
-    const isPeak = i >= Math.floor(bars.length * 0.8);
+    const isPeak = i >= redFrom;
     bars[i].style.background = isActive ? (isPeak ? "#e53935" : "#43a047") : "#444";
   }
-}
-
-function rmsDbToLevel01(rmsDb?: number): number {
-  const n = typeof rmsDb === "number" && Number.isFinite(rmsDb) ? rmsDb : -120;
-  const clamped = Math.max(-60, Math.min(0, n));
-  return (clamped + 60) / 60;
 }
 
 function ensureActualBlock(descEl?: HTMLElement | null, spanId?: string): void {

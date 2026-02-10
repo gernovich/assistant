@@ -111,6 +111,9 @@ export const RawAssistantSettingsSchema = z
         gstreamerMonitorSource: zStr.optional(),
         gstreamerMicProcessing: zStr.optional(),
         gstreamerMonitorProcessing: zStr.optional(),
+        gstreamerMicMixLevel: zNumOrStr.optional(),
+        gstreamerMonitorMixLevel: zNumOrStr.optional(),
+        electronMicLevel: zNumOrStr.optional(),
         autoStartEnabled: zBool.optional(),
         autoStartSeconds: zNumOrStr.optional(),
       })

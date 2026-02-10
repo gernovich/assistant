@@ -3,6 +3,7 @@ import type { RecordingController } from "../../src/presentation/controllers/rec
 import type { RecordingStats } from "../../src/recording/recordingService";
 import type { WindowTransport, TransportMessage, TransportConfig } from "../../src/presentation/electronWindow/transport/windowTransport";
 import { DEFAULT_SETTINGS } from "../../src/settingsStore";
+import { createGStreamerVizPolicy } from "../../src/domain/policies/recordingVizNormalizePolicy";
 
 type MockListener = (...args: any[]) => void;
 
@@ -137,7 +138,7 @@ describe("RecordingDialog визуализация", () => {
       createDialogTransport: () => transport,
     } as any;
 
-    let onViz: ((amp01: number) => void) | undefined;
+    let onViz: ((p: { mic01: number; monitor01: number }) => void) | undefined;
     let onStats: ((s: RecordingStats) => void) | undefined;
 
     const stats: RecordingStats = { status: "idle", filesTotal: 0, filesRecognized: 0 };
@@ -167,12 +168,13 @@ describe("RecordingDialog визуализация", () => {
       defaultCreateNewProtocol: false,
       recordingController,
       transportRegistry,
+      vizPolicies: { mic: createGStreamerVizPolicy(), monitor: createGStreamerVizPolicy() },
     });
 
     dialog.open();
 
     stats.status = "recording";
-    onViz?.(1);
+    onViz?.({ mic01: -20, monitor01: -40 });
     vi.advanceTimersByTime(40);
     const sentBeforePause = transport.sent.filter((m) => (m as any).type === "recording/viz").length;
     expect(sentBeforePause).toBeGreaterThan(0);
@@ -185,7 +187,7 @@ describe("RecordingDialog визуализация", () => {
     expect(sentAfterPause).toBe(sentBeforePause);
 
     stats.status = "recording";
-    onViz?.(0.5);
+    onViz?.({ mic01: -12, monitor01: -30 });
     vi.advanceTimersByTime(120);
     const sentAfterResume = transport.sent.filter((m) => (m as any).type === "recording/viz").length;
     expect(sentAfterResume).toBeGreaterThan(sentAfterPause);

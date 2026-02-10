@@ -2,6 +2,23 @@ import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import type { LogEntry } from "../log/logService";
 import type { LogController } from "../presentation/controllers/logController";
 
+/**
+ * Установить Obsidian-стиль тултип на элемент.
+ * Использует встроенный механизм Obsidian через setTooltip если доступен,
+ * иначе fallback на data-tooltip-position.
+ */
+function setObsidianTooltip(el: HTMLElement, text: string): void {
+  if (typeof (el as any).setTooltip === "function") {
+    (el as any).setTooltip(text);
+  } else {
+    // Fallback: используем data-tooltip-position (Obsidian автоматически обрабатывает это)
+    el.setAttribute("data-tooltip-position", "top");
+    el.setAttribute("aria-label", text);
+  }
+  // Убираем title, чтобы не было дублирования с Obsidian тултипом
+  el.removeAttribute("title");
+}
+
 /** Тип Obsidian view для панели лога ассистента. */
 export const LOG_VIEW_TYPE = "assistant-log";
 
@@ -95,7 +112,7 @@ function renderEntry(e: LogEntry): HTMLElement {
   const ts = document.createElement("span");
   ts.className = "assistant-log__ts";
   ts.textContent = fmtTime(e.ts);
-  ts.title = new Date(e.ts).toISOString();
+  setObsidianTooltip(ts, new Date(e.ts).toISOString());
 
   const lvl = document.createElement("span");
   lvl.className = `assistant-log__lvl assistant-log__lvl--${e.level}`;

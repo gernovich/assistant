@@ -3,6 +3,7 @@ import type { AssistantSettings, Event } from "../types";
 import type { PluginContext } from "./pluginContext";
 import { ensureFolder } from "../vault/ensureFolder";
 import { isTFile } from "../vault/ensureFile";
+import { revealOrOpenInNewLeaf } from "../vault/revealOrOpenFile";
 import { AgendaView, AGENDA_VIEW_TYPE } from "../views/agendaView";
 import { LOG_VIEW_TYPE } from "../views/logView";
 import { registerAssistantCommands } from "../presentation/obsidian/commands/registerAssistantCommands";
@@ -24,6 +25,14 @@ import { CalendarRefreshUseCase } from "../application/calendar/calendarRefreshU
 import { RecordingDialogUseCase } from "../application/recording/recordingDialogUseCase";
 import { AutoRefreshUseCase } from "../application/calendar/autoRefreshUseCase";
 import { TranscriptionSchedulerUseCase } from "../application/recording/transcriptionSchedulerUseCase";
+import { TranscribeFileUseCase } from "../application/transcription/transcribeFileUseCase";
+import { isAudioFile } from "../domain/policies/audioFileExtensions";
+import { recordingBackendFromSettings } from "../domain/policies/recordingBackend";
+import {
+  createElectronMicVizPolicy,
+  createElectronMonitorVizPolicy,
+  createGStreamerVizPolicy,
+} from "../domain/policies/recordingVizNormalizePolicy";
 import { RecordingDialog } from "../recording/recordingDialog";
 import { CaldavProvider } from "../calendar/providers/caldavProvider";
 import { runGoogleLoopbackOAuth } from "../caldav/googleOauth";
@@ -113,6 +122,7 @@ export class AssistantController {
   private recordingDialogUseCase?: RecordingDialogUseCase;
   private autoRefreshUseCase?: AutoRefreshUseCase;
   private transcriptionSchedulerUseCase?: TranscriptionSchedulerUseCase;
+  private transcribeFileUseCase?: TranscribeFileUseCase;
   private authorizeGoogleCaldavUseCase: AuthorizeGoogleCaldavUseCase;
   private caldavAccountsUseCase: CaldavAccountsUseCase;
   private discoverCaldavCalendarsUseCase: DiscoverCaldavCalendarsUseCase;
@@ -132,6 +142,7 @@ export class AssistantController {
     checkGStreamerRecordingDependencies: async () => await this.checkGStreamerRecordingDependencies(),
     listGStreamerRecordingSources: async () => await this.listGStreamerRecordingSources(),
     resolveGStreamerActualSource: async (p: { kind: "mic" | "monitor" }) => await this.resolveGStreamerActualSource(p),
+    runGStreamerAutoDetectAndLog: async () => await this.runGStreamerAutoDetectAndLog(),
     startGStreamerLevelProbe: async (p: { kind: "mic" | "monitor"; device?: string | null }) => await this.startGStreamerLevelProbe(p),
     stopGStreamerLevelProbe: async (p: { kind: "mic" | "monitor"; device?: string | null }) => await this.stopGStreamerLevelProbe(p),
     probeGStreamerLevel: async (p: { kind: "mic" | "monitor"; device?: string | null }) => await this.probeGStreamerLevel(p),
@@ -239,12 +250,21 @@ export class AssistantController {
 
     // Зависимости диалога записи
     this.di.register("assistant.controller.refreshCalendars", { useValue: async () => await this.refreshCalendars() });
+    this.di.register("assistant.controller.refreshCalendar", { useValue: async (calendarId: string) => await this.refreshCalendar(calendarId) });
+    this.di.register("assistant.controller.openSettings", {
+      useValue: () => (this.plugin.app as any).setting?.open?.(),
+    });
     this.di.register("assistant.controller.createProtocolFromEvent", {
       useValue: async (ev: Event) => await this.createProtocolFromEvent(ev),
     });
     this.di.register("assistant.controller.recordingDialogFactory", {
-      useValue: (p: any) =>
-        new RecordingDialog({
+      useValue: (p: any) => {
+        const backend = recordingBackendFromSettings(p.settings?.recording?.audioBackend);
+        const vizPolicies =
+          backend === "g_streamer"
+            ? { mic: createGStreamerVizPolicy(), monitor: createGStreamerVizPolicy() }
+            : { mic: createElectronMicVizPolicy(2.2), monitor: createElectronMonitorVizPolicy() };
+        return new RecordingDialog({
           settings: p.settings,
           events: p.events,
           protocols: p.protocols,
@@ -259,7 +279,9 @@ export class AssistantController {
           onLog: p.onLog,
           pluginDirPath: this.pluginDirPath,
           transportRegistry: this.di.resolve(TransportRegistry),
-        }),
+          vizPolicies,
+        });
+      },
     });
 
     // Финально: резолвим singleton'ы из DI
@@ -334,17 +356,35 @@ export class AssistantController {
         void this.onFileMenu(menu, file);
       }),
     );
+
+    // Obsidian: контекстное меню внутри редактора (ПКМ в открытом файле)
+    this.plugin.registerEvent(
+      workspace.on("editor-menu", (menu: any, _editor: any, view: any) => {
+        const file = view?.file ?? workspace.getActiveFile?.();
+        void this.onFileMenu(menu, file);
+      }),
+    );
   }
 
   private async onFileMenu(menu: any, file: any): Promise<void> {
     if (!file || !isTFile(file)) return;
 
-    // 1) Аудиозаписи: "Перейти в протокол"
-    const recordingPrefix = `${String(DEFAULT_RECORDINGS_DIR).replace(/\/+$/g, "")}/`;
-    const p = String(file.path ?? "");
     const ext = String(file.extension ?? "").toLowerCase();
-    const isAudio = p.startsWith(recordingPrefix) && ext !== "md";
-    if (isAudio) {
+    const p = String(file.path ?? "");
+
+    // 1) Звуковые файлы: "Расшифровать"
+    if (isAudioFile(ext)) {
+      menu.addItem((it: any) => {
+        it.setTitle("Расшифровать")
+          .setIcon("file-text")
+          .onClick(() => void this.transcribeAudioFile(file));
+      });
+    }
+
+    // 2) Аудиозаписи в папке записей: "Перейти в протокол"
+    const recordingPrefix = `${String(DEFAULT_RECORDINGS_DIR).replace(/\/+$/g, "")}/`;
+    const isRecording = p.startsWith(recordingPrefix) && ext !== "md";
+    if (isRecording) {
       const proto = await this.findProtocolFileByRecordingPath(p);
       if (proto) {
         menu.addItem((it: any) => {
@@ -388,6 +428,28 @@ export class AssistantController {
           .setIcon("users")
           .onClick(() => void this.createPeopleCardsFromActiveMeeting());
       });
+    }
+  }
+
+  private async transcribeAudioFile(audioFile: any): Promise<void> {
+    if (!this.transcribeFileUseCase) {
+      this.notice.show("Ассистент: транскрипция не инициализирована");
+      return;
+    }
+
+    try {
+      this.notice.show("Ассистент: начинаю расшифровку...");
+      const mdFile = await this.transcribeFileUseCase.transcribeFile(audioFile);
+      this.notice.show(`Ассистент: расшифровка завершена. Создан файл ${mdFile.name}`);
+      // Открываем созданный файл
+      const app = (this.plugin as any)?.app;
+      if (app) {
+        await revealOrOpenInNewLeaf(app, mdFile);
+      }
+    } catch (e) {
+      const errorMsg = String((e as unknown) ?? "неизвестная ошибка");
+      this.notice.show(`Ассистент: ошибка расшифровки: ${errorMsg}`);
+      this.ctx.logService.error("Транскрипция файла: ошибка", { file: audioFile.path, error: errorMsg });
     }
   }
 
@@ -897,6 +959,14 @@ export class AssistantController {
     return await this.pickMicFromPactl();
   }
 
+  /** Запускает автоопределение микрофона и монитора, пишет результат в лог, возвращает имена. */
+  async runGStreamerAutoDetectAndLog(): Promise<{ mic: string; monitor: string }> {
+    const mic = await this.pickMicFromPactl();
+    const monitor = await this.pickMonitorFromPactl();
+    this.ctx.logService.info("GStreamer автоопределение источников", { mic: mic || "—", monitor: monitor || "—" });
+    return { mic, monitor };
+  }
+
   async refreshCalendars(): Promise<void> {
     await this.calendarRefreshUseCase?.refreshAll();
   }
@@ -920,6 +990,9 @@ export class AssistantController {
   }
 
   openRecordingDialog(preferredEvent?: Event): void {
+    if (this.getSettings().recording.audioBackend === "g_streamer") {
+      void this.runGStreamerAutoDetectAndLog();
+    }
     void this.recordingDialogUseCase?.open(preferredEvent);
   }
 
@@ -938,6 +1011,7 @@ export class AssistantController {
     this.recordingDialogUseCase = this.di.resolve(RecordingDialogUseCase);
     this.autoRefreshUseCase = this.di.resolve(AutoRefreshUseCase);
     this.transcriptionSchedulerUseCase = this.di.resolve(TranscriptionSchedulerUseCase);
+    this.transcribeFileUseCase = this.di.resolve(TranscribeFileUseCase);
   }
 
   async applyOutbox(): Promise<void> {

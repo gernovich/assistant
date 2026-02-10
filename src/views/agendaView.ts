@@ -5,6 +5,23 @@ import { attendeesTooltipRu } from "../domain/policies/attendeesSummaryRu";
 import type { AgendaController } from "../application/agenda/agendaController";
 import { DEFAULT_CALENDAR_COLOR } from "../domain/policies/defaultCalendarColor";
 
+/**
+ * Установить Obsidian-стиль тултип на элемент.
+ * Использует встроенный механизм Obsidian через setTooltip если доступен,
+ * иначе fallback на data-tooltip-position.
+ */
+function setObsidianTooltip(el: HTMLElement, text: string): void {
+  if (typeof (el as any).setTooltip === "function") {
+    (el as any).setTooltip(text);
+  } else {
+    // Fallback: используем data-tooltip-position (Obsidian автоматически обрабатывает это)
+    el.setAttribute("data-tooltip-position", "top");
+    el.setAttribute("aria-label", text);
+  }
+  // Убираем title, чтобы не было дублирования с Obsidian тултипом
+  el.removeAttribute("title");
+}
+
 /** Тип Obsidian view для “Повестки”. */
 export const AGENDA_VIEW_TYPE = "assistant-agenda";
 const RU = "ru-RU";
@@ -97,6 +114,10 @@ export class AgendaView extends ItemView {
 
     const header = el.createDiv({ cls: "assistant-agenda__header" });
     header.createDiv({ text: "Повестка", cls: "assistant-agenda__title" });
+    header.oncontextmenu = (e) => {
+      e.preventDefault();
+      this.openCalendarMenu(e);
+    };
 
     const nav = header.createDiv({ cls: "assistant-agenda__nav" });
     const prev = nav.createEl("button", { text: "←" });
@@ -122,25 +143,66 @@ export class AgendaView extends ItemView {
     // Область для алертов (сообщения над календарем)
     const alertsContainer = el.createDiv({ cls: "assistant-agenda__alerts" });
 
-    // Баннер “данные устарели”: если часть календарей не обновилась — показываем предупреждение, но продолжаем отображать кэш.
+    // Алерты о статусе обновления календарей
     const status = this.controller.getRefreshResult().perCalendar;
     {
       const entries = Object.entries(status);
-      const stale = entries.filter(([, s]) => s.status === "stale");
+      const namesById = new Map(this.settings.calendars.map((c) => [c.id, c.name]));
       const total = entries.length;
-      if (stale.length > 0 && total > 0) {
-        const namesById = new Map(this.settings.calendars.map((c) => [c.id, c.name]));
+
+      // Проверяем статус "refreshing" (идёт обновление)
+      const refreshing = entries.filter(([, s]) => s.status === "refreshing");
+      if (refreshing.length > 0 && total > 0) {
+        const refreshingNames = refreshing
+          .map(([id]) => namesById.get(id) ?? id)
+          .filter(Boolean)
+          .slice(0, 5)
+          .join(", ");
+        const hintMore = refreshing.length > 5 ? ` (+${refreshing.length - 5})` : "";
+        const text = `Обновление календарей… ${refreshing.length}/${total}${refreshingNames ? ` (${refreshingNames}${hintMore})` : ""}`;
+        this.createAlert(alertsContainer, "info", text);
+      }
+
+      // Проверяем статус "stale" (данные устарели)
+      const stale = entries.filter(([, s]) => s.status === "stale");
+      if (stale.length > 0 && total > 0 && refreshing.length === 0) {
         const staleNames = stale
           .map(([id]) => namesById.get(id) ?? id)
           .filter(Boolean)
           .slice(0, 5)
           .join(", ");
         const hintMore = stale.length > 5 ? ` (+${stale.length - 5})` : "";
-        const text =
-          `Данные устарели: ${stale.length}/${total} календарей не обновились. ` +
-          `Показываю последние сохранённые события. См. лог.` +
-          (staleNames ? ` (${staleNames}${hintMore})` : "");
-        this.createAlert(alertsContainer, "warning", text);
+        const isOffline = stale.length === total;
+        const hasAuthError = stale.some(([, s]) => isStaleAuthError(s));
+        let text: string;
+        let alertType: "info" | "warning" | "error" | "success";
+        if (hasAuthError) {
+          text =
+            isOffline
+              ? "Токен/авторизация не работает. Перейдите в настройки и авторизуйтесь заново. Показываю последние сохранённые события."
+              : `Часть календарей не обновилась из‑за авторизации. Перейдите в настройки и авторизуйтесь заново. Показываю кэш.${staleNames ? ` (${staleNames}${hintMore})` : ""}`;
+          alertType = "error";
+        } else {
+          text = isOffline
+            ? "Оффлайн режим: невозможно обновить календари. Показываю последние сохранённые события."
+            : `Данные устарели: ${stale.length}/${total} календарей не обновились. Показываю последние сохранённые события. См. лог.` +
+              (staleNames ? ` (${staleNames}${hintMore})` : "");
+          alertType = isOffline ? "error" : "warning";
+        }
+        const alertEl = this.createAlert(alertsContainer, alertType, text);
+        if (hasAuthError) {
+          const btn = alertEl.createEl("button", {
+            text: "Открыть настройки",
+            cls: "assistant-agenda__alert-action assistant-agenda__alert-action--outline",
+          });
+          btn.onclick = () => this.controller.openSettings();
+        } else if (isOffline) {
+          const btn = alertEl.createEl("button", {
+            text: "Переподключиться",
+            cls: "assistant-agenda__alert-action assistant-agenda__alert-action--outline",
+          });
+          btn.onclick = () => void this.controller.refreshCalendars();
+        }
       }
     }
 
@@ -158,7 +220,7 @@ export class AgendaView extends ItemView {
         pill.addClass(`assistant-agenda__allday-pill--${partstatUiToken(this.getMyPartstat(ev))}`);
         pill.style.setProperty("--assistant-agenda-event-color", this.resolveEventColor(ev));
         const cal = this.settings.calendars.find((c) => c.id === ev.calendar.id);
-        pill.title = this.buildEventTooltip(ev, cal?.name);
+        setObsidianTooltip(pill, this.buildEventTooltip(ev, cal?.name));
         pill.createSpan({ text: ev.summary, cls: "assistant-agenda__event-title" });
         pill.onclick = () => {
           try {
@@ -178,6 +240,13 @@ export class AgendaView extends ItemView {
     const hours = grid.createDiv({ cls: "assistant-agenda__hours" });
     const timeline = grid.createDiv({ cls: "assistant-agenda__timeline" });
     timeline.style.height = `${24 * HOUR_HEIGHT_PX}px`;
+    timeline.oncontextmenu = (e) => {
+      const t = e.target as HTMLElement | null;
+      // Если кликнули по событию — там своё меню.
+      if (t?.closest?.(".assistant-agenda__block") || t?.closest?.(".assistant-agenda__allday-pill")) return;
+      e.preventDefault();
+      this.openCalendarMenu(e);
+    };
 
     for (let h = 0; h < 24; h++) {
       const row = hours.createDiv({ cls: "assistant-agenda__hour" });
@@ -227,7 +296,7 @@ export class AgendaView extends ItemView {
       node.style.width = `calc(${100 / b.colCount}% - 8px)`;
 
       const cal = this.settings.calendars.find((c) => c.id === b.event.calendar.id);
-      node.title = this.buildEventTooltip(b.event, cal?.name);
+      setObsidianTooltip(node, this.buildEventTooltip(b.event, cal?.name));
 
       const title = node.createDiv({ cls: "assistant-agenda__block-title" });
       title.createSpan({ text: b.event.summary, cls: "assistant-agenda__event-title" });
@@ -249,6 +318,38 @@ export class AgendaView extends ItemView {
 
   private openEventMenu(ev: Event, e: MouseEvent) {
     void this.openEventMenuAsync(ev, e);
+  }
+
+  private openCalendarMenu(e: MouseEvent) {
+    const menu = new Menu();
+
+    menu.addItem((it) => {
+      it.setTitle("Обновить календари").setIcon("refresh-cw").onClick(() => void this.controller.refreshCalendars());
+    });
+
+    menu.addItem((it) => {
+      it.setTitle("Обновить календарь…")
+        .setIcon("calendar")
+        .onClick(() => {
+          const sub = new Menu();
+          const status = this.controller.getRefreshResult().perCalendar;
+          for (const cal of this.settings.calendars.filter((c) => c.enabled)) {
+            const st = (status as any)?.[cal.id]?.status;
+            const suffix = st === "stale" ? " (stale)" : "";
+            sub.addItem((ii) => {
+              ii.setTitle(`${cal.name}${suffix}`).onClick(() => void this.controller.refreshCalendar(cal.id));
+            });
+          }
+          sub.showAtPosition({ x: e.pageX, y: e.pageY });
+        });
+    });
+
+    menu.addSeparator();
+    menu.addItem((it) => {
+      it.setTitle("Открыть лог").setIcon("list").onClick(() => this.controller.openLog());
+    });
+
+    menu.showAtPosition({ x: e.pageX, y: e.pageY });
   }
 
   private async openEventMenuAsync(ev: Event, e: MouseEvent) {
@@ -475,6 +576,13 @@ export class AgendaView extends ItemView {
     alert.createDiv({ text, cls: "assistant-agenda__alert-text" });
     return alert;
   }
+}
+
+/** Ошибка stale из‑за авторизации/токена (refresh_token, OAuth, CalDAV вход и т.п.). */
+function isStaleAuthError(s: { status: string; error?: string }): boolean {
+  if (s.status !== "stale" || typeof s.error !== "string") return false;
+  const e = s.error.toLowerCase();
+  return /refresh_token|access_token|oauth|caldav\s*вход|авториз|токен|invalid_grant|нет refresh_token/.test(e);
 }
 
 function diffDaysLocalDay(a: Date, b: Date): number {

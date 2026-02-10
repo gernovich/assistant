@@ -1,17 +1,15 @@
+import type { RecordingVizNormalizerFn } from "../domain/policies/recordingVizNormalizePolicy";
+
 type RecordingVizNormalizerOptions = {
-  /** Интервал выдачи значений (мс). */
+  /** Функция нормализации: сырое значение (dB, RMS и т.д.) → 0..1. Вся нормализация только здесь. */
+  normalizePolicy: RecordingVizNormalizerFn;
+  /** Интервал выдачи значений (мс), например 33 для ~30 fps. */
   outputIntervalMs?: number;
   /** Доля, на которую уменьшаем значение при отсутствии новых событий. */
   decayFactor?: number;
-  /** Скорость затухания пика в секунду (0..1). */
-  peakDecayPerSec?: number;
-  /** Минимальный пик, чтобы не делить на ноль. */
-  minPeak?: number;
-  /** Порог тишины (ниже него считаем, что звука нет). */
-  silenceFloor?: number;
   /** Интервал логирования статистики (мс). */
   logIntervalMs?: number;
-  /** Логгер для диагностики работы нормализатора. */
+  /** Логгер для диагностики. */
   onLog?: (message: string) => void;
 };
 
@@ -31,29 +29,23 @@ function updateMinMax(mm: MinMax | null, v: number): MinMax {
 
 /**
  * Нормализатор/буфер для визуализации уровня записи:
- * - принимает значения с любой частотой
- * - отдаёт значения с заданной частотой
- * - нормализует амплитуду по плавающему пику
- * - при отсутствии новых событий снижает значение на фиксированную долю
- * - ведёт агрегированную статистику и логирует её с заданной частотой
+ * - принимает сырые значения с любой частотой (dB, RMS и т.д.)
+ * - применяет переданную политику нормализации (цепочка шагов) → 0..1
+ * - отдаёт значения с заданной частотой (outputIntervalMs)
+ * - при отсутствии новых событий снижает значение на decayFactor
+ * Вся нормализация (dB→01, порог тишины, масштаб и т.д.) задаётся только политикой.
  */
 export class RecordingVizNormalizer {
+  private readonly normalizePolicy: RecordingVizNormalizerFn;
   private readonly outputIntervalMs: number;
   private readonly decayFactor: number;
-  private readonly peakDecayPerSec: number;
-  private readonly minPeak: number;
-  private readonly silenceFloor: number;
   private readonly logIntervalMs: number;
   private readonly onLog?: (message: string) => void;
 
   private lastInputAtMs: number | null = null;
   private lastInputValue = 0;
-  private lastInputIsSilence = false;
   private lastOutputAtMs: number | null = null;
   private lastOutputValue = 0;
-
-  private peak = 0;
-  private peakAtMs: number | null = null;
 
   private inCount = 0;
   private inMinMax: MinMax | null = null;
@@ -61,28 +53,24 @@ export class RecordingVizNormalizer {
   private outMinMax: MinMax | null = null;
   private lastLogAtMs: number | null = null;
 
-  constructor(options?: RecordingVizNormalizerOptions) {
-    this.outputIntervalMs = Math.max(5, Number(options?.outputIntervalMs ?? 33));
-    this.decayFactor = clamp01(Number(options?.decayFactor ?? 0.9));
-    this.peakDecayPerSec = clamp01(Number(options?.peakDecayPerSec ?? 0.96));
-    this.minPeak = Math.max(0.000_001, Number(options?.minPeak ?? 0.000_5));
-    this.silenceFloor = clamp01(Number(options?.silenceFloor ?? 0.02));
-    this.logIntervalMs = Math.max(1, Number(options?.logIntervalMs ?? 1000));
-    this.onLog = options?.onLog;
+  constructor(options: RecordingVizNormalizerOptions) {
+    this.normalizePolicy = options.normalizePolicy;
+    this.outputIntervalMs = Math.max(5, Number(options.outputIntervalMs ?? 33));
+    this.decayFactor = clamp01(Number(options.decayFactor ?? 0.9));
+    this.logIntervalMs = Math.max(1, Number(options.logIntervalMs ?? 1000));
+    this.onLog = options.onLog;
   }
 
-  /** Принимает событие уровня амплитуды. */
-  push(amp01: number, nowMs: number = Date.now()): void {
-    const v = clamp01(Number(amp01));
+  /** Принимает сырое значение уровня (dB, RMS и т.д.). */
+  push(raw: number, nowMs: number = Date.now()): void {
+    const v = clamp01(this.normalizePolicy(Number(raw)));
     this.lastInputAtMs = nowMs;
     this.lastInputValue = v;
-    this.lastInputIsSilence = v < this.silenceFloor;
     this.inCount += 1;
     this.inMinMax = updateMinMax(this.inMinMax, v);
-    if (!this.lastInputIsSilence) this.updatePeakWithInput(v, nowMs);
   }
 
-  /** Возвращает новое значение, если пришло время выдачи. */
+  /** Возвращает новое значение 0..1, если пришло время выдачи. */
   pull(nowMs: number = Date.now()): number | null {
     const lastOutAt = this.lastOutputAtMs ?? 0;
     if (this.lastOutputAtMs !== null && nowMs - lastOutAt < this.outputIntervalMs) {
@@ -90,14 +78,9 @@ export class RecordingVizNormalizer {
       return null;
     }
 
-    let out: number;
-    const hasNewInput = this.lastInputAtMs !== null && (this.lastOutputAtMs === null || this.lastInputAtMs > this.lastOutputAtMs);
-    if (hasNewInput) {
-      out = this.lastInputIsSilence ? 0 : this.normalize(this.lastInputValue, nowMs);
-    } else {
-      out = clamp01(this.lastOutputValue * this.decayFactor);
-    }
-    if (out < this.silenceFloor) out = 0;
+    const hasNewInput =
+      this.lastInputAtMs !== null && (this.lastOutputAtMs === null || this.lastInputAtMs > this.lastOutputAtMs);
+    const out = hasNewInput ? this.lastInputValue : clamp01(this.lastOutputValue * this.decayFactor);
 
     this.lastOutputAtMs = nowMs;
     this.lastOutputValue = out;
@@ -107,15 +90,11 @@ export class RecordingVizNormalizer {
     return out;
   }
 
-  /** Сброс состояния и статистики. */
   reset(): void {
     this.lastInputAtMs = null;
     this.lastInputValue = 0;
-    this.lastInputIsSilence = false;
     this.lastOutputAtMs = null;
     this.lastOutputValue = 0;
-    this.peak = 0;
-    this.peakAtMs = null;
     this.inCount = 0;
     this.inMinMax = null;
     this.outCount = 0;
@@ -123,51 +102,18 @@ export class RecordingVizNormalizer {
     this.lastLogAtMs = null;
   }
 
-  /** Заморозить тайминг (пауза записи), чтобы после паузы не было рывка. */
   pause(nowMs: number = Date.now()): void {
     this.lastOutputAtMs = nowMs;
-    this.peakAtMs = nowMs;
-    this.peak = 0;
     this.lastInputAtMs = nowMs;
     this.lastInputValue = 0;
-    this.lastInputIsSilence = true;
     this.lastOutputValue = 0;
   }
 
-  /** Возобновить после паузы (сбрасываем тайминг затухания пика). */
   resume(nowMs: number = Date.now()): void {
     this.lastOutputAtMs = nowMs;
-    this.peakAtMs = nowMs;
-    this.peak = 0;
     this.lastInputAtMs = nowMs;
     this.lastInputValue = 0;
-    this.lastInputIsSilence = true;
     this.lastOutputValue = 0;
-  }
-
-  private updatePeakWithInput(v: number, nowMs: number): void {
-    this.decayPeak(nowMs);
-    this.peak = Math.max(this.peak, v, this.minPeak);
-  }
-
-  private decayPeak(nowMs: number): void {
-    if (this.peakAtMs === null) {
-      this.peakAtMs = nowMs;
-      return;
-    }
-    const dtSec = Math.max(0, (nowMs - this.peakAtMs) / 1000);
-    if (dtSec > 0) {
-      this.peak = this.peak * Math.pow(this.peakDecayPerSec, dtSec);
-      if (this.peak < this.minPeak) this.peak = this.minPeak;
-      this.peakAtMs = nowMs;
-    }
-  }
-
-  private normalize(raw: number, nowMs: number): number {
-    if (raw <= 0) return 0;
-    this.decayPeak(nowMs);
-    const peak = Math.max(this.peak, this.minPeak);
-    return clamp01(raw / peak);
   }
 
   private maybeLog(nowMs: number): void {
