@@ -26,7 +26,7 @@ export class NexaraTranscriptionProvider implements TranscriptionProvider {
       token: this.deps.token,
       log: this.deps.log,
     });
-    const resp = await nx.transcribeVerboseJson({ fileBlob: params.fileBlob, fileName: params.fileName, timestamps: "segment" });
+    const resp = await nx.transcribeVerboseJson({ fileBlob: params.fileBlob, fileName: params.fileName, task: "diarize" });
     const segs = Array.isArray(resp.segments) ? resp.segments : [];
     
     this.deps.log?.info("Nexara: обработка ответа", {

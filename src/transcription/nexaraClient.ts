@@ -34,22 +34,22 @@ export class NexaraClient {
   async transcribeVerboseJson(params: {
     fileBlob: Blob;
     fileName: string;
-    /** segment timestamps only (simplest) */
-    timestamps: "segment";
+    /** transcribe = сегменты по времени; diarize = сегменты с speaker_0, speaker_1, … */
+    task: "transcribe" | "diarize";
   }): Promise<NexaraVerboseJsonResponse> {
     const base = String(this.deps.apiBaseUrl || "").trim().replace(/\/+$/g, "");
     const url = `${base}/audio/transcriptions`;
 
+    // Порядок как в документации Nexara: response_format, task, затем file
+    // https://docs.nexara.ru/ru/quickstart — diarize возвращает segments с speaker, start, end, text
     const form = new FormData();
-    form.append("file", params.fileBlob, params.fileName);
     form.append("response_format", "verbose_json");
-    if (params.timestamps === "segment") {
-      // API expects array form key: timestamp_granularities[]
+    form.append("task", params.task);
+    if (params.task === "transcribe") {
       form.append("timestamp_granularities[]", "segment");
     }
-    // Для получения сегментов используем task=transcribe (диаризация возвращает только text без сегментов)
-    // Если нужна диаризация, можно добавить отдельный метод
     form.append("language", "ru");
+    form.append("file", params.fileBlob, params.fileName);
 
     const token = String(this.deps.token || "");
     const headers: Record<string, string> = {};
@@ -61,12 +61,11 @@ export class NexaraClient {
 
     const text = await r.text().catch(() => "");
     
-    this.deps.log?.info("Nexara API: ответ", { 
-      status: r.status, 
+    this.deps.log?.info("Nexara API: ответ", {
+      status: r.status,
       statusText: r.statusText,
       textLength: text.length,
-      textPreview: text.slice(0, 500),
-      fullText: text, // Логируем полный ответ для отладки
+      textPreview: text.slice(0, 300),
     });
 
     if (!r.ok) {
@@ -158,11 +157,13 @@ export class NexaraClient {
       "Content-Type": `multipart/form-data; boundary=${boundary}`,
     };
 
+    const body =
+      result.buffer.byteLength === result.length ? result.buffer : result.buffer.slice(0, result.length);
     const res = await requestUrl({
       url,
       method: "POST",
       headers: multipartHeaders,
-      body: result.buffer,
+      body,
       throw: false,
     });
 

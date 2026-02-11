@@ -29,16 +29,27 @@ export function formatSrtTime(totalSeconds: number): string {
   return `${pad2(h)}:${pad2(mm)}:${pad2(ss)},${pad3(mmm)}`;
 }
 
-export function formatSegmentsMarkdown(params: { segments: TranscriptSegment[]; fileLabel: string }): string {
+export function formatSegmentsMarkdown(params: { segments: TranscriptSegment[]; fileLabel?: string }): string {
   const lines: string[] = [];
-  lines.push(`#### Расшифровка: ${params.fileLabel}`);
+  lines.push("#### Расшифровка");
   lines.push("");
   for (const seg of params.segments || []) {
     const start = typeof seg.startSec === "number" ? seg.startSec : 0;
     const end = typeof seg.endSec === "number" ? seg.endSec : start;
     const text = String(seg.text ?? "").trim();
     if (!text) continue;
-    lines.push(`- ${formatHhMmSsMs(start)}–${formatHhMmSsMs(end)} ${text}`);
+    const timeStr = formatHhMmSsMs(start);
+    const endStr = formatHhMmSsMs(end);
+    const speakerPart = typeof seg.speaker === "string" && seg.speaker ? ` [[${seg.speaker}]]` : "";
+    lines.push(`- **${timeStr}**${speakerPart}  ${text}`);
+    const personIdVal = typeof seg.personId === "string" && seg.personId ? `"${seg.personId}"` : "~";
+    const voiceprintVal = typeof seg.voiceprint === "string" && seg.voiceprint ? `"${seg.voiceprint}"` : "~";
+    lines.push(`<!--`);
+    lines.push(`start: "${timeStr}"`);
+    lines.push(`end: "${endStr}"`);
+    lines.push(`person_id: ${personIdVal}`);
+    lines.push(`voiceprint: ${voiceprintVal}`);
+    lines.push(`-->`);
   }
   if (lines.length === 2) {
     lines.push("- (пусто)");

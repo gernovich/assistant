@@ -56,10 +56,9 @@ export class TranscribeFileUseCase {
     const folderPath = normalizePath(audioFile.path.substring(0, audioFile.path.lastIndexOf("/")) || "");
     const baseName = audioFile.basename;
 
-    // Создаем содержимое .md файла
+    // Создаем содержимое .md файла: секция с плеером записи + расшифровка по сегментам
     const audioLinkTarget = stripMarkdownExtension(audioFile.path);
-    const audioLink = `[[${audioLinkTarget}|${fileName}]]`;
-    const content = `# Расшифровка: ${baseName}\n\n## Оригинальный файл\n\n${audioLink}\n\n${transcriptMd}`;
+    const content = `## Запись\n\n![[${audioLinkTarget}]]\n\n${transcriptMd}`;
 
     // Создаем уникальный .md файл
     const mdFile = await createUniqueMarkdownFile(app.vault, folderPath, baseName, content);
